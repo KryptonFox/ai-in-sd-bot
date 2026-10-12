@@ -8,7 +8,6 @@ class CommandError(RuntimeError):
 
 
 def compose_quote(value: str) -> str:
-    """Compose сохраняет обратные косые черты внутри одинарных кавычек буквально."""
     return "'" + value.replace("'", "\\'") + "'"
 
 
@@ -42,8 +41,8 @@ def run_command(
         raise CommandError(f"{label}: превышено время ожидания ({timeout} с).") from None
     except OSError:
         raise CommandError(f"{label}: не удалось запустить программу.") from None
+
     if result.returncode:
-        # Вывод сторонних программ может содержать env и токены; не печатаем его.
         message = f"{label}: команда завершилась с кодом {result.returncode}."
         if error_prefix:
             detail = next(
@@ -57,12 +56,15 @@ def run_command(
             if detail:
                 message = f"{message} {detail}"
         raise CommandError(message)
+
     return result.stdout or ""
 
 
 def private_write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+
     with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
         stream.write(content)
+
     path.chmod(0o600)

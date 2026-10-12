@@ -1,10 +1,10 @@
 import asyncpg
 
 from app.config import Settings
+from app.db.migrations.runner import run_migrations
 
 
 async def create_pool(settings: Settings) -> asyncpg.Pool:
-    # Небольшого пула достаточно для учебной ВМ. Таблицы добавляют студенты.
     pool = await asyncpg.create_pool(
         host=settings.postgres_host,
         port=settings.postgres_port,
@@ -16,9 +16,12 @@ async def create_pool(settings: Settings) -> asyncpg.Pool:
         timeout=5,
         command_timeout=5,
     )
+
     try:
         await pool.fetchval("SELECT 1", timeout=3)
+        await run_migrations(pool)
     except BaseException:
         await pool.close()
         raise
+
     return pool
