@@ -6,27 +6,38 @@
 
 ## Лабораторная работа № 1
 
-* [01-initial-architecture.md](file:///home/krypton/Dev/itmo/ai-in-sd-bot/docs/plans/lab1/01-initial-architecture.md) — **Ревизия 1 (Черновая)**:
+* [01-initial-architecture.md](lab1/01-initial-architecture.md) — **Ревизия 1 (Черновая)**:
   - Первоначальное проектирование архитектуры бота для Лаб 1.
   - Базовые dataclass-модели без Pydantic.
   - Ограничение схемы БД только ролями `user` и `assistant`.
-* [02-pydantic-and-mcp-readiness.md](file:///home/krypton/Dev/itmo/ai-in-sd-bot/docs/plans/lab1/02-pydantic-and-mcp-readiness.md) — **Ревизия 2 (Утверждённая)**:
+* [02-pydantic-and-mcp-readiness.md](lab1/02-pydantic-and-mcp-readiness.md) — **Ревизия 2 (Утверждённая)**:
   - **Корректировка после анализа Лаб 2 и 3**:
     1. Интеграция `Pydantic v2` для строгой валидации DTO и подготовки к схемам инструментов MCP.
     2. Расширение таблицы `dialog_messages` (роли `user`, `assistant`, `system`, `tool` и поле `metadata JSONB` под `tool_calls`).
     3. Выделение сервисного слоя (`DialogService` -> `AgentService`), отделенного от Telegram-хэндлеров, для бесшовного добавления агентного цикла в Лаб 2.
     4. Подготовка сквозного `request_id` (correlation ID) через `contextvars` для трассировки (Лаб 3).
 
+* [03-lab1-finalization.md](lab1/03-lab1-finalization.md) — **план завершения lab1**:
+  эксперимент, отчёт, контрольная проверка и тег.
+
 ---
 
 ## Лабораторная работа № 2
 
-* [01-agent-and-mcp-architecture.md](file:///home/krypton/Dev/itmo/ai-in-sd-bot/docs/plans/lab2/01-agent-and-mcp-architecture.md) (см. также [docs/lab2/plan.md](file:///home/krypton/Dev/itmo/ai-in-sd-bot/docs/lab2/plan.md)) — **Ревизия 1 (Утверждённый план)**:
-  - Текущее состояние проекта по итогам Лаб 1 (91 тест, синхронизация с апстримом).
-  - FastMCP сервер с гибридным транспортом (SSE для Docker Compose + STDIO для тестов и MCP Inspector).
-  - Контракты инструментов (`get_weather`, `get_schedule`, `add_reminder`) и ресурса `schedule://current-week`.
-  - Двухфазное подтверждение с Human-in-the-Loop и защита от Confused Deputy.
-  - Регламентные документы (`AGENTS.md`, `spec.md`, `plan.md`) и эксперимент по маршрутизации.
+Все планы lab2 хранятся в этом каталоге. **Актуальный план реализации —
+[04-lab2-implementation.md](lab2/04-lab2-implementation.md)**; подготовительный
+переход на uv описан отдельно в [03-uv-migration.md](lab2/03-uv-migration.md).
+
+* [03-uv-migration.md](lab2/03-uv-migration.md) — **отдельный подготовительный план**:
+  зависимости и lock-файл uv, скрипты запуска, Docker, build context, облачная
+  упаковка, CI и отказ от requirements/constraints. Выполнен 2026-10-24; результаты и ограничения проверки записаны в плане.
+* [04-lab2-implementation.md](lab2/04-lab2-implementation.md) — **актуальная редакция**:
+  stdio и Streamable HTTP, развитие существующих сервисов, полный tool-calling цикл,
+  подтверждения и идемпотентность, единый этап проверки, эксперимент и матрица приёмки.
+  Реализация не начата.
+
+Первоначальные планы lab2 01–02 удалены по решению автора 2026-10-24.
+Номера оставшихся документов сохранены.
 
 ---
 
@@ -36,3 +47,9 @@
 2. При существенной корректировке плана старый файл не перезаписывается, а создаётся следующая ревизия.
 3. В шапке каждого плана указываются ключевые изменения относительно предыдущей версии.
 
+4. Статусы выполнения обновляются в актуальном плане. Существенное изменение
+   решений оформляется следующей редакцией со ссылкой на предыдущую.
+5. Исторические планы сохраняются; допустимы исправления навигации и отметка архивного
+   статуса без подмены первоначальных решений.
+6. Все содержательные планы находятся в `docs/plans`. Требуемый методичкой корневой
+   `plan.md` служит кратким указателем на актуальные документы, без дублирования этапов.

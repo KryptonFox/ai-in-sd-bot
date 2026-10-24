@@ -82,12 +82,15 @@ def source_archive(root: Path) -> Path:
         for name in [
             "Dockerfile",
             ".dockerignore",
-            "requirements.txt",
-            "constraints.txt",
+            "pyproject.toml",
+            "uv.lock",
+            ".python-version",
             "compose.yaml",
         ]
     ]
     candidates.extend((root / "app").rglob("*.py"))
+    candidates.extend((root / "app" / "db" / "migrations" / "sql").glob("*.sql"))
+    candidates.extend((root / "app" / "data").glob("*.json"))
 
     with tarfile.open(archive_path, "w:gz") as archive:
         for path in sorted(candidates):

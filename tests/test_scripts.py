@@ -256,6 +256,14 @@ def test_deploy_archive_never_contains_env_or_keys(tmp_path):
 
     (tmp_path / "app").mkdir()
     (tmp_path / "app" / "__init__.py").write_text("", encoding="utf-8")
+    for name in ["Dockerfile", ".dockerignore", "pyproject.toml", "uv.lock", ".python-version"]:
+        (tmp_path / name).write_text("test", encoding="utf-8")
+    migrations = tmp_path / "app" / "db" / "migrations" / "sql"
+    migrations.mkdir(parents=True)
+    (migrations / "0001_initial_schema.sql").write_text("SELECT 1;", encoding="utf-8")
+    data = tmp_path / "app" / "data"
+    data.mkdir()
+    (data / "schedule.json").write_text("[]", encoding="utf-8")
     (tmp_path / "app" / ".env").write_text("SECRET=yes", encoding="utf-8")
     (tmp_path / ".env.cloud").write_text("SECRET=yes", encoding="utf-8")
     (tmp_path / ".deploy").mkdir()
@@ -267,6 +275,15 @@ def test_deploy_archive_never_contains_env_or_keys(tmp_path):
         names = archive.getnames()
 
     assert "app/__init__.py" in names
+    assert {
+        "Dockerfile",
+        ".dockerignore",
+        "pyproject.toml",
+        "uv.lock",
+        ".python-version",
+        "app/db/migrations/sql/0001_initial_schema.sql",
+        "app/data/schedule.json",
+    } <= set(names)
     assert all(".env" not in n and "id_ed25519" not in n for n in names)
 
 

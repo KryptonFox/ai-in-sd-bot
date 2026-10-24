@@ -15,7 +15,7 @@
 - **Схемы и валидация данных:** `pydantic v2` (модели запросов/ответов LLM, сообщений, валидация настроек пользователей)
 - **Служебный HTTP-сервер:** `aiohttp` (эндпоинт `/health` на порту 8080 для Docker и оркестраторов)
 - **Контейнеризация:** Docker, Docker Compose
-- **Тестирование и линтинг:** `pytest`, `pytest-asyncio`, `ruff` (86 тестов)
+- **Тестирование и линтинг:** `pytest`, `pytest-asyncio`, `ruff`
 
 
 ---
@@ -102,7 +102,7 @@ ai-in-sd-bot/
 │   ├── __init__.py
 │   └── __main__.py                    # Главная точка входа, жизненный цикл и graceful shutdown
 ├── scripts/                           # Вспомогательные скрипты инфраструктуры
-│   ├── bootstrap.py                   # Автоматическая настройка виртуального окружения
+│   ├── bootstrap.py                   # Подготовка окружения через uv
 │   ├── cli.py                         # Главная консольная точка входа для управления проектом
 │   ├── cloud.py                       # Управление развёртыванием в Yandex Cloud
 │   ├── common.py                      # Общие системные утилиты скриптов
@@ -175,17 +175,29 @@ HEALTH_PORT=8080
    curl -LsSf https://astral.sh/uv/install.sh | sh
    ```
 
-2. **Запустите PostgreSQL в Docker:**
+2. **Подготовьте окружение:**
    ```bash
-   docker compose up -d db
+   uv sync --locked
+   ```
+   Python 3.12 выбирается из `.python-version`; при необходимости uv загрузит его.
+
+3. **Запустите PostgreSQL в Docker:**
+   ```bash
+   docker compose -f compose.yaml -f compose.local.yaml up -d db
    ```
 
-3. **Запустите бота:**
+4. **Запустите бота:**
    ```bash
-   uv run python -m app
+   uv run --locked python -m app
    ```
 
-`uv` автоматически развернёт виртуальное окружение `.venv`, установит зависимости из `pyproject.toml`, применит миграции и запустит long polling бота.
+`uv` создаёт `.venv` и устанавливает зависимости по `uv.lock`. Миграции PostgreSQL
+применяет само приложение при запуске перед началом long polling.
+
+Зависимости объявлены в `pyproject.toml`, точные версии зафиксированы в `uv.lock`.
+Добавление пакетов: `uv add <package>`, инструментов разработки: `uv add --dev <package>`.
+После изменения зависимостей коммитьте оба файла. В CI и Docker используется
+`--locked`: несоответствие конфигурации lock-файлу приводит к ошибке.
 
 ---
 
@@ -201,7 +213,9 @@ bash scripts/start.sh
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start.ps1
 ```
 
-Скрипт проверяет наличие Python 3.12, разворачивает `.venv`, запускает контейнер с PostgreSQL и стартует бота.
+Для обёрток нужны uv в `PATH` и Docker Compose. Скрипт подготавливает окружение
+через `uv sync --locked`, запускает PostgreSQL и бота. Системная установка Python
+для обёрток не требуется: интерпретатором управляет uv. Запуск возможен из любого каталога.
 
 ---
 
@@ -219,7 +233,7 @@ bash scripts/start.sh --setup-only
 
 1. **Проверка статуса через CLI:**
    ```bash
-   uv run python -m app.healthcheck
+   uv run --locked python -m app.healthcheck
    ```
 
 2. **Проверка статуса по HTTP:**
@@ -237,28 +251,34 @@ bash scripts/start.sh --setup-only
 
 - **Запуск всех тестов:**
   ```bash
-  uv run pytest -q
+  uv run --locked pytest -q
   ```
-  *(85 passed, 1 skipped)*
 
 - **Запуск интеграционных тестов с реальной БД:**
   ```bash
-  RUN_INTEGRATION=1 uv run pytest -m integration -v
+  RUN_INTEGRATION=1 uv run --locked pytest -m integration -v
   ```
 
 - **Проверка линтером:**
   ```bash
-  uv run ruff check .
+  uv run --locked ruff check .
   ```
 
 - **Автоформатирование кода:**
   ```bash
-  uv run ruff format .
+  uv run --locked ruff format .
   ```
 
 ---
 
 ## 8. Деплой в Yandex Cloud
+
+Docker-образ собирается на Python 3.12 с uv 0.13.1. Runtime-зависимости устанавливаются
+из `uv.lock` при сборке без группы `dev`; контейнер запускается от `student` и использует
+`/app/.venv/bin/python` для приложения и healthcheck. При старте пакеты не скачиваются.
+Для локальной проверки образа: `docker build -t ai-in-sd-bot:uv .`.
+Архив развёртывания включает конфигурацию uv, исходники, SQL-миграции и JSON из
+`app/data`, исключая `.env`, локальные окружения и ключи.
 
 Скрипты `scripts/deploy.sh` (Linux/macOS) и `scripts/deploy.ps1` (Windows) автоматизируют развёртывание бота на виртуальной машине в Yandex Cloud:
 

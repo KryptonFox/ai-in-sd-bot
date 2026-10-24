@@ -1,7 +1,7 @@
 **
 !Dockerfile
-!requirements.txt
-!constraints.txt
+!pyproject.toml
+!uv.lock
 !app/
 !app/**
 **/__pycache__/
@@ -9,3 +9,4 @@
 **/.env*
 **/*.pem
 **/id_*
+**/.venv/
