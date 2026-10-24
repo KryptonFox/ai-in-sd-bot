@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 from contextlib import nullcontext
@@ -19,6 +20,7 @@ from app.services.dialog_service import DialogService
 logger = logging.getLogger("app.handlers.dialog")
 router = Router(name="dialog")
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096
+TYPING_INTERVAL = 4.0
 _retry_cache: dict[str, tuple[int, str]] = {}
 
 
@@ -75,6 +77,22 @@ def find_retry_text(retry_id: str, user_id: int, message: Message | None) -> str
     return None
 
 
+async def _send_typing(message: Message) -> None:
+    if not message.bot:
+        return
+
+    while True:
+        try:
+            await message.bot.send_chat_action(
+                chat_id=message.chat.id,
+                action=ChatAction.TYPING,
+                request_timeout=TYPING_INTERVAL,
+            )
+        except Exception:
+            logger.debug("Не удалось отправить статус typing")
+        await asyncio.sleep(TYPING_INTERVAL)
+
+
 async def _execute_dialog(
     target_message: Message,
     dialog_service: DialogService,
@@ -104,15 +122,12 @@ async def _execute_dialog(
                 except Exception:
                     pass
 
-            if target_message.bot:
-                try:
-                    await target_message.bot.send_chat_action(
-                        chat_id=target_message.chat.id, action=ChatAction.TYPING
-                    )
-                except Exception:
-                    logger.debug("[%s] Не удалось отправить статус typing", req_id)
-
-            response_text = await dialog_service.process_user_message(user_id, user_text)
+            typing_task = asyncio.create_task(_send_typing(target_message))
+            try:
+                response_text = await dialog_service.process_user_message(user_id, user_text)
+            finally:
+                typing_task.cancel()
+                await asyncio.gather(typing_task, return_exceptions=True)
             chunks = split_text(response_text)
             for chunk in chunks:
                 await send_formatted_message(target_message, chunk)
