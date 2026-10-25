@@ -10,6 +10,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from app.core.context import generate_request_id, set_request_id
 from app.core.exceptions import (
     LLMEmptyResponseError,
+    LLMRefusalError,
     LLMServiceError,
     LLMTimeoutError,
     QueueFullError,
@@ -19,41 +20,8 @@ from app.services.dialog_service import DialogService
 
 logger = logging.getLogger("app.handlers.dialog")
 router = Router(name="dialog")
-TELEGRAM_MAX_MESSAGE_LENGTH = 4096
 TYPING_INTERVAL = 4.0
 _retry_cache: dict[str, tuple[int, str]] = {}
-
-
-def split_text(text: str, max_chunk_size: int = TELEGRAM_MAX_MESSAGE_LENGTH) -> list[str]:
-    if len(text) <= max_chunk_size:
-        return [text]
-    chunks: list[str] = []
-    current_chunk: list[str] = []
-    current_length = 0
-    paragraphs = text.split("\n")
-    for para in paragraphs:
-        if len(para) > max_chunk_size:
-            if current_chunk:
-                chunks.append("\n".join(current_chunk))
-                current_chunk = []
-                current_length = 0
-            start = 0
-            while start < len(para):
-                end = start + max_chunk_size
-                chunks.append(para[start:end])
-                start = end
-            continue
-        para_len = len(para) + (1 if current_chunk else 0)
-        if current_length + para_len > max_chunk_size:
-            chunks.append("\n".join(current_chunk))
-            current_chunk = [para]
-            current_length = len(para)
-        else:
-            current_chunk.append(para)
-            current_length += para_len
-    if current_chunk:
-        chunks.append("\n".join(current_chunk))
-    return [c for c in chunks if c]
 
 
 def get_retry_keyboard(user_id: int, text: str) -> InlineKeyboardMarkup:
@@ -128,9 +96,7 @@ async def _execute_dialog(
             finally:
                 typing_task.cancel()
                 await asyncio.gather(typing_task, return_exceptions=True)
-            chunks = split_text(response_text)
-            for chunk in chunks:
-                await send_formatted_message(target_message, chunk)
+            await send_formatted_message(target_message, response_text)
 
     except QueueFullError:
         logger.warning("[%s] Очередь пользователя %d переполнена", req_id, user_id)
@@ -160,6 +126,12 @@ async def _execute_dialog(
         await send_formatted_message(
             target_message,
             "⚠️ Языковая модель вернула пустой ответ. Попробуйте переформулировать запрос.",
+        )
+
+    except LLMRefusalError:
+        await send_formatted_message(
+            target_message,
+            "Модель отказалась выполнять запрос. Попробуйте изменить задачу или её формулировку.",
         )
 
     except LLMServiceError:

@@ -11,6 +11,7 @@ from app.config import Settings
 from app.core.schemas.llm import LLMRequest
 from app.core.schemas.message import ChatMessage, MessageRole
 from app.llm.client import OpenAIClient
+from app.logging_setup import configure_logging
 from app.modes.definitions import STUDY_MODE
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -26,7 +27,12 @@ RUNS_PER_TEMP = 3
 
 async def run_experiment() -> dict:
     settings = Settings.load()
-    client = OpenAIClient(settings)
+    configure_logging(settings)
+    async with OpenAIClient(settings) as client:
+        return await _run_experiment(settings, client)
+
+
+async def _run_experiment(settings: Settings, client: OpenAIClient) -> dict:
 
     logger.info("Starting Lab 1 experiment using model: %s", settings.llm_model)
     results = []
@@ -53,8 +59,8 @@ async def run_experiment() -> dict:
                     resp = await client.generate(req)
                     elapsed = time.monotonic() - start
                     break
-                except Exception as e:
-                    logger.warning("Run #%d attempt %d failed: %s", run_idx, attempt, e)
+                except Exception:
+                    logger.warning("Run #%d attempt %d failed", run_idx, attempt)
                     if attempt < 2:
                         await asyncio.sleep(3)
                     else:

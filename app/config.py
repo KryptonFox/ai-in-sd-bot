@@ -1,3 +1,4 @@
+import math
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -27,6 +28,7 @@ class Settings:
     llm_base_url: str = "https://openrouter.ai/api/v1"
     llm_model: str = "openai/gpt-4o-mini"
     llm_timeout: float = 180.0
+    llm_context_provider: str = "auto"
     history_max_messages: int = 10
     history_max_chars: int = 8000
     default_context_length: int = 32768
@@ -91,7 +93,7 @@ class Settings:
 
         try:
             llm_timeout = float(value("LLM_TIMEOUT", "180.0"))
-            if llm_timeout <= 0:
+            if not math.isfinite(llm_timeout) or llm_timeout <= 0:
                 raise ValueError
         except ValueError:
             raise ConfigError(
@@ -152,6 +154,10 @@ class Settings:
                 "USER_QUEUE_MAX_SIZE: значение должно быть целым числом >= 1."
             ) from None
 
+        context_provider = value("LLM_CONTEXT_PROVIDER", "auto")
+        if context_provider not in {"auto", "none", "ollama", "models"}:
+            raise ConfigError("LLM_CONTEXT_PROVIDER: используйте auto, none, ollama или models.")
+
         return cls(
             bot_token=token,
             postgres_password=password,
@@ -166,6 +172,7 @@ class Settings:
             llm_base_url=llm_url,
             llm_model=llm_model,
             llm_timeout=llm_timeout,
+            llm_context_provider=context_provider,
             history_max_messages=max_messages,
             history_max_chars=max_chars,
             default_context_length=def_ctx,

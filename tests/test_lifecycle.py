@@ -104,3 +104,41 @@ async def test_http_proxy_receives_connect_and_failure_has_no_direct_fallback(un
         await bot.session.close()
         server.close()
         await server.wait_closed()
+
+
+@pytest.mark.parametrize("failure", ["db", "telegram", "health", "polling", "none"])
+async def test_application_closes_llm_at_every_lifecycle_boundary(monkeypatch, failure):
+    from app import __main__ as application
+
+    llm = Mock(aclose=AsyncMock())
+    pool = Mock(close=AsyncMock())
+    bot = Mock(
+        get_me=AsyncMock(return_value=Mock(username="test")),
+        get_webhook_info=AsyncMock(return_value=Mock(url="")),
+        session=Mock(close=AsyncMock()),
+    )
+    runner = Mock(cleanup=AsyncMock())
+    dispatcher = Mock(start_polling=AsyncMock())
+    monkeypatch.setattr(application, "OpenAIClient", Mock(return_value=llm))
+    monkeypatch.setattr(application, "create_pool", AsyncMock(return_value=pool))
+    monkeypatch.setattr(application, "create_bot", Mock(return_value=bot))
+    monkeypatch.setattr(application, "Dispatcher", Mock(return_value=dispatcher))
+    monkeypatch.setattr(application, "setup_bot_commands", AsyncMock())
+    monkeypatch.setattr(application, "start_health_server", AsyncMock(return_value=runner))
+    if failure == "db":
+        application.create_pool.side_effect = RuntimeError
+    elif failure == "telegram":
+        bot.get_me.side_effect = RuntimeError
+    elif failure == "health":
+        application.start_health_server.side_effect = RuntimeError
+    elif failure == "polling":
+        dispatcher.start_polling.side_effect = RuntimeError
+    if failure == "none":
+        await application.run(Settings(bot_token="unused", postgres_password="unused"))
+    else:
+        with pytest.raises(RuntimeError):
+            await application.run(Settings(bot_token="unused", postgres_password="unused"))
+    llm.aclose.assert_awaited_once()
+    bot.session.close.assert_awaited_once()
+    if failure != "db":
+        pool.close.assert_awaited_once()

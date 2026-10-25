@@ -2,15 +2,15 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.core.schemas.message import ChatMessage
+from app.core.schemas.message import ChatMessage, ToolCall
 
 
-class ToolCall(BaseModel):
+class ToolDefinition(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    id: str
-    name: str
-    arguments: dict[str, Any] = Field(default_factory=dict)
+    name: str = Field(min_length=1)
+    description: str = ""
+    parameters: dict[str, Any] = Field(default_factory=lambda: {"type": "object", "properties": {}})
 
 
 class LLMRequest(BaseModel):
@@ -20,6 +20,7 @@ class LLMRequest(BaseModel):
     temperature: float = 0.7
     model: str | None = None
     max_tokens: int | None = None
+    tools: list[ToolDefinition] = Field(default_factory=list)
 
 
 class LLMResponse(BaseModel):

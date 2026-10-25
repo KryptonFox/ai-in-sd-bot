@@ -38,6 +38,7 @@ def configure_logging(settings: Settings) -> None:
         SecretFilter(
             [
                 settings.bot_token,
+                settings.llm_api_key,
                 settings.postgres_password,
                 settings.telegram_proxy_url,
                 proxy.password or "",
@@ -48,3 +49,6 @@ def configure_logging(settings: Settings) -> None:
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
 
     logging.basicConfig(level=settings.log_level, handlers=[handler], force=True)
+
+    for name in ("openai", "httpx", "httpx2", "httpcore", "httpcore2"):
+        logging.getLogger(name).setLevel(logging.CRITICAL)

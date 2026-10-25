@@ -9,8 +9,10 @@ dependencies = [
     "aiohttp-socks==0.12.0",
     "asyncpg==0.31.0",
     "httpx>=0.28,<0.29",
+    "openai==3.37.0",
     "pydantic==2.13.5",
     "python-dotenv==1.2.3",
+    "telegramify-markdown==1.4.1",
     "tzdata>=2026.5",
 ]
 

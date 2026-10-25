@@ -5,7 +5,6 @@ from app.modes.definitions import (
     STUDY_MODE,
     TELEGRAM_FORMATTING_PROMPT,
     TRANSLATE_MODE,
-    compose_prompt,
 )
 from app.modes.registry import ModeRegistry
 
@@ -68,7 +67,44 @@ def test_telegram_formatting_prompt_included():
         assert "Telegram Formatting Guidelines" in mode.system_prompt
 
 
-def test_compose_prompt_custom():
-    composed = compose_prompt("Custom Role")
-    assert composed.startswith("Custom Role\n\n")
-    assert TELEGRAM_FORMATTING_PROMPT in composed
+def test_rctf_and_shared_rules_once():
+    from app.prompts.compaction import COMPACTION_PROMPT
+    from app.prompts.policy import SAFETY_TASK, TRUST_CONTEXT
+
+    for prompt in [m.system_prompt for m in (STUDY_MODE, TRANSLATE_MODE, REVIEW_MODE)] + [
+        COMPACTION_PROMPT
+    ]:
+        positions = []
+        for heading in ("Role:", "Context:", "Task:", "Format:"):
+            assert prompt.splitlines().count(heading) == 1
+            positions.append(prompt.index(heading))
+        assert positions == sorted(positions)
+        assert prompt.count(SAFETY_TASK) == 1
+        assert prompt.count(TRUST_CONTEXT) == 1
+    assert TELEGRAM_FORMATTING_PROMPT not in COMPACTION_PROMPT
+
+
+def test_rctf_requires_nonempty_fields():
+    import pytest
+    from pydantic import ValidationError
+
+    from app.prompts.builder import PromptParts
+
+    with pytest.raises(ValidationError):
+        PromptParts(role="role", context="   ", task="task", format="format")
+
+
+def test_relevant_examples_are_bounded_and_keep_languages():
+    for query, marker in [
+        ("C++ vector", "cpp"),
+        ("C# string", "csharp"),
+        ("Java ArrayList", "java"),
+        ("Python duplicates", "python"),
+    ]:
+        messages = REVIEW_MODE.build_initial_messages(query)
+        assert len(messages) == 3
+        assert "```" + marker in messages[-1].content
+        assert sum(len(m.content) for m in messages[1:]) <= 1800
+    math = STUDY_MODE.build_initial_messages("Объясни индукцию")
+    assert "```" not in math[-1].content
+    assert len(STUDY_MODE.build_initial_messages("Привет")) == 1

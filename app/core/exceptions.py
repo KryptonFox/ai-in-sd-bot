@@ -28,3 +28,7 @@ class InvalidModeError(AppError):
 
 class QueueFullError(AppError):
     pass
+
+
+class LLMRefusalError(LLMError):
+    pass

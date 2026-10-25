@@ -20,8 +20,10 @@ async def run(settings: Settings) -> None:
     state = HealthState()
     bot = create_bot(settings)
     runner = None
+    llm_client = None
 
     try:
+        llm_client = OpenAIClient(settings)
         state.pool = await create_pool(settings)
         logger.info("PostgreSQL подключён: SELECT 1 выполнен, миграции применены.")
 
@@ -39,7 +41,6 @@ async def run(settings: Settings) -> None:
 
         await setup_bot_commands(bot)
 
-        llm_client = OpenAIClient(settings)
         dialog_service = DialogService(state.pool, settings, llm_client)
 
         dispatcher = Dispatcher()
@@ -66,17 +67,23 @@ async def run(settings: Settings) -> None:
             state.polling_task.cancel()
             await asyncio.gather(state.polling_task, return_exceptions=True)
 
-        if runner:
-            await runner.cleanup()
-
-        await bot.session.close()
-
-        if state.pool:
+        try:
+            if runner:
+                await runner.cleanup()
+        finally:
             try:
-                async with asyncio.timeout(10):
-                    await state.pool.close()
-            except TimeoutError:
-                state.pool.terminate()
+                if llm_client:
+                    await llm_client.aclose()
+            finally:
+                try:
+                    await bot.session.close()
+                finally:
+                    if state.pool:
+                        try:
+                            async with asyncio.timeout(10):
+                                await state.pool.close()
+                        except TimeoutError:
+                            state.pool.terminate()
 
 
 def main() -> int:

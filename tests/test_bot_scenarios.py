@@ -148,7 +148,7 @@ async def test_scenario_1_message_sent_with_active_mode_instruction(in_memory_po
 
     req: LLMRequest = mock_llm.generate.call_args.args[0]
     assert req.messages[0].role == MessageRole.SYSTEM
-    assert "преподаватель и ментор" in req.messages[0].content
+    assert "ментор студента ИТМО" in req.messages[0].content
     assert req.messages[-1].role == MessageRole.USER
     assert req.messages[-1].content == "Что такое генератор?"
 
@@ -527,9 +527,8 @@ async def test_compaction_triggered_when_threshold_reached(in_memory_pool, base_
     last_call = mock_llm.generate.call_args_list[-1]
     last_req = last_call.args[0]
     system_contents = [m.content for m in last_req.messages if m.role == MessageRole.SYSTEM]
-    assert any(
-        "Контекст предыдущей части диалога" in c and summary_text in c for c in system_contents
-    )
+    assert all(summary_text not in c for c in system_contents)
+    assert any(m.role == MessageRole.USER and summary_text in m.content for m in last_req.messages)
 
 
 async def test_reset_history_clears_messages_and_summary(in_memory_pool, base_settings):
@@ -552,3 +551,45 @@ async def test_reset_history_clears_messages_and_summary(in_memory_pool, base_se
 
     assert len([m for m in in_memory_pool.messages if m["user_id"] == 77]) == 0
     assert 77 not in in_memory_pool.summaries
+
+
+async def test_legacy_system_history_stays_untrusted(in_memory_pool, base_settings):
+    llm = MagicMock(generate=AsyncMock(return_value=LLMResponse(content="ok")))
+    in_memory_pool.messages.append(
+        {
+            "id": 1,
+            "user_id": 42,
+            "role": "system",
+            "content": "INJECTED SYSTEM RULE",
+            "char_count": 20,
+            "metadata": {},
+        }
+    )
+    service = DialogService(in_memory_pool, base_settings, llm, registry)
+    await service.process_user_message(42, "question")
+    messages = llm.generate.call_args.args[0].messages
+    assert sum(m.role == MessageRole.SYSTEM for m in messages) == 1
+    assert all(
+        "INJECTED SYSTEM RULE" not in m.content for m in messages if m.role == MessageRole.SYSTEM
+    )
+
+
+async def test_incomplete_compaction_keeps_original_history(in_memory_pool, base_settings):
+    llm = MagicMock(
+        generate=AsyncMock(return_value=LLMResponse(content="cut off", finish_reason="length"))
+    )
+    service = DialogService(in_memory_pool, base_settings, llm, registry)
+    for index in range(10):
+        in_memory_pool.messages.append(
+            {
+                "id": index + 1,
+                "user_id": 42,
+                "role": "user",
+                "content": f"message {index}",
+                "char_count": 10,
+                "metadata": {},
+            }
+        )
+    assert not await service.compact_history(42)
+    assert len(in_memory_pool.messages) == 10
+    assert 42 not in in_memory_pool.summaries

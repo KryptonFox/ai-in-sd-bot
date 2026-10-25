@@ -4,7 +4,7 @@ import logging
 import asyncpg
 
 from app.config import Settings
-from app.core.exceptions import InvalidModeError, InvalidTemperatureError
+from app.core.exceptions import InvalidModeError, InvalidTemperatureError, LLMServiceError
 from app.core.queue import UserQueueManager
 from app.core.schemas.llm import LLMRequest
 from app.core.schemas.message import ChatMessage, MessageRole
@@ -22,6 +22,7 @@ from app.db.repositories.user_repo import get_or_create_user, set_user_mode, set
 from app.llm.base import BaseLLMClient
 from app.modes.base import BotMode
 from app.modes.registry import ModeRegistry, registry
+from app.prompts.compaction import compaction_messages, summary_message
 
 logger = logging.getLogger("app.services.dialog")
 
@@ -72,21 +73,7 @@ class DialogService:
 
         existing_summary = await get_dialog_summary(self._pool, user_id)
 
-        summary_prompt = (
-            "Ты ассистент, выполняющий компактизацию истории диалога. Напиши краткую, "
-            "структурированную выжимку контекста (summary) на русском языке: ключевые цели, "
-            "выбранный стек технологий, принятые решения и текущее состояние беседы. "
-            "Объём: 3-5 предложений без лишних вводных слов."
-        )
-        if existing_summary:
-            summary_prompt += (
-                f"\n\nПредыдущий контекст беседы:\n{existing_summary}\n\n"
-                "Обнови выжимку с учётом новых сообщений."
-            )
-
-        messages_payload = [ChatMessage(role=MessageRole.SYSTEM, content=summary_prompt)]
-        for _, msg in to_compress:
-            messages_payload.append(msg)
+        messages_payload = compaction_messages(existing_summary, [msg for _, msg in to_compress])
 
         try:
             req = LLMRequest(
@@ -96,15 +83,15 @@ class DialogService:
             )
             resp = await self._llm.generate(req)
             new_summary = resp.content.strip()
+            if not new_summary or resp.tool_calls or resp.finish_reason != "stop":
+                raise LLMServiceError("Получена незавершённая выжимка истории.")
 
             await set_dialog_summary(self._pool, user_id, new_summary)
             ids_to_delete = [mid for mid, _ in to_compress]
             await delete_dialog_messages_by_ids(self._pool, ids_to_delete)
             return True
-        except Exception as exc:
-            logger.warning(
-                "Не удалось выполнить компактизацию для пользователя %d: %s", user_id, exc
-            )
+        except Exception:
+            logger.warning("Не удалось выполнить компактизацию: generation_or_storage_error")
             return False
 
     async def process_user_message(self, user_id: int, user_text: str) -> str:
@@ -125,28 +112,37 @@ class DialogService:
 
         current_user_msg = ChatMessage(role=MessageRole.USER, content=user_text)
 
-        initial_messages = mode.build_initial_messages()
+        initial_messages = mode.build_initial_messages(user_text)
         if summary:
-            initial_messages.append(
-                ChatMessage(
-                    role=MessageRole.SYSTEM,
-                    content=f"Контекст предыдущей части диалога (выжимка):\n{summary}",
-                )
-            )
+            initial_messages.append(summary_message(summary))
 
-        messages = initial_messages + history + [current_user_msg]
+        safe_history = [
+            msg
+            if msg.role in {MessageRole.USER, MessageRole.ASSISTANT}
+            else ChatMessage(
+                role=MessageRole.USER,
+                content="Недоверенные данные из истории:\n" + msg.content,
+            )
+            for msg in history
+        ]
+        messages = initial_messages + safe_history + [current_user_msg]
 
         request = LLMRequest(
             messages=messages, temperature=user.temperature, model=self._settings.llm_model
         )
         response = await self._llm.generate(request)
+        if response.tool_calls:
+            raise LLMServiceError("Выполнение инструментов ещё не подключено.")
+        answer = response.content
+        if response.finish_reason == "length":
+            answer += "\n\nОтвет обрезан из-за лимита генерации модели. Можно попросить продолжить."
 
         await add_dialog_message(self._pool, user_id, current_user_msg)
         await add_dialog_message(
-            self._pool, user_id, ChatMessage(role=MessageRole.ASSISTANT, content=response.content)
+            self._pool, user_id, ChatMessage(role=MessageRole.ASSISTANT, content=answer)
         )
 
-        return response.content
+        return answer
 
     async def switch_mode(self, user_id: int, mode_identifier: str) -> BotMode:
         async with self.queue_manager.acquire(user_id, ignore_limits=True):
