@@ -1,0 +1,204 @@
+{
+  "label": "baseline-configured",
+  "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "temperature": 0.0,
+  "clock": "2026-10-12T09:00:00+03:00",
+  "timezone": "Europe/Moscow",
+  "revision": "c74659a50959f632bd61ba89791e563865ecd911",
+  "dirty": true,
+  "app_python_sha256": "ebc9ae7de3f64f49e9021e3513d5042809da6f0d14ea54d16558b26bef080ed1",
+  "created_at": "2026-10-26T09:13:59.198804+00:00",
+  "max_tool_calls": 2,
+  "max_llm_steps": 4,
+  "measurement_status": "completed",
+  "counts": {
+    "planned": 12,
+    "attempted": 12,
+    "decisions_received": 12,
+    "not_run": 0
+  },
+  "summary": {
+    "routing_correct": 12,
+    "routing_total": 12,
+    "routing_accuracy": 1.0,
+    "arguments_correct": 7,
+    "arguments_total": 9,
+    "arguments_accuracy": 0.7777777777777778
+  },
+  "cases": [
+    {
+      "id": "weather_1",
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Санкт-Петербург"
+      },
+      "predicted_action": "get_weather",
+      "arguments": {
+        "city": "saint petersburg"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": false,
+      "success": false
+    },
+    {
+      "id": "weather_2",
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Казань"
+      },
+      "predicted_action": "get_weather",
+      "arguments": {
+        "city": "казань"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true
+    },
+    {
+      "id": "weather_3",
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Тбилиси, Грузия"
+      },
+      "predicted_action": "get_weather",
+      "arguments": {
+        "city": "tbilisi"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": false,
+      "success": false
+    },
+    {
+      "id": "schedule_1",
+      "expected_action": "get_schedule",
+      "expected_arguments": {
+        "date": "2026-10-12"
+      },
+      "predicted_action": "get_schedule",
+      "arguments": {
+        "date": "2026-10-12"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true
+    },
+    {
+      "id": "schedule_2",
+      "expected_action": "get_schedule",
+      "expected_arguments": {
+        "date": "2026-10-13"
+      },
+      "predicted_action": "get_schedule",
+      "arguments": {
+        "date": "2026-10-13"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true
+    },
+    {
+      "id": "schedule_3",
+      "expected_action": "get_schedule",
+      "expected_arguments": {
+        "date": "2026-10-18"
+      },
+      "predicted_action": "get_schedule",
+      "arguments": {
+        "date": "2026-10-18"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true
+    },
+    {
+      "id": "reminder_1",
+      "expected_action": "add_reminder",
+      "expected_arguments": {
+        "text": "отправить отчёт",
+        "remind_at": "2026-10-13T18:30:00+03:00"
+      },
+      "predicted_action": "add_reminder",
+      "arguments": {
+        "text": "отправить отчёт",
+        "remind_at": "2026-10-13T15:30:00+00:00"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true
+    },
+    {
+      "id": "reminder_2",
+      "expected_action": "add_reminder",
+      "expected_arguments": {
+        "text": "проверить расписание",
+        "remind_at": "2026-10-15T09:00:00+03:00"
+      },
+      "predicted_action": "add_reminder",
+      "arguments": {
+        "text": "проверить расписание",
+        "remind_at": "2026-10-15T06:00:00+00:00"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true
+    },
+    {
+      "id": "reminder_3",
+      "expected_action": "add_reminder",
+      "expected_arguments": {
+        "text": "сделать перерыв",
+        "remind_at": "2026-10-12T11:00:00+03:00"
+      },
+      "predicted_action": "add_reminder",
+      "arguments": {
+        "text": "сделать перерыв",
+        "remind_at": "2026-10-12T08:00:00+00:00"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true
+    },
+    {
+      "id": "respond_1",
+      "expected_action": "respond",
+      "expected_arguments": {},
+      "predicted_action": "respond",
+      "arguments": {},
+      "route_correct": true,
+      "arguments_applicable": false,
+      "arguments_correct": null,
+      "success": true
+    },
+    {
+      "id": "respond_2",
+      "expected_action": "respond",
+      "expected_arguments": {},
+      "predicted_action": "respond",
+      "arguments": {},
+      "route_correct": true,
+      "arguments_applicable": false,
+      "arguments_correct": null,
+      "success": true
+    },
+    {
+      "id": "clarify_1",
+      "expected_action": "clarify",
+      "expected_arguments": {},
+      "predicted_action": "clarify",
+      "arguments": {},
+      "route_correct": true,
+      "arguments_applicable": false,
+      "arguments_correct": null,
+      "success": true
+    }
+  ]
+}

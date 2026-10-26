@@ -36,7 +36,10 @@ async def handle_start(message: Message) -> None:
         "Выбери нужную роль с помощью кнопок ниже или отправь команду из списка.\n\n"
         "⚙️ **Управление настройками:**\n"
         "• `/settings` — текущий режим, модель и настройка температуры генерации\n"
-        "• `/reset` — очистить историю текущего диалога\n\n"
+        "• `/reset` — очистить историю текущего диалога\n"
+        "• `/tools` — обнаруженные возможности MCP\n"
+        "• `/timezone Europe/Moscow` — часовой пояс для напоминаний\n"
+        "• `/why` — последнее решение агента\n\n"
         "Отправь мне текстовое сообщение, и я отвечу в рамках активного режима!"
     )
     await send_formatted_message(message, text, reply_markup=get_roles_keyboard())
@@ -50,7 +53,7 @@ async def handle_mode_switch(message: Message, dialog_service: DialogService) ->
     command = message.text.strip().lstrip("/").split()[0].lower()
     user_id = message.from_user.id if message.from_user else message.chat.id
     mode = await dialog_service.switch_mode(user_id, command)
-    logger.info("Пользователь %d переключил режим на %s", user_id, mode.id)
+    logger.info("mode_changed mode=%s", mode.id)
 
     text = (
         f"✅ Режим переключен на: **{mode.name}**\n\n"
@@ -68,7 +71,7 @@ async def handle_role_callback(callback: CallbackQuery, dialog_service: DialogSe
     role_id = callback.data.split(":", 1)[1]
     user_id = callback.from_user.id
     mode = await dialog_service.switch_mode(user_id, role_id)
-    logger.info("Пользователь %d переключил режим по кнопке на %s", user_id, mode.id)
+    logger.info("mode_changed mode=%s", mode.id)
 
     await callback.answer(f"Выбрана роль: {mode.name}")
     text = (
@@ -83,7 +86,7 @@ async def handle_role_callback(callback: CallbackQuery, dialog_service: DialogSe
 async def handle_reset(message: Message, dialog_service: DialogService) -> None:
     user_id = message.from_user.id if message.from_user else message.chat.id
     await dialog_service.reset_history(user_id)
-    logger.info("Пользователь %d сбросил историю диалога", user_id)
+    logger.info("history_reset")
 
     await send_formatted_message(
         message, "🧹 История диалога очищена. Текущий режим и температура сохранены."

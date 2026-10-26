@@ -35,6 +35,15 @@ class Settings:
     compaction_threshold_messages: int = 10
     compaction_keep_recent: int = 3
     user_queue_max_size: int = 3
+    mcp_transport: str = "stdio"
+    mcp_server_url: str = "http://127.0.0.1:8000/mcp/"
+    mcp_shared_secret: str = field(default="", repr=False)
+    mcp_timeout: float = 10.0
+    agent_max_tool_calls: int = 2
+    agent_max_llm_steps: int = 4
+    confirmation_ttl: int = 300
+    schedule_path: str = "app/data/schedule.json"
+    schedule_timezone: str = "Europe/Moscow"
 
     @classmethod
     def load(
@@ -158,6 +167,25 @@ class Settings:
         if context_provider not in {"auto", "none", "ollama", "models"}:
             raise ConfigError("LLM_CONTEXT_PROVIDER: используйте auto, none, ollama или models.")
 
+        transport = value("MCP_TRANSPORT", "stdio")
+        if transport not in {"stdio", "streamable-http"}:
+            raise ConfigError("MCP_TRANSPORT: используйте stdio или streamable-http.")
+
+        def bounded(key, default, low, high):
+            try:
+                number = int(value(key, str(default)))
+                if not low <= number <= high:
+                    raise ValueError
+                return number
+            except ValueError:
+                raise ConfigError(f"{key}: допустимый диапазон {low}..{high}.") from None
+
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(value("SCHEDULE_TIMEZONE", "Europe/Moscow"))
+        except (ValueError, ZoneInfoNotFoundError):
+            raise ConfigError("SCHEDULE_TIMEZONE: нужна зона IANA.") from None
         return cls(
             bot_token=token,
             postgres_password=password,
@@ -179,4 +207,13 @@ class Settings:
             compaction_threshold_messages=compact_thresh,
             compaction_keep_recent=compact_keep,
             user_queue_max_size=queue_max,
+            mcp_transport=transport,
+            mcp_server_url=value("MCP_SERVER_URL", "http://127.0.0.1:8000/mcp/"),
+            mcp_shared_secret=value("MCP_SHARED_SECRET"),
+            mcp_timeout=bounded("MCP_TIMEOUT", 10, 1, 120),
+            agent_max_tool_calls=bounded("AGENT_MAX_TOOL_CALLS", 2, 1, 2),
+            agent_max_llm_steps=bounded("AGENT_MAX_LLM_STEPS", 4, 1, 8),
+            confirmation_ttl=bounded("CONFIRMATION_TTL", 300, 1, 300),
+            schedule_path=value("SCHEDULE_PATH", "app/data/schedule.json"),
+            schedule_timezone=value("SCHEDULE_TIMEZONE", "Europe/Moscow"),
         )

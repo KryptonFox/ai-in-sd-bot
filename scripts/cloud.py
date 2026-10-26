@@ -489,7 +489,12 @@ class Cloud:
         command = (
             "set -eu; "
             f"mkdir -p {REMOTE}; chmod 700 {REMOTE}; "
-            f"if [ -f {REMOTE}/.env.cloud ]; then {COMPOSE} stop bot; fi; "
+            f"if [ -f {REMOTE}/.env.cloud ]; then "
+            f"services=$({COMPOSE} config --services); "
+            "if printf '%s\\n' \"$services\" | grep -qx bot; then "
+            f"{COMPOSE} stop bot; fi; "
+            "if printf '%s\\n' \"$services\" | grep -qx mcp-server; then "
+            f"{COMPOSE} stop mcp-server; fi; fi; "
             f"rm -rf {REMOTE}/app; "
             f"tar -xzf /home/student/course-source.tar.gz -C {REMOTE}; "
             f"mv /home/student/course-env.pending {REMOTE}/.env.cloud; "
@@ -612,7 +617,9 @@ def cloud_main(root: Path, args) -> int:
                 if address.get("address"):
                     print(f"Публичный IPv4: {address['address']}")
             if instance.get("status") == "RUNNING":
-                command = "ps" if args.action == "status" else "logs --tail 100 bot db"
+                command = (
+                    "ps --all" if args.action == "status" else "logs --tail 100 bot mcp-server db"
+                )
                 output = deployment.ssh(instance, f"{COMPOSE} {command}")
                 print(output)
     except BaseException:

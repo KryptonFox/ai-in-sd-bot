@@ -27,6 +27,7 @@ services:
   bot:
     profiles: ["cloud"]
     build: .
+    image: itmo-ai-bot:local
     restart: unless-stopped
     environment:
       BOT_TOKEN: ${BOT_TOKEN:?Задайте BOT_TOKEN}
@@ -38,6 +39,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Задайте POSTGRES_PASSWORD}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       HEALTH_PORT: ${HEALTH_PORT:-8080}
+      MCP_TRANSPORT: streamable-http
+      MCP_SERVER_URL: http://mcp-server:8000/mcp
+      MCP_SHARED_SECRET: ${MCP_SHARED_SECRET:-}
     env_file:
       - .env
     depends_on:
@@ -54,6 +58,48 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    networks:
+      - default
+      - mcp_internal
+
+  mcp-server:
+    profiles: ["cloud"]
+    build: .
+    image: itmo-ai-bot:local
+    command: ["python", "-m", "app.mcp_server", "--transport", "streamable-http"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-bot}
+      POSTGRES_USER: ${POSTGRES_USER:-bot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Задайте POSTGRES_PASSWORD}
+      MCP_SHARED_SECRET: ${MCP_SHARED_SECRET:-}
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8000"
+      SCHEDULE_PATH: ${SCHEDULE_PATH:-app/data/schedule.json}
+      SCHEDULE_TIMEZONE: ${SCHEDULE_TIMEZONE:-Europe/Moscow}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - default
+      - mcp_internal
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.mcp_server.healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   postgres_data:
+
+networks:
+  mcp_internal:
+    internal: true

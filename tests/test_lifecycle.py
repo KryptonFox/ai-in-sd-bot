@@ -110,6 +110,8 @@ async def test_http_proxy_receives_connect_and_failure_has_no_direct_fallback(un
 async def test_application_closes_llm_at_every_lifecycle_boundary(monkeypatch, failure):
     from app import __main__ as application
 
+    mcp = Mock(start=AsyncMock(), aclose=AsyncMock(), available=False)
+    monkeypatch.setattr(application, "MCPClient", Mock(return_value=mcp))
     llm = Mock(aclose=AsyncMock())
     pool = Mock(close=AsyncMock())
     bot = Mock(
@@ -139,6 +141,8 @@ async def test_application_closes_llm_at_every_lifecycle_boundary(monkeypatch, f
         with pytest.raises(RuntimeError):
             await application.run(Settings(bot_token="unused", postgres_password="unused"))
     llm.aclose.assert_awaited_once()
+    if failure not in {"db", "telegram"}:
+        mcp.aclose.assert_awaited_once()
     bot.session.close.assert_awaited_once()
     if failure != "db":
         pool.close.assert_awaited_once()

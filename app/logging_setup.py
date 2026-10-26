@@ -39,6 +39,7 @@ def configure_logging(settings: Settings) -> None:
             [
                 settings.bot_token,
                 settings.llm_api_key,
+                settings.mcp_shared_secret,
                 settings.postgres_password,
                 settings.telegram_proxy_url,
                 proxy.password or "",
@@ -50,5 +51,5 @@ def configure_logging(settings: Settings) -> None:
 
     logging.basicConfig(level=settings.log_level, handlers=[handler], force=True)
 
-    for name in ("openai", "httpx", "httpx2", "httpcore", "httpcore2"):
+    for name in ("openai", "httpx", "httpx2", "httpcore", "httpcore2", "mcp"):
         logging.getLogger(name).setLevel(logging.CRITICAL)

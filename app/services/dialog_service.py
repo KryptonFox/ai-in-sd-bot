@@ -4,11 +4,15 @@ import logging
 import asyncpg
 
 from app.config import Settings
+from app.core.clock import SystemClock
+from app.core.context import get_request_id
 from app.core.exceptions import InvalidModeError, InvalidTemperatureError, LLMServiceError
 from app.core.queue import UserQueueManager
+from app.core.schemas.agent import AgentResult, EventContext
 from app.core.schemas.llm import LLMRequest
 from app.core.schemas.message import ChatMessage, MessageRole
 from app.core.schemas.user import VALID_TEMPERATURES, UserSettings
+from app.db.repositories.audit_repo import latest_decision
 from app.db.repositories.history_repo import (
     add_dialog_message,
     clear_dialog_history,
@@ -18,6 +22,7 @@ from app.db.repositories.history_repo import (
     get_user_messages_with_ids,
     set_dialog_summary,
 )
+from app.db.repositories.timezone_repo import get_timezone, set_timezone
 from app.db.repositories.user_repo import get_or_create_user, set_user_mode, set_user_temperature
 from app.llm.base import BaseLLMClient
 from app.modes.base import BotMode
@@ -35,11 +40,15 @@ class DialogService:
         llm_client: BaseLLMClient,
         mode_registry: ModeRegistry = registry,
         queue_manager: UserQueueManager | None = None,
+        agent=None,
+        clock=None,
     ) -> None:
         self._pool = pool
         self._settings = settings
         self._llm = llm_client
         self._registry = mode_registry
+        self.agent = agent
+        self.clock = clock or SystemClock()
         max_queue = getattr(settings, "user_queue_max_size", 3)
         self.queue_manager = queue_manager or UserQueueManager(max_queue_size=max_queue)
 
@@ -94,7 +103,9 @@ class DialogService:
             logger.warning("Не удалось выполнить компактизацию: generation_or_storage_error")
             return False
 
-    async def process_user_message(self, user_id: int, user_text: str) -> str:
+    async def process_user_message(
+        self, user_id: int, user_text: str, *, event_id: str | None = None
+    ) -> str | AgentResult:
         user = await get_or_create_user(self._pool, user_id)
         mode = self._registry.get_or_default(user.mode)
 
@@ -126,6 +137,25 @@ class DialogService:
             for msg in history
         ]
         messages = initial_messages + safe_history + [current_user_msg]
+
+        if self.agent is not None:
+            context = EventContext(
+                user_id=user_id,
+                event_id=event_id or f"local:{get_request_id()}",
+                request_id=get_request_id() or "local",
+            )
+            result = await self.agent.run(
+                messages,
+                context,
+                timezone=await get_timezone(self._pool, user_id),
+                temperature=user.temperature,
+                model=self._settings.llm_model,
+            )
+            await add_dialog_message(self._pool, user_id, current_user_msg)
+            await add_dialog_message(
+                self._pool, user_id, ChatMessage(role=MessageRole.ASSISTANT, content=result.text)
+            )
+            return result
 
         request = LLMRequest(
             messages=messages, temperature=user.temperature, model=self._settings.llm_model
@@ -176,3 +206,41 @@ class DialogService:
         mode = self._registry.get_or_default(user.mode)
 
         return (user, mode)
+
+    async def tools_status(self):
+        if self.agent is None or not self.agent.mcp.available:
+            return "MCP-инструменты сейчас недоступны."
+        lines = ["**Доступные инструменты:**"]
+        for tool in self.agent.mcp.tools.values():
+            access = "изменение, нужно подтверждение" if tool.name == "add_reminder" else "чтение"
+            lines.append(f"- `{tool.name}` — {tool.description} ({access})")
+        return "\n".join(lines)
+
+    async def timezone_status(self, user_id, zone=None):
+        from zoneinfo import ZoneInfo
+
+        if zone is not None:
+            ZoneInfo(zone)
+            await set_timezone(self._pool, user_id, zone)
+        else:
+            zone = await get_timezone(self._pool, user_id)
+        if zone is None:
+            return "Часовой пояс не задан. Используйте /timezone Europe/Moscow."
+        local_now = self.clock.now().astimezone(ZoneInfo(zone)).isoformat()
+        return f"Часовой пояс: {zone}. Текущее время: {local_now}"
+
+    async def why(self, user_id):
+        record = await latest_decision(self._pool, user_id)
+        if record is None:
+            return "Решений пока нет. Отправьте запрос."
+        return (
+            f"Время: {record['created_at'].isoformat()}\nДействие: {record['decision']}\n"
+            f"Инструмент: {record['tool_name'] or 'нет'}\nПараметры: {record['arguments']}\n"
+            f"Проверка: {record['validation']}\nВыполнение: {record['execution']}\n"
+            f"Длительность: {record['duration_ms']:.0f} мс\nПричина: {record['reason']}"
+        )
+
+    async def confirm_action(self, user_id, identifier, *, cancel=False):
+        if self.agent is None or self.agent.confirmations is None:
+            return AgentResult(text="Подтверждения недоступны.", decision="error")
+        return await self.agent.confirmations.confirm(user_id, identifier, cancel=cancel)

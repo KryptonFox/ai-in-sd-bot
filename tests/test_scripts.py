@@ -38,6 +38,32 @@ def test_cloud_requires_proxy_and_has_separate_password(tmp_path):
     assert config["POSTGRES_HOST"] == "db"
     assert config["POSTGRES_PASSWORD"] != dotenv_values(tmp_path / ".env")["POSTGRES_PASSWORD"]
     assert config["TELEGRAM_PROXY_URL"] == "socks5://user:p%40ss@proxy:1080"
+    assert len(config["MCP_SHARED_SECRET"]) >= 32
+
+    first = path.read_bytes()
+    prepare_env(tmp_path, cloud=True, ask=Mock(side_effect=AssertionError), environ={})
+    assert path.read_bytes() == first
+
+
+def test_cloud_persists_environment_mcp_secret_and_rejects_short_secret(tmp_path):
+    env = {
+        "BOT_TOKEN": "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk",
+        "POSTGRES_PASSWORD": "database-password",
+        "TELEGRAM_PROXY_URL": "socks5://proxy:1080",
+        "MCP_SHARED_SECRET": "m" * 40,
+    }
+    path = prepare_env(tmp_path, cloud=True, ask=Mock(), environ=env)
+
+    assert dotenv_values(path)["MCP_SHARED_SECRET"] == "m" * 40
+    assert path.stat().st_mode & 0o077 == 0
+
+    with pytest.raises(ValueError, match="MCP_SHARED_SECRET"):
+        prepare_env(
+            tmp_path / "short",
+            cloud=True,
+            ask=Mock(),
+            environ={**env, "MCP_SHARED_SECRET": "short"},
+        )
 
 
 def test_cloud_empty_proxy_fails_before_creating_file(tmp_path):
@@ -356,6 +382,7 @@ def test_deploy_uploads_secrets_only_over_ssh_stdin(tmp_path, monkeypatch):
         bot_token="secret-token",
         postgres_password="p$a#s's",
         telegram_proxy_url="http://user:password@proxy:3128",
+        mcp_shared_secret="m" * 40,
     )
     deployment.deploy({}, settings)
 
@@ -372,6 +399,11 @@ def test_deploy_uploads_secrets_only_over_ssh_stdin(tmp_path, monkeypatch):
     assert values["BOT_TOKEN"] == "secret-token"
     assert values["POSTGRES_PASSWORD"] == "p$a#s's"
     assert values["POSTGRES_HOST"] == "db"
+    assert values["MCP_SHARED_SECRET"] == "m" * 40
+    assert all("m" * 40 not in command for command, _ in calls)
+    deployment_command = next(command for command, _ in calls if "tar -xzf" in command)
+    assert "config --services" in deployment_command
+    assert "stop mcp-server" in deployment_command
 
     cloud_init = next(kwargs for cmd, kwargs in calls if "cloud-init status" in cmd)
     deployment_cmd = next(kwargs for cmd, kwargs in calls if "--wait --wait-timeout 180" in cmd)
@@ -393,6 +425,35 @@ def test_cloud_help_renders(capsys):
 
     assert exc.value.code == 0
     assert "Гарантия vCPU, %" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("action", "expected"),
+    [
+        ("status", "ps --all"),
+        ("logs", "logs --tail 100 bot mcp-server db"),
+    ],
+)
+def test_cloud_status_and_logs_include_mcp_server(tmp_path, monkeypatch, action, expected):
+    import scripts.cloud as cloud_module
+    from scripts.cli import parser
+
+    cloud(tmp_path, FakeYC())
+    commands = []
+    monkeypatch.setattr(cloud_module.shutil, "which", lambda _: "/usr/bin/ssh")
+    monkeypatch.setattr(cloud_module, "install_yc", lambda: "/usr/bin/yc")
+    monkeypatch.setattr(cloud_module, "authenticate", lambda _: "folder-1")
+    monkeypatch.setattr(cloud_module.Cloud, "instance", lambda _: {"id": "vm", "status": "RUNNING"})
+    monkeypatch.setattr(
+        cloud_module.Cloud,
+        "ssh",
+        lambda _self, _instance, command, **_kwargs: commands.append(command) or "ok",
+    )
+
+    result = cloud_module.cloud_main(tmp_path, parser().parse_args(["cloud", action]))
+
+    assert result == 0
+    assert commands == [f"{cloud_module.COMPOSE} {expected}"]
 
 
 def test_setup_only_checks_real_credentials_without_starting_bot(tmp_path, monkeypatch):

@@ -16,6 +16,8 @@ from app.core.exceptions import (
     QueueFullError,
 )
 from app.core.formatters import send_formatted_message
+from app.core.schemas.agent import AgentResult
+from app.handlers.agent_commands import get_confirmation_keyboard
 from app.services.dialog_service import DialogService
 
 logger = logging.getLogger("app.handlers.dialog")
@@ -66,6 +68,7 @@ async def _execute_dialog(
     dialog_service: DialogService,
     user_id: int,
     user_text: str,
+    event_id: str | None = None,
 ) -> None:
     req_id = generate_request_id()
     set_request_id(req_id)
@@ -92,14 +95,33 @@ async def _execute_dialog(
 
             typing_task = asyncio.create_task(_send_typing(target_message))
             try:
-                response_text = await dialog_service.process_user_message(user_id, user_text)
+                if (
+                    event_id is not None
+                    and isinstance(dialog_service, DialogService)
+                    and dialog_service.agent is not None
+                ):
+                    response_text = await dialog_service.process_user_message(
+                        user_id, user_text, event_id=event_id
+                    )
+                else:
+                    response_text = await dialog_service.process_user_message(user_id, user_text)
             finally:
                 typing_task.cancel()
                 await asyncio.gather(typing_task, return_exceptions=True)
-            await send_formatted_message(target_message, response_text)
+            if isinstance(response_text, AgentResult):
+                keyboard = (
+                    get_confirmation_keyboard(response_text.confirmation_id)
+                    if response_text.confirmation_id
+                    else None
+                )
+                await send_formatted_message(
+                    target_message, response_text.text, reply_markup=keyboard
+                )
+            else:
+                await send_formatted_message(target_message, response_text)
 
     except QueueFullError:
-        logger.warning("[%s] Очередь пользователя %d переполнена", req_id, user_id)
+        logger.warning("[%s] user_queue_full", req_id)
         if queue_msg and hasattr(queue_msg, "delete") and callable(queue_msg.delete):
             try:
                 await queue_msg.delete()
@@ -112,7 +134,7 @@ async def _execute_dialog(
         )
 
     except LLMTimeoutError:
-        logger.warning("[%s] Истёк таймаут ответа LLM для пользователя %d", req_id, user_id)
+        logger.warning("[%s] llm_timeout", req_id)
         keyboard = get_retry_keyboard(user_id, user_text)
         await send_formatted_message(
             target_message,
@@ -122,7 +144,7 @@ async def _execute_dialog(
         )
 
     except LLMEmptyResponseError:
-        logger.warning("[%s] Получен пустой ответ от LLM для пользователя %d", req_id, user_id)
+        logger.warning("[%s] llm_empty", req_id)
         await send_formatted_message(
             target_message,
             "⚠️ Языковая модель вернула пустой ответ. Попробуйте переформулировать запрос.",
@@ -135,16 +157,14 @@ async def _execute_dialog(
         )
 
     except LLMServiceError:
-        logger.error("[%s] Ошибка сервиса LLM для пользователя %d", req_id, user_id)
+        logger.error("[%s] llm_error", req_id)
         await send_formatted_message(
             target_message,
             "⚠️ Сервис языковой модели временно недоступен. Попробуйте повторить запрос позже.",
         )
 
     except Exception:
-        logger.exception(
-            "[%s] Непредвиденная ошибка при обработке сообщения пользователя %d", req_id, user_id
-        )
+        logger.error("[%s] dialog_error", req_id)
         await send_formatted_message(
             target_message,
             "❌ Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже.",
@@ -157,7 +177,13 @@ async def handle_user_text(message: Message, dialog_service: DialogService) -> N
         return
 
     user_id = message.from_user.id if message.from_user else message.chat.id
-    await _execute_dialog(message, dialog_service, user_id, message.text)
+    await _execute_dialog(
+        message,
+        dialog_service,
+        user_id,
+        message.text,
+        event_id=f"telegram:{message.chat.id}:{message.message_id}",
+    )
 
 
 @router.callback_query(F.data.startswith("retry:"))
@@ -188,4 +214,10 @@ async def handle_retry_callback(callback: CallbackQuery, dialog_service: DialogS
         run_target = target_msg
 
     if run_target:
-        await _execute_dialog(run_target, dialog_service, user_id, user_text)
+        await _execute_dialog(
+            run_target,
+            dialog_service,
+            user_id,
+            user_text,
+            event_id=f"telegram:{run_target.chat.id}:{run_target.message_id}",
+        )

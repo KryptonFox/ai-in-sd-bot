@@ -10,6 +10,7 @@ class HealthState:
     pool: asyncpg.Pool | None = None
     initialized: bool = False
     polling_task: asyncio.Task | None = None
+    mcp: object | None = None
 
 
 async def health_result(state: HealthState) -> tuple[int, dict[str, str]]:
@@ -24,11 +25,14 @@ async def health_result(state: HealthState) -> tuple[int, dict[str, str]]:
     polling_ok = state.polling_task is not None and not state.polling_task.done()
     ready = state.initialized and polling_ok and database_ok
 
-    return (200 if ready else 503), {
+    result = {
         "status": "ok" if ready else "not_ready",
         "database": "ok" if database_ok else "unavailable",
         "polling": "running" if polling_ok else "stopped",
     }
+    if state.mcp is not None:
+        result["mcp"] = "available" if state.mcp.available else "unavailable"
+    return (200 if ready else 503), result
 
 
 async def start_health_server(state: HealthState, port: int) -> web.AppRunner:

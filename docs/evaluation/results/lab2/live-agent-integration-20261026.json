@@ -1,0 +1,10 @@
+{
+  "created_at": "2026-10-26T09:23:29.605914+00:00",
+  "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "database": "isolated temporary Docker PostgreSQL",
+  "transport": "stdio",
+  "schedule_full_llm_tool_llm_cycle": "passed",
+  "reminder_no_write_before_confirmation": "passed",
+  "confirmed_mcp_reminder": "passed",
+  "confirmation_replay_single_record": "passed"
+}

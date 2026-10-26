@@ -30,6 +30,9 @@ def get_default_bot_commands(mode_registry: ModeRegistry = registry) -> list[Bot
             BotCommand(command="settings", description="Настройки режима и температуры"),
             BotCommand(command="reset", description="Очистить историю диалога"),
             BotCommand(command="help", description="Справка по доступным командам"),
+            BotCommand(command="tools", description="Доступные инструменты MCP"),
+            BotCommand(command="timezone", description="Часовой пояс IANA для напоминаний"),
+            BotCommand(command="why", description="Последнее решение агента"),
         ]
     )
 

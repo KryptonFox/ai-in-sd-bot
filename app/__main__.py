@@ -10,6 +10,9 @@ from app.handlers import router
 from app.health import HealthState, start_health_server
 from app.llm.client import OpenAIClient
 from app.logging_setup import configure_logging
+from app.mcp.client import MCPClient
+from app.services.agent_service import AgentService
+from app.services.confirmation_service import ConfirmationService
 from app.services.dialog_service import DialogService
 from app.telegram import create_bot, setup_bot_commands
 
@@ -21,6 +24,8 @@ async def run(settings: Settings) -> None:
     bot = create_bot(settings)
     runner = None
     llm_client = None
+    mcp_client = None
+    recovery_task = None
 
     try:
         llm_client = OpenAIClient(settings)
@@ -41,7 +46,31 @@ async def run(settings: Settings) -> None:
 
         await setup_bot_commands(bot)
 
-        dialog_service = DialogService(state.pool, settings, llm_client)
+        mcp_client = MCPClient(settings)
+        await mcp_client.start()
+        state.mcp = mcp_client
+        confirmations = ConfirmationService(state.pool, mcp_client, ttl=settings.confirmation_ttl)
+        agent = AgentService(
+            llm_client,
+            mcp_client,
+            confirmations,
+            state.pool,
+            max_tool_calls=settings.agent_max_tool_calls,
+            max_llm_steps=settings.agent_max_llm_steps,
+        )
+        dialog_service = DialogService(state.pool, settings, llm_client, agent=agent)
+
+        async def recovery_loop():
+            while True:
+                try:
+                    await confirmations.recover()
+                    if not mcp_client.available:
+                        await mcp_client.start()
+                except Exception:
+                    logger.warning("agent_recovery_unavailable")
+                await asyncio.sleep(15)
+
+        recovery_task = asyncio.create_task(recovery_loop())
 
         dispatcher = Dispatcher()
         dispatcher.include_router(router)
@@ -67,23 +96,30 @@ async def run(settings: Settings) -> None:
             state.polling_task.cancel()
             await asyncio.gather(state.polling_task, return_exceptions=True)
 
+        if recovery_task:
+            recovery_task.cancel()
+            await asyncio.gather(recovery_task, return_exceptions=True)
         try:
-            if runner:
-                await runner.cleanup()
+            if mcp_client:
+                await mcp_client.aclose()
         finally:
             try:
-                if llm_client:
-                    await llm_client.aclose()
+                if runner:
+                    await runner.cleanup()
             finally:
                 try:
-                    await bot.session.close()
+                    if llm_client:
+                        await llm_client.aclose()
                 finally:
-                    if state.pool:
-                        try:
-                            async with asyncio.timeout(10):
-                                await state.pool.close()
-                        except TimeoutError:
-                            state.pool.terminate()
+                    try:
+                        await bot.session.close()
+                    finally:
+                        if state.pool:
+                            try:
+                                async with asyncio.timeout(10):
+                                    await state.pool.close()
+                            except TimeoutError:
+                                state.pool.terminate()
 
 
 def main() -> int:

@@ -1,0 +1,216 @@
+{
+  "label": "exact-city-description-final",
+  "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "temperature": 0.0,
+  "clock": "2026-10-12T09:00:00+03:00",
+  "timezone": "Europe/Moscow",
+  "revision": "c74659a50959f632bd61ba89791e563865ecd911",
+  "dirty": true,
+  "app_python_sha256": "eb8c8b53af6ae636cde4733b40d15801b02d738a39a8488857effccddea89614",
+  "created_at": "2026-10-26T09:19:05.232892+00:00",
+  "max_tool_calls": 2,
+  "max_llm_steps": 4,
+  "measurement_status": "completed",
+  "counts": {
+    "planned": 12,
+    "attempted": 12,
+    "decisions_received": 12,
+    "not_run": 0
+  },
+  "summary": {
+    "routing_correct": 12,
+    "routing_total": 12,
+    "routing_accuracy": 1.0,
+    "arguments_correct": 9,
+    "arguments_total": 9,
+    "arguments_accuracy": 1.0
+  },
+  "cases": [
+    {
+      "id": "weather_1",
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Санкт-Петербург"
+      },
+      "predicted_action": "get_weather",
+      "arguments": {
+        "city": "санкт-петербург"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Выбран инструмент."
+    },
+    {
+      "id": "weather_2",
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Казань"
+      },
+      "predicted_action": "get_weather",
+      "arguments": {
+        "city": "казань"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Выбран инструмент."
+    },
+    {
+      "id": "weather_3",
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Тбилиси, Грузия"
+      },
+      "predicted_action": "get_weather",
+      "arguments": {
+        "city": "тбилиси, грузия"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Выбран инструмент."
+    },
+    {
+      "id": "schedule_1",
+      "expected_action": "get_schedule",
+      "expected_arguments": {
+        "date": "2026-10-12"
+      },
+      "predicted_action": "get_schedule",
+      "arguments": {
+        "date": "2026-10-12"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Выбран инструмент."
+    },
+    {
+      "id": "schedule_2",
+      "expected_action": "get_schedule",
+      "expected_arguments": {
+        "date": "2026-10-13"
+      },
+      "predicted_action": "get_schedule",
+      "arguments": {
+        "date": "2026-10-13"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Выбран инструмент."
+    },
+    {
+      "id": "schedule_3",
+      "expected_action": "get_schedule",
+      "expected_arguments": {
+        "date": "2026-10-18"
+      },
+      "predicted_action": "get_schedule",
+      "arguments": {
+        "date": "2026-10-18"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Выбран инструмент."
+    },
+    {
+      "id": "reminder_1",
+      "expected_action": "add_reminder",
+      "expected_arguments": {
+        "text": "отправить отчёт",
+        "remind_at": "2026-10-13T18:30:00+03:00"
+      },
+      "predicted_action": "add_reminder",
+      "arguments": {
+        "text": "отправить отчёт",
+        "remind_at": "2026-10-13T15:30:00+00:00"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Подготовка напоминания."
+    },
+    {
+      "id": "reminder_2",
+      "expected_action": "add_reminder",
+      "expected_arguments": {
+        "text": "проверить расписание",
+        "remind_at": "2026-10-15T09:00:00+03:00"
+      },
+      "predicted_action": "add_reminder",
+      "arguments": {
+        "text": "проверить расписание",
+        "remind_at": "2026-10-15T06:00:00+00:00"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Подготовка напоминания."
+    },
+    {
+      "id": "reminder_3",
+      "expected_action": "add_reminder",
+      "expected_arguments": {
+        "text": "сделать перерыв",
+        "remind_at": "2026-10-12T11:00:00+03:00"
+      },
+      "predicted_action": "add_reminder",
+      "arguments": {
+        "text": "сделать перерыв",
+        "remind_at": "2026-10-12T08:00:00+00:00"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Подготовка напоминания."
+    },
+    {
+      "id": "respond_1",
+      "expected_action": "respond",
+      "expected_arguments": {},
+      "predicted_action": "respond",
+      "arguments": {},
+      "route_correct": true,
+      "arguments_applicable": false,
+      "arguments_correct": null,
+      "success": true,
+      "public_answer": "**Суть:** Списки изменяемы (mutable), кортежи — нет (immutable). Это главное отличие, от которого следуют остальные.\n\n**Объяснение:**\n- **Список (`list`)** — упорядоченная коллекция, которую можно менять после создания: добавлять/удалять элементы, менять их значения, сортировать на месте. Обозначается квадратными скобками: `[1, 2, 3]`.\n- **Кортеж (`tuple`)** — тоже упорядоченная коллекция, но после создания её содержимое нельзя изменить. Обозначается круглыми скобками: `(1, 2, 3)` или просто `1, 2, 3`.\n\n**Последствия неизменяемости кортежей:**\n- Можно использовать как ключи словаря и элементы множеств (списки — нет).\n- Занимают чуть меньше памяти и быстрее создаются.\n- Защищают данные от случайного изменения — полезно для констант, возврата нескольких значений из функции, записей БД.\n\n**Ключевой вывод:** Если коллекция должна меняться — используй список. Если данные фиксированы и нужна гарантия неизменяемости (или хешируемость) — кортеж."
+    },
+    {
+      "id": "respond_2",
+      "expected_action": "respond",
+      "expected_arguments": {},
+      "predicted_action": "respond",
+      "arguments": {},
+      "route_correct": true,
+      "arguments_applicable": false,
+      "arguments_correct": null,
+      "success": true,
+      "public_answer": "**The laboratory work is completed.**  \nили более формально: **The laboratory work has been completed.**"
+    },
+    {
+      "id": "clarify_1",
+      "expected_action": "clarify",
+      "expected_arguments": {},
+      "predicted_action": "clarify",
+      "arguments": {},
+      "route_correct": true,
+      "arguments_applicable": false,
+      "arguments_correct": null,
+      "success": true,
+      "public_answer": "Хорошо, напомню про лабораторную. Уточни, пожалуйста:\n1. Во сколько именно (например, 19:00 или 20:30)?\n2. Какой текст напоминания (просто «Лабораторная» или с деталями)?\nЧасовой пояс буду использовать Europe/Moscow."
+    }
+  ]
+}

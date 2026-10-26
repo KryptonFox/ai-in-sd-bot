@@ -1,0 +1,60 @@
+{
+  "label": "weather-description-failed-cases",
+  "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "temperature": 0.0,
+  "clock": "2026-10-12T09:00:00+03:00",
+  "timezone": "Europe/Moscow",
+  "revision": "c74659a50959f632bd61ba89791e563865ecd911",
+  "dirty": true,
+  "app_python_sha256": "413302736bc6030d114201a5bd10d6e576d2097e11ee1e74fa29ab25b72f78a4",
+  "created_at": "2026-10-26T09:14:42.222795+00:00",
+  "max_tool_calls": 2,
+  "max_llm_steps": 4,
+  "measurement_status": "completed",
+  "counts": {
+    "planned": 2,
+    "attempted": 2,
+    "decisions_received": 2,
+    "not_run": 0
+  },
+  "summary": {
+    "routing_correct": 2,
+    "routing_total": 2,
+    "routing_accuracy": 1.0,
+    "arguments_correct": 1,
+    "arguments_total": 2,
+    "arguments_accuracy": 0.5
+  },
+  "cases": [
+    {
+      "id": "weather_1",
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Санкт-Петербург"
+      },
+      "predicted_action": "get_weather",
+      "arguments": {
+        "city": "санкт-петербург, россия"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": false,
+      "success": false
+    },
+    {
+      "id": "weather_3",
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Тбилиси, Грузия"
+      },
+      "predicted_action": "get_weather",
+      "arguments": {
+        "city": "тбилиси, грузия"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true
+    }
+  ]
+}

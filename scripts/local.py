@@ -47,6 +47,13 @@ def prepare_env(
     if not values.get("POSTGRES_PASSWORD"):
         updates["POSTGRES_PASSWORD"] = secrets.token_urlsafe(24)
 
+    if cloud:
+        mcp_secret = values.get("MCP_SHARED_SECRET") or secrets.token_urlsafe(32)
+        if len(mcp_secret) < 32:
+            raise ConfigError("MCP_SHARED_SECRET: задайте секрет длиной не менее 32 символов.")
+        if existing.get("MCP_SHARED_SECRET") != mcp_secret:
+            updates["MCP_SHARED_SECRET"] = mcp_secret
+
     if "TELEGRAM_PROXY_URL" not in values or (cloud and not values.get("TELEGRAM_PROXY_URL")):
         updates["TELEGRAM_PROXY_URL"] = ask(
             "URL HTTP/SOCKS5 прокси (ввод скрыт; локально Enter — без прокси): "
