@@ -14,7 +14,7 @@ from app.mcp.client import MCPClient
 from app.services.agent_service import AgentService
 from app.services.confirmation_service import ConfirmationService
 from app.services.dialog_service import DialogService
-from app.telegram import create_bot, setup_bot_commands
+from app.telegram import create_bot, setup_bot_commands, setup_bot_description
 
 logger = logging.getLogger("app")
 
@@ -45,6 +45,7 @@ async def run(settings: Settings) -> None:
         logger.info("Telegram доступен. Бот @%s запускает polling.", me.username)
 
         await setup_bot_commands(bot)
+        await setup_bot_description(bot)
 
         mcp_client = MCPClient(settings)
         await mcp_client.start()

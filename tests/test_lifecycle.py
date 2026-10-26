@@ -128,6 +128,8 @@ async def test_application_closes_llm_at_every_lifecycle_boundary(monkeypatch, f
     monkeypatch.setattr(application, "create_bot", Mock(return_value=bot))
     monkeypatch.setattr(application, "Dispatcher", Mock(return_value=dispatcher))
     monkeypatch.setattr(application, "setup_bot_commands", AsyncMock())
+    setup_bot_description = AsyncMock()
+    monkeypatch.setattr(application, "setup_bot_description", setup_bot_description)
     monkeypatch.setattr(application, "start_health_server", start_health_server)
     if failure == "db":
         create_pool.side_effect = RuntimeError
@@ -145,6 +147,9 @@ async def test_application_closes_llm_at_every_lifecycle_boundary(monkeypatch, f
     llm.aclose.assert_awaited_once()
     if failure not in {"db", "telegram"}:
         mcp.aclose.assert_awaited_once()
+        setup_bot_description.assert_awaited_once_with(bot)
+    else:
+        setup_bot_description.assert_not_awaited()
     bot.session.close.assert_awaited_once()
     if failure != "db":
         pool.close.assert_awaited_once()
