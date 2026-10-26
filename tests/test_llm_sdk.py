@@ -10,6 +10,7 @@ from openai import AsyncOpenAI
 from app.config import Settings
 from app.core.exceptions import (
     LLMEmptyResponseError,
+    LLMErrorCode,
     LLMRefusalError,
     LLMServiceError,
     LLMTimeoutError,
@@ -56,7 +57,7 @@ async def adapter():
 
     def make(handler, *, settings=SETTINGS):
         sdk = AsyncOpenAI(
-            api_key=settings.llm_api_key,
+            api_key=settings.llm_api_key or "not-configured",
             base_url=settings.llm_base_url,
             http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)),
             max_retries=2,
@@ -112,13 +113,35 @@ async def test_response_boundaries(adapter, body, error):
         await client.generate(request())
 
 
-@pytest.mark.parametrize("status", [400, 401, 429, 500, 503])
-async def test_http_errors_are_safe_and_never_retried(adapter, status, caplog):
+@pytest.mark.parametrize(
+    ("status", "code"),
+    [
+        (400, LLMErrorCode.INVALID_REQUEST),
+        (401, LLMErrorCode.AUTHENTICATION),
+        (403, LLMErrorCode.PERMISSION),
+        (404, LLMErrorCode.NOT_FOUND),
+        (408, LLMErrorCode.TIMEOUT),
+        (422, LLMErrorCode.INVALID_REQUEST),
+        (429, LLMErrorCode.RATE_LIMIT),
+        (500, LLMErrorCode.UNAVAILABLE),
+        (503, LLMErrorCode.UNAVAILABLE),
+    ],
+)
+async def test_http_errors_are_safe_and_never_retried(adapter, status, code, caplog):
     calls = []
 
     def handler(req):
         calls.append(req)
-        return httpx2.Response(status, json={"error": {"message": "secret-key PRIVATE PROMPT"}})
+        return httpx2.Response(
+            status,
+            json={
+                "error": {
+                    "message": "secret-key PRIVATE PROMPT",
+                    "code": "secret-key",
+                    "param": "PRIVATE PROMPT",
+                }
+            },
+        )
 
     client, _ = adapter(handler)
     with caplog.at_level("INFO", logger="app.llm"), pytest.raises(LLMServiceError) as error:
@@ -127,6 +150,65 @@ async def test_http_errors_are_safe_and_never_retried(adapter, status, caplog):
     assert "PRIVATE PROMPT" not in caplog.text + str(error.value)
     assert "secret-key" not in caplog.text + str(error.value)
     assert f"http_{status}" in caplog.text
+    assert error.value.code == code
+    assert error.value.status_code == status
+    assert "model='configured-model'" in caplog.text
+    assert f"code={code}" in caplog.text
+    assert f"status={status}" in caplog.text
+    assert "exception=" in caplog.text
+
+
+async def test_provider_quota_code_and_model_override_are_logged(adapter, caplog):
+    client, _ = adapter(
+        lambda _: httpx2.Response(
+            429,
+            json={"error": {"message": "PRIVATE DETAIL", "code": "insufficient_quota"}},
+        )
+    )
+
+    with caplog.at_level("INFO", logger="app.llm"), pytest.raises(LLMServiceError):
+        await client.generate(request(model="override-model"))
+
+    assert "model='override-model'" in caplog.text
+    assert "provider_code=insufficient_quota" in caplog.text
+    assert "PRIVATE DETAIL" not in caplog.text
+
+
+async def test_invalid_response_logs_field_and_validation_problem(adapter, caplog):
+    client, _ = adapter(lambda _: httpx2.Response(200, json=completion(123)))
+
+    with caplog.at_level("INFO", logger="app.llm"), pytest.raises(LLMServiceError):
+        await client.generate(request())
+
+    assert "field=choices.0.message.content problem=string_type" in caplog.text
+    assert "code=llm_invalid_response" in caplog.text
+    assert "PRIVATE PROMPT" not in caplog.text
+
+
+async def test_missing_api_key_is_reported_without_network_request(adapter):
+    calls = []
+
+    def handler(req):
+        calls.append(req)
+        return httpx2.Response(200, json=completion())
+
+    client, _ = adapter(handler, settings=replace(SETTINGS, llm_api_key=""))
+
+    with pytest.raises(LLMServiceError) as error:
+        await client.generate(request())
+
+    assert error.value.code == LLMErrorCode.NOT_CONFIGURED
+    assert calls == []
+
+
+async def test_generation_limit_has_its_own_reason(adapter):
+    client, _ = adapter(lambda _: httpx2.Response(200, json=completion(None, reason="length")))
+
+    with pytest.raises(LLMServiceError) as error:
+        await client.generate(request())
+
+    assert error.value.code == LLMErrorCode.GENERATION_LIMIT
+    assert "лимит генерации" in error.value.user_message
 
 
 @pytest.mark.parametrize(
@@ -136,13 +218,15 @@ async def test_http_errors_are_safe_and_never_retried(adapter, status, caplog):
         (httpx2.ConnectError, LLMServiceError),
     ],
 )
-async def test_transport_errors(adapter, transport_error, error):
+async def test_transport_errors(adapter, transport_error, error, caplog):
     def handler(req):
         raise transport_error("PRIVATE PROVIDER DETAIL", request=req)
 
     client, _ = adapter(handler)
     with pytest.raises(error, match="модел"):
         await client.generate(request())
+    assert f"exception={transport_error.__name__}" in caplog.text
+    assert "PRIVATE PROVIDER DETAIL" not in caplog.text
 
 
 async def test_total_deadline_and_cancellation_stop_request(adapter):
@@ -204,7 +288,7 @@ async def test_tools_roundtrip(adapter):
 
 
 @pytest.mark.parametrize("arguments", ["broken", "[]", '"text"', "null", '{"x": NaN}'])
-async def test_invalid_tool_arguments_are_service_errors(adapter, arguments):
+async def test_invalid_tool_arguments_are_service_errors(adapter, arguments, caplog):
     call = {
         "id": "call-1",
         "type": "function",
@@ -217,6 +301,13 @@ async def test_invalid_tool_arguments_are_service_errors(adapter, arguments):
     )
     with pytest.raises(LLMServiceError):
         await client.generate(request())
+    assert "code=llm_invalid_response" in caplog.text
+    if arguments == "broken":
+        assert "invalid_json_line=1 column=1" in caplog.text
+    elif arguments == '{"x": NaN}':
+        assert "problem=invalid_json_constant" in caplog.text
+    else:
+        assert "problem=tool arguments must be an object" in caplog.text
 
 
 async def test_internal_sdk_is_closed_on_exit_and_exception(monkeypatch):

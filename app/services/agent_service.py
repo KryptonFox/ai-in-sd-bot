@@ -177,8 +177,8 @@ class AgentService:
         except ToolFailure as error:
             decision = "clarify" if error.code in CLARIFICATION_ERRORS else "error"
             return _Outcome(self._answer(state, error.message, decision), error.code)
-        except LLMError:
-            await self._record_model_failure(state.context)
+        except LLMError as error:
+            await self._record_model_failure(state.context, error)
             raise
         except (ValidationError, ValueError):
             return _Outcome(
@@ -380,7 +380,7 @@ class AgentService:
             arguments=call.arguments if call else {},
         )
 
-    async def _record_model_failure(self, context: EventContext) -> None:
+    async def _record_model_failure(self, context: EventContext, error: LLMError) -> None:
         if self.pool is None:
             return
 
@@ -391,9 +391,9 @@ class AgentService:
             event_id=context.event_id,
             request_id=context.request_id,
             decision="error",
-            validation="llm_error",
+            validation=error.code,
             execution="failed",
-            reason="llm_error",
+            reason=error.code,
         )
 
     async def _record(

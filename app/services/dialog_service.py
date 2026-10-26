@@ -6,7 +6,12 @@ import asyncpg
 from app.config import Settings
 from app.core.clock import Clock, SystemClock
 from app.core.context import get_request_id
-from app.core.exceptions import InvalidModeError, InvalidTemperatureError, LLMServiceError
+from app.core.exceptions import (
+    LLM_ERROR_MESSAGES,
+    InvalidModeError,
+    InvalidTemperatureError,
+    LLMServiceError,
+)
 from app.core.queue import UserQueueManager
 from app.core.schemas.agent import AgentResult, EventContext
 from app.core.schemas.llm import LLMRequest
@@ -234,11 +239,13 @@ class DialogService:
         record = await latest_decision(self._pool, user_id)
         if record is None:
             return "Решений пока нет. Отправьте запрос."
+        validation = LLM_ERROR_MESSAGES.get(record["validation"], record["validation"])
+        reason = LLM_ERROR_MESSAGES.get(record["reason"], record["reason"])
         return (
             f"Время: {record['created_at'].isoformat()}\nДействие: {record['decision']}\n"
             f"Инструмент: {record['tool_name'] or 'нет'}\nПараметры: {record['arguments']}\n"
-            f"Проверка: {record['validation']}\nВыполнение: {record['execution']}\n"
-            f"Длительность: {record['duration_ms']:.0f} мс\nПричина: {record['reason']}"
+            f"Проверка: {validation}\nВыполнение: {record['execution']}\n"
+            f"Длительность: {record['duration_ms']:.0f} мс\nПричина: {reason}"
         )
 
     async def confirm_action(

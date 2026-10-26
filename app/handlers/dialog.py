@@ -157,11 +157,17 @@ async def _execute_dialog(
             "Модель отказалась выполнять запрос. Попробуйте изменить задачу или её формулировку.",
         )
 
-    except LLMServiceError:
-        logger.error("[%s] llm_error", req_id)
+    except LLMServiceError as error:
+        logger.error(
+            "[%s] llm_error code=%s status=%s reason=%s",
+            req_id,
+            error.code,
+            error.status_code,
+            error.user_message,
+        )
         await send_formatted_message(
             target_message,
-            "⚠️ Сервис языковой модели временно недоступен. Попробуйте повторить запрос позже.",
+            f"⚠️ {error.user_message}",
         )
 
     except Exception:

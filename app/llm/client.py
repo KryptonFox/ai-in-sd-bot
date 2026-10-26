@@ -11,7 +11,10 @@ from openai.types.chat import ChatCompletion
 from app.config import Settings
 from app.core.context import get_request_id
 from app.core.exceptions import (
+    LLM_ERROR_MESSAGES,
     LLMEmptyResponseError,
+    LLMError,
+    LLMErrorCode,
     LLMRefusalError,
     LLMServiceError,
     LLMTimeoutError,
@@ -25,8 +28,20 @@ from app.llm.context_length import (
 from app.llm.context_length import (
     ContextLengthResolver as ContextLengthResolver,
 )
+from app.llm.diagnostics import generation_error_details
 
 logger = logging.getLogger("app.llm")
+
+HTTP_ERROR_CODES: dict[int, LLMErrorCode] = {
+    400: LLMErrorCode.INVALID_REQUEST,
+    401: LLMErrorCode.AUTHENTICATION,
+    403: LLMErrorCode.PERMISSION,
+    404: LLMErrorCode.NOT_FOUND,
+    408: LLMErrorCode.TIMEOUT,
+    413: LLMErrorCode.INVALID_REQUEST,
+    422: LLMErrorCode.INVALID_REQUEST,
+    429: LLMErrorCode.RATE_LIMIT,
+}
 
 
 def _reject_json_constant(value: str) -> None:
@@ -139,7 +154,10 @@ class OpenAIClient(BaseLLMClient):
             raise ValueError("missing_tool_calls")
         if not content.strip() and not calls:
             if choice.finish_reason == "length":
-                raise LLMServiceError("Лимит генерации исчерпан до появления публичного ответа.")
+                raise LLMServiceError(
+                    "Лимит генерации исчерпан до появления публичного ответа.",
+                    code=LLMErrorCode.GENERATION_LIMIT,
+                )
             raise LLMEmptyResponseError("Модель вернула пустой ответ.")
         usage = data.usage
         return LLMResponse(
@@ -152,52 +170,76 @@ class OpenAIClient(BaseLLMClient):
         )
 
     async def generate(self, request: LLMRequest) -> LLMResponse:
-        if not self._settings.llm_api_key:
-            raise LLMServiceError("API-ключ модели не настроен. Укажите LLM_API_KEY в файле .env.")
         req_id = get_request_id() or "local"
+        model = request.model or self._settings.llm_model
         started = time.monotonic()
         code = "ok"
+        logger.info("[%s] llm_start model=%r", req_id, model)
+
         try:
-            async with asyncio.timeout(self._settings.llm_timeout):
-                payload = self._payload(request)
-                data = await self._client.chat.completions.create(
-                    model=request.model or self._settings.llm_model, **payload
-                )
-                result = self._response(data)
+            result = await self._generate(request, model)
             logger.info(
-                "[%s] llm_usage prompt=%s completion=%s total=%s finish=%s",
+                "[%s] llm_usage model=%r prompt=%s completion=%s total=%s finish=%s",
                 req_id,
+                model,
                 result.prompt_tokens,
                 result.completion_tokens,
                 result.total_tokens,
                 result.finish_reason,
             )
             return result
-        except (APITimeoutError, TimeoutError):
-            code = "timeout"
-            raise LLMTimeoutError("Превышено время ожидания ответа языковой модели.") from None
-        except APIStatusError as exc:
-            code = f"http_{exc.status_code}"
-            raise LLMServiceError("Сервис языковой модели временно недоступен.") from None
-        except APIConnectionError:
-            code = "connection_error"
-            raise LLMServiceError("Не удалось соединиться с сервисом языковой модели.") from None
-        except (APIError, ValueError, TypeError, AttributeError):
-            code = "invalid_response_or_connection"
-            raise LLMServiceError("Не удалось получить корректный ответ языковой модели.") from None
-        except LLMEmptyResponseError:
-            code = "empty_response"
-            raise
-        except LLMRefusalError:
-            code = "refusal"
-            raise
-        except LLMServiceError:
-            code = "generation_limit"
+        except LLMError as error:
+            code = f"http_{error.status_code}" if error.status_code else error.code
+            logger.warning(
+                "[%s] llm_failed model=%r code=%s status=%s reason=%s details=%s",
+                req_id,
+                model,
+                error.code,
+                error.status_code,
+                error.user_message,
+                generation_error_details(error),
+            )
             raise
         except asyncio.CancelledError:
             code = "cancelled"
             raise
         finally:
             logger.info(
-                "[%s] llm_complete duration=%.3f code=%s", req_id, time.monotonic() - started, code
+                "[%s] llm_complete model=%r duration=%.3f code=%s",
+                req_id,
+                model,
+                time.monotonic() - started,
+                code,
             )
+
+    async def _generate(self, request: LLMRequest, model: str) -> LLMResponse:
+        if not self._settings.llm_api_key:
+            raise LLMServiceError(
+                "API-ключ модели не настроен. Укажите LLM_API_KEY в файле .env.",
+                code=LLMErrorCode.NOT_CONFIGURED,
+            )
+
+        try:
+            async with asyncio.timeout(self._settings.llm_timeout):
+                payload = self._payload(request)
+                data = await self._client.chat.completions.create(model=model, **payload)
+                return self._response(data)
+        except (APITimeoutError, TimeoutError):
+            raise LLMTimeoutError("Превышено время ожидания ответа языковой модели.") from None
+        except APIStatusError as exc:
+            error_code = HTTP_ERROR_CODES.get(exc.status_code, LLMErrorCode.UNAVAILABLE)
+            raise LLMServiceError(
+                LLM_ERROR_MESSAGES[error_code],
+                code=error_code,
+                status_code=exc.status_code,
+            ) from None
+        except APIConnectionError:
+            raise LLMServiceError(
+                "Не удалось соединиться с сервисом языковой модели.",
+                code=LLMErrorCode.CONNECTION,
+            ) from None
+        except (APIError, ValueError, TypeError, AttributeError):
+            raise LLMServiceError(
+                "Не удалось получить корректный ответ языковой модели.",
+                code=LLMErrorCode.INVALID_RESPONSE,
+            ) from None
