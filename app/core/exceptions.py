@@ -93,10 +93,12 @@ class LLMServiceError(LLMError):
         *,
         code: LLMErrorCode = LLMErrorCode.UNAVAILABLE,
         status_code: int | None = None,
+        diagnostic_details: str | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.status_code = status_code
+        self.diagnostic_details = diagnostic_details
 
 
 class LLMEmptyResponseError(LLMError):

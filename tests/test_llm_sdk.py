@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import httpx2
 import pytest
-from openai import AsyncOpenAI
+from openai import APIStatusError, AsyncOpenAI
 
 from app.config import Settings
 from app.core.exceptions import (
@@ -18,6 +18,7 @@ from app.core.exceptions import (
 from app.core.schemas.llm import LLMRequest, ToolCall, ToolDefinition
 from app.core.schemas.message import ChatMessage, MessageRole
 from app.llm.client import OpenAIClient
+from app.llm.diagnostics import api_status_error_details
 
 SETTINGS = Settings(
     bot_token="unused",
@@ -172,6 +173,147 @@ async def test_provider_quota_code_and_model_override_are_logged(adapter, caplog
     assert "model='override-model'" in caplog.text
     assert "provider_code=insufficient_quota" in caplog.text
     assert "PRIVATE DETAIL" not in caplog.text
+
+
+async def test_api_400_logs_specific_safe_parameter_diagnosis(adapter, caplog):
+    client, _ = adapter(
+        lambda _: httpx2.Response(
+            400,
+            json={
+                "error": {
+                    "message": "Unsupported value: temperature is not supported for this model.",
+                    "type": "invalid_request_error",
+                    "code": "unsupported_parameter",
+                    "param": "temperature",
+                }
+            },
+        )
+    )
+
+    with caplog.at_level("INFO", logger="app.llm"), pytest.raises(LLMServiceError):
+        await client.generate(request())
+
+    assert "model='configured-model'" in caplog.text
+    assert "provider_code=unsupported_parameter" in caplog.text
+    assert "provider_type=invalid_request_error" in caplog.text
+    assert "provider_param=temperature" in caplog.text
+    assert "provider_reason_code=unsupported_parameter_for_temperature" in caplog.text
+    assert (
+        "provider_reason=API отклонил temperature: параметр или значение не поддерживается моделью"
+        in caplog.text
+    )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"error": {"message": 42, "code": ["unsupported_parameter"], "param": {}}},
+        {"error": {"message": "PRIVATE PROMPT api-key=sk-secret-value", "code": None}},
+    ],
+)
+async def test_incomplete_provider_error_uses_safe_fallback(adapter, caplog, body):
+    client, _ = adapter(lambda _: httpx2.Response(400, json=body))
+
+    with caplog.at_level("INFO", logger="app.llm"), pytest.raises(LLMServiceError):
+        await client.generate(request())
+
+    assert "provider_reason_code=unclassified_api_error" in caplog.text
+    assert "PRIVATE PROMPT" not in caplog.text
+    assert "api-key" not in caplog.text
+    assert "sk-secret-value" not in caplog.text
+    assert "unsupported_parameter']" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("message", "reason_code", "reason"),
+    [
+        (
+            "No endpoints found for this model",
+            "no_available_endpoints",
+            "нет доступных точек подключения",
+        ),
+        (
+            "maximum context length exceeded",
+            "context_length_exceeded",
+            "превышен лимит контекста",
+        ),
+        (
+            "Unsupported parameter: temperature",
+            "unsupported_parameter_for_temperature",
+            "API отклонил temperature",
+        ),
+        (
+            "temperature does not support this value",
+            "unsupported_parameter_for_temperature",
+            "API отклонил temperature",
+        ),
+        (
+            "temperature is not supported for this model",
+            "unsupported_parameter_for_temperature",
+            "API отклонил temperature",
+        ),
+        (
+            "You exceeded your current quota",
+            "insufficient_quota",
+            "API сообщил об исчерпанной квоте",
+        ),
+    ],
+)
+async def test_message_only_provider_errors_have_safe_specific_reasons(
+    adapter, caplog, message, reason_code, reason
+):
+    client, _ = adapter(lambda _: httpx2.Response(400, json={"message": message}))
+
+    with caplog.at_level("INFO", logger="app.llm"), pytest.raises(LLMServiceError):
+        await client.generate(request())
+
+    assert f"provider_reason_code={reason_code}" in caplog.text
+    assert reason in caplog.text
+    assert message not in caplog.text
+    assert "PRIVATE PROMPT" not in caplog.text
+
+
+def test_sdk_message_only_error_is_classified_without_logging_raw_message():
+    request = httpx2.Request("POST", "https://provider.test/v1/chat/completions")
+    response = httpx2.Response(400, request=request)
+    error = APIStatusError(
+        "Unsupported parameter: temperature",
+        response=response,
+        body=None,
+    )
+
+    details = api_status_error_details(error)
+
+    assert "provider_reason_code=unsupported_parameter_for_temperature" in details
+    assert (
+        "provider_reason=API отклонил temperature: параметр или значение не поддерживается моделью"
+        in details
+    )
+    assert "Unsupported parameter: temperature" not in details
+
+
+@pytest.mark.parametrize(
+    ("status", "reason_code", "reason"),
+    [
+        (401, "authentication_rejected", "API отклонил учётные данные"),
+        (403, "permission_denied", "API запретил доступ к ресурсу"),
+        (404, "resource_not_found", "API не нашёл адрес или модель"),
+        (429, "rate_limit_or_quota", "API ограничил запросы или квоту"),
+        (500, "provider_server_error", "API вернул внутреннюю ошибку сервера"),
+        (503, "provider_server_error", "API вернул внутреннюю ошибку сервера"),
+    ],
+)
+async def test_http_status_has_safe_reason_without_provider_code(
+    adapter, caplog, status, reason_code, reason
+):
+    client, _ = adapter(lambda _: httpx2.Response(status, json={"message": "failure"}))
+
+    with caplog.at_level("INFO", logger="app.llm"), pytest.raises(LLMServiceError):
+        await client.generate(request())
+
+    assert f"provider_reason_code={reason_code}" in caplog.text
+    assert reason in caplog.text
+    assert "failure" not in caplog.text
 
 
 async def test_invalid_response_logs_field_and_validation_problem(adapter, caplog):

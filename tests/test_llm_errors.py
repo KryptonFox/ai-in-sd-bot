@@ -50,6 +50,33 @@ async def test_service_error_explains_reason_without_exposing_exception(
         assert private not in caplog.text + response
 
 
+async def test_handler_llm_error_log_includes_safe_api_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    message = MagicMock()
+    message.bot = None
+    service = MagicMock()
+    service.queue_manager = None
+    diagnosis = "provider_reason=API отклонил temperature: параметр не поддерживается моделью"
+    service.process_user_message = AsyncMock(
+        side_effect=LLMServiceError(
+            "PRIVATE ERROR",
+            code=LLMErrorCode.INVALID_REQUEST,
+            status_code=400,
+            diagnostic_details=diagnosis,
+        )
+    )
+    monkeypatch.setattr(dialog, "send_formatted_message", AsyncMock())
+
+    await dialog._execute_dialog(message, service, 42, "PRIVATE PROMPT")
+
+    assert "llm_error code=llm_invalid_request status=400" in caplog.text
+    assert diagnosis in caplog.text
+    assert "PRIVATE ERROR" not in caplog.text
+    assert "PRIVATE PROMPT" not in caplog.text
+
+
 async def test_agent_preserves_failure_reason_and_releases_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

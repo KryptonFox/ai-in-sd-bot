@@ -28,7 +28,7 @@ from app.llm.context_length import (
 from app.llm.context_length import (
     ContextLengthResolver as ContextLengthResolver,
 )
-from app.llm.diagnostics import generation_error_details
+from app.llm.diagnostics import api_status_error_details, generation_error_details
 
 logger = logging.getLogger("app.llm")
 
@@ -232,6 +232,7 @@ class OpenAIClient(BaseLLMClient):
                 LLM_ERROR_MESSAGES[error_code],
                 code=error_code,
                 status_code=exc.status_code,
+                diagnostic_details=api_status_error_details(exc),
             ) from None
         except APIConnectionError:
             raise LLMServiceError(

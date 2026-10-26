@@ -159,11 +159,12 @@ async def _execute_dialog(
 
     except LLMServiceError as error:
         logger.error(
-            "[%s] llm_error code=%s status=%s reason=%s",
+            "[%s] llm_error code=%s status=%s reason=%s details=%s",
             req_id,
             error.code,
             error.status_code,
             error.user_message,
+            error.diagnostic_details or "no_provider_details",
         )
         await send_formatted_message(
             target_message,
