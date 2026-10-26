@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Self
+from typing import Any, Self
 
 import httpx
 from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError, AsyncOpenAI
@@ -74,10 +74,10 @@ class OpenAIClient(BaseLLMClient):
         return await self._context.get(model or self._settings.llm_model)
 
     @staticmethod
-    def _payload(request: LLMRequest) -> dict:
-        messages = []
+    def _payload(request: LLMRequest) -> dict[str, Any]:
+        messages: list[dict[str, Any]] = []
         for msg in request.messages:
-            item = {"role": msg.role.value, "content": msg.content}
+            item: dict[str, Any] = {"role": msg.role.value, "content": msg.content}
             if msg.tool_calls:
                 if msg.role != MessageRole.ASSISTANT:
                     raise ValueError("tool_calls require assistant")
@@ -99,7 +99,7 @@ class OpenAIClient(BaseLLMClient):
                     raise ValueError("tool result requires tool_call_id")
                 item["tool_call_id"] = msg.tool_call_id
             messages.append(item)
-        payload = {
+        payload: dict[str, Any] = {
             "messages": messages,
             "temperature": request.temperature,
         }

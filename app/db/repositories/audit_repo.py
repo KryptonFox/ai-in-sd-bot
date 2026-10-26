@@ -1,9 +1,11 @@
 import json
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Any
+from typing import cast
 
 import asyncpg
+
+from app.db.records import DecisionAudit
 
 _SAFE_ARGUMENT_LIMITS = {
     "city": 100,
@@ -13,7 +15,7 @@ _SAFE_ARGUMENT_LIMITS = {
 }
 
 
-def _safe_arguments(arguments: Mapping[str, Any] | None) -> str:
+def _safe_arguments(arguments: Mapping[str, object] | None) -> str:
     safe: dict[str, str] = {}
     if isinstance(arguments, Mapping):
         for key, limit in _SAFE_ARGUMENT_LIMITS.items():
@@ -31,7 +33,7 @@ async def record_decision(
     request_id: str,
     decision: str,
     tool_name: str | None = None,
-    arguments: Mapping[str, Any] | None = None,
+    arguments: Mapping[str, object] | None = None,
     validation: str = "ok",
     execution: str = "none",
     duration_ms: float = 0,
@@ -61,7 +63,7 @@ async def record_decision(
         )
 
 
-async def latest_decision(pool: asyncpg.Pool, user_id: int) -> dict[str, Any] | None:
+async def latest_decision(pool: asyncpg.Pool, user_id: int) -> DecisionAudit | None:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
@@ -81,4 +83,4 @@ async def latest_decision(pool: asyncpg.Pool, user_id: int) -> dict[str, Any] | 
     result = dict(row)
     if isinstance(result["arguments"], str):
         result["arguments"] = json.loads(result["arguments"])
-    return result
+    return cast(DecisionAudit, result)

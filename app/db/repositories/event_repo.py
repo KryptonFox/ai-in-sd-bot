@@ -1,7 +1,13 @@
 import json
+from collections.abc import Mapping
+from datetime import datetime
+
+import asyncpg
+
+from app.db.records import EventClaim
 
 
-async def begin(pool, user_id, event_id, now):
+async def begin(pool: asyncpg.Pool, user_id: int, event_id: str, now: datetime) -> EventClaim:
     async with pool.acquire() as conn, conn.transaction():
         inserted = await conn.fetchrow(
             """INSERT INTO agent_events(user_id,event_id,updated_at) VALUES($1,$2,$3)
@@ -17,6 +23,8 @@ async def begin(pool, user_id, event_id, now):
             user_id,
             event_id,
         )
+        assert row is not None
+
         if row["result"]:
             result = row["result"]
             return {
@@ -35,7 +43,7 @@ async def begin(pool, user_id, event_id, now):
         return {"claimed": False, "calls_used": row["calls_used"]}
 
 
-async def reserve(pool, user_id, event_id, limit):
+async def reserve(pool: asyncpg.Pool, user_id: int, event_id: str, limit: int) -> bool:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """UPDATE agent_events SET calls_used=calls_used+1 WHERE user_id=$1 AND event_id=$2
@@ -47,19 +55,21 @@ async def reserve(pool, user_id, event_id, limit):
     return row is not None
 
 
-async def finish(pool, user_id, event_id, result, now):
+async def finish(
+    pool: asyncpg.Pool, user_id: int, event_id: str, result: Mapping[str, object], now: datetime
+) -> None:
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE agent_events SET state='done',result=$3::jsonb,updated_at=$4 "
             "WHERE user_id=$1 AND event_id=$2",
             user_id,
             event_id,
-            json.dumps(result),
+            json.dumps(dict(result)),
             now,
         )
 
 
-async def fail(pool, user_id, event_id, now):
+async def fail(pool: asyncpg.Pool, user_id: int, event_id: str, now: datetime) -> None:
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE agent_events SET state='failed',updated_at=$3 WHERE user_id=$1 AND event_id=$2",

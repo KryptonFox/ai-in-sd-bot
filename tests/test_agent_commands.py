@@ -97,6 +97,7 @@ async def test_timezone_invalid_zone_gets_friendly_response(
 
     await agent_commands.handle_timezone(make_message("/timezone Invalid/Zone"), service)
 
+    assert send.await_args is not None
     response = send.await_args.args[1]
     assert "часовой пояс" in response
     assert "Invalid/Zone" not in response
@@ -134,6 +135,7 @@ async def test_confirmation_callback_calls_service_under_queue_and_sends_result(
     assert service.queue_manager.acquisitions == [(42, True)]
     service.confirm_action.assert_awaited_once_with(42, identifier, cancel=cancel)
     edit_markup.assert_awaited_once_with(reply_markup=None)
+    assert send.await_args is not None
     assert send.await_args.args == (message, "Готово")
 
 
@@ -155,6 +157,7 @@ async def test_error_result_preserves_confirmation_markup(monkeypatch: pytest.Mo
     )
 
     edit_markup.assert_not_awaited()
+    assert send.await_args is not None
     assert send.await_args.args == (message, "Действие недоступно")
 
 
@@ -173,6 +176,7 @@ async def test_confirmation_ignores_markup_removal_failure(monkeypatch: pytest.M
     )
 
     edit_markup.assert_awaited_once_with(reply_markup=None)
+    assert send.await_args is not None
     assert send.await_args.args == (message, "Готово")
 
 
@@ -195,4 +199,4 @@ def test_confirmation_keyboard_callback_data_fits_telegram_limit() -> None:
     keyboard = agent_commands.get_confirmation_keyboard(identifier)
     callback_values = [button.callback_data for row in keyboard.inline_keyboard for button in row]
     assert callback_values == [f"confirm:{identifier}", f"cancel:{identifier}"]
-    assert all(len(value) < 64 for value in callback_values)
+    assert all(value is not None and len(value) < 64 for value in callback_values)

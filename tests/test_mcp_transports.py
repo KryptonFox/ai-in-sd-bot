@@ -4,9 +4,10 @@ from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
-from mcp import ClientSession
+from mcp import ClientSession, types
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
+from pydantic import AnyUrl
 
 from app.mcp_server.__main__ import http_app
 from app.mcp_server.config import ServerSettings
@@ -161,17 +162,21 @@ async def test_stdio_transport_discovers_and_calls_server(tmp_path):
             ]
 
             schedule = await session.call_tool("get_schedule", {"date": "2030-01-02"})
+            assert schedule.structuredContent is not None
             assert schedule.isError is not True
             assert schedule.structuredContent["lessons"][0]["title"] == "Распределённые системы"
             repeated = await session.call_tool("get_schedule", {"date": "2030-01-02"})
             assert repeated.structuredContent == schedule.structuredContent
 
             weather = await session.call_tool("get_weather", {"city": "Москва"})
+            assert weather.structuredContent is not None
             assert weather.isError is not True
             assert weather.structuredContent["temperature"] == 8.0
 
-            week = await session.read_resource("schedule://current-week")
-            week_data = json.loads(week.contents[0].text)
+            week = await session.read_resource(AnyUrl("schedule://current-week"))
+            content = week.contents[0]
+            assert isinstance(content, types.TextResourceContents)
+            week_data = json.loads(content.text)
             assert len(week_data["days"]) == 7
 
             extra_field = await session.call_tool(
@@ -221,17 +226,21 @@ async def test_streamable_http_transport_auth_and_mcp_contract(tmp_path):
                         assert len(resources.resources) == 1
 
                         schedule = await session.call_tool("get_schedule", {"date": "2030-01-02"})
+                        assert schedule.structuredContent is not None
                         assert schedule.isError is not True
                         assert (
                             schedule.structuredContent["lessons"][0]["title"]
                             == "Распределённые системы"
                         )
                         weather = await session.call_tool("get_weather", {"city": "Москва"})
+                        assert weather.structuredContent is not None
                         assert weather.isError is not True
                         assert weather.structuredContent["status"] == "ok"
 
-                        week = await session.read_resource("schedule://current-week")
-                        assert len(json.loads(week.contents[0].text)["days"]) == 7
+                        week = await session.read_resource(AnyUrl("schedule://current-week"))
+                        content = week.contents[0]
+                        assert isinstance(content, types.TextResourceContents)
+                        assert len(json.loads(content.text)["days"]) == 7
                         malformed = await session.call_tool(
                             "get_schedule", {"date": "2030-01-02", "unexpected": True}
                         )

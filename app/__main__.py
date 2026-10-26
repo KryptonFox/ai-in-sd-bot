@@ -60,7 +60,7 @@ async def run(settings: Settings) -> None:
         )
         dialog_service = DialogService(state.pool, settings, llm_client, agent=agent)
 
-        async def recovery_loop():
+        async def recovery_loop() -> None:
             while True:
                 try:
                     await confirmations.recover()

@@ -365,7 +365,11 @@ async def test_conversion_failure_does_not_request_another_llm_answer(message, m
     service = SimpleNamespace(
         process_user_message=AsyncMock(return_value="**answer**"), queue_manager=None
     )
-    await _execute_dialog(message, service, 42, "question")
+    from typing import cast
+
+    from app.services.dialog_service import DialogService
+
+    await _execute_dialog(message, cast(DialogService, service), 42, "question")
     service.process_user_message.assert_awaited_once_with(42, "question")
     message.answer.assert_awaited_once()
     assert message.answer.call_args.args[0] == "**answer**"

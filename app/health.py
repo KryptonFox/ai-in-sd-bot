@@ -4,13 +4,15 @@ from dataclasses import dataclass
 import asyncpg
 from aiohttp import web
 
+from app.core.ports import ToolClient
+
 
 @dataclass
 class HealthState:
     pool: asyncpg.Pool | None = None
     initialized: bool = False
     polling_task: asyncio.Task | None = None
-    mcp: object | None = None
+    mcp: ToolClient | None = None
 
 
 async def health_result(state: HealthState) -> tuple[int, dict[str, str]]:

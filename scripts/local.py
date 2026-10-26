@@ -26,7 +26,7 @@ def prepare_env(
     path = root / (".env.cloud" if cloud else ".env")
     existing = dotenv_values(path, interpolate=False)
     process = dict(os.environ if environ is None else environ)
-    values = {**existing, **process}
+    values = {key: value for key, value in {**existing, **process}.items() if value is not None}
     updates = {}
     defaults = {
         "POSTGRES_HOST": "db" if cloud else "127.0.0.1",

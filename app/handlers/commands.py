@@ -65,7 +65,7 @@ async def handle_mode_switch(message: Message, dialog_service: DialogService) ->
 
 @router.callback_query(F.data.startswith("set_role:") | F.data.startswith("set_mode:"))
 async def handle_role_callback(callback: CallbackQuery, dialog_service: DialogService) -> None:
-    if not callback.data or not callback.message:
+    if not callback.data or not isinstance(callback.message, Message):
         return
 
     role_id = callback.data.split(":", 1)[1]
@@ -146,7 +146,7 @@ async def handle_settings(message: Message, dialog_service: DialogService) -> No
 
 @router.callback_query(F.data.startswith("set_temp:"))
 async def handle_temp_callback(callback: CallbackQuery, dialog_service: DialogService) -> None:
-    if not callback.data or not callback.message:
+    if not callback.data or not isinstance(callback.message, Message):
         return
 
     val_str = callback.data.split(":", 1)[1]

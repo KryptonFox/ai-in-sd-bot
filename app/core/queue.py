@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from app.core.exceptions import QueueFullError
@@ -34,7 +34,7 @@ class UserQueueManager:
             return self._active_counts.get(user_id, 0)
 
     @asynccontextmanager
-    async def acquire(self, user_id: int, ignore_limits: bool = False) -> AsyncIterator[int]:
+    async def acquire(self, user_id: int, ignore_limits: bool = False) -> AsyncGenerator[int]:
         """Захватывает очередь для пользователя.
 
         Yields:

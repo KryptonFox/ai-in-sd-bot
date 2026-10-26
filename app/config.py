@@ -171,7 +171,7 @@ class Settings:
         if transport not in {"stdio", "streamable-http"}:
             raise ConfigError("MCP_TRANSPORT: используйте stdio или streamable-http.")
 
-        def bounded(key, default, low, high):
+        def bounded(key: str, default: int, low: int, high: int) -> int:
             try:
                 number = int(value(key, str(default)))
                 if not low <= number <= high:

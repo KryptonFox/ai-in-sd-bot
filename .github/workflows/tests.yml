@@ -23,6 +23,7 @@ jobs:
       - run: uv sync --locked
       - run: uv run --locked ruff check .
       - run: uv run --locked ruff format --check .
+      - run: uv run --locked ty check
       - run: uv pip check
       - run: uv run --locked pytest -q
       - if: runner.os == 'Linux'

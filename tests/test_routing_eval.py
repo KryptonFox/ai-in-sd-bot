@@ -1,5 +1,7 @@
 import scripts.run_routing_eval as routing_eval
 from scripts.run_routing_eval import (
+    ExpectedDecision,
+    ScoredDecision,
     _app_python_sha256,
     _markdown_report,
     normalize_arguments,
@@ -10,7 +12,7 @@ from scripts.run_routing_eval import (
 
 
 def test_route_error_also_counts_as_argument_error():
-    case = {
+    case: ExpectedDecision = {
         "expected_action": "get_weather",
         "expected_arguments": {"city": "Санкт-Петербург"},
     }
@@ -43,7 +45,7 @@ def test_argument_normalization_uses_trim_casefold_and_instant():
 
 
 def test_summary_uses_full_routing_and_tool_argument_denominators():
-    cases = [
+    cases: list[ScoredDecision] = [
         {"route_correct": True, "arguments_applicable": True, "arguments_correct": True},
         {"route_correct": False, "arguments_applicable": True, "arguments_correct": False},
         {"route_correct": True, "arguments_applicable": False, "arguments_correct": None},

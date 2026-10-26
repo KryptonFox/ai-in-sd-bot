@@ -1,11 +1,19 @@
 import json
 import uuid
+from collections.abc import Mapping
+from datetime import datetime
+
+import asyncpg
 
 from app.core.schemas.tools import ReminderArguments, ReminderResult, ToolFailure
 
 
 async def create_confirmed_reminder(
-    pool, identifier: str, user_id: int, arguments: dict, now
+    pool: asyncpg.Pool,
+    identifier: str,
+    user_id: int,
+    arguments: Mapping[str, object],
+    now: datetime,
 ) -> ReminderResult:
     async with pool.acquire() as conn, conn.transaction():
         pending = await conn.fetchrow(
@@ -42,6 +50,8 @@ async def create_confirmed_reminder(
                 pending["idempotency_key"],
             )
             created = True
+        assert existing is not None
+
         return ReminderResult(
             id=existing["id"],
             text=existing["text"],
@@ -51,7 +61,7 @@ async def create_confirmed_reminder(
         )
 
 
-async def find_result(pool, key):
+async def find_result(pool: asyncpg.Pool, key: str) -> dict[str, object] | None:
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM reminders WHERE idempotency_key=$1", key)
     if row is None:

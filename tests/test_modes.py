@@ -16,8 +16,12 @@ def test_mode_registry_default():
     reg.register(REVIEW_MODE)
 
     assert reg.get_or_default("unknown").id == "study"
-    assert reg.get("translate").name == "Переводчик"
-    assert reg.get("review").command == "review"
+    translate = reg.get("translate")
+    review = reg.get("review")
+    assert translate is not None
+    assert review is not None
+    assert translate.name == "Переводчик"
+    assert review.command == "review"
     assert "study" in reg.commands()
     assert "translate" in reg.commands()
     assert "review" in reg.commands()

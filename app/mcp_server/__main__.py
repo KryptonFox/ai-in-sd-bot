@@ -2,30 +2,35 @@ import argparse
 import asyncio
 import hmac
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+import asyncpg
 import httpx
 import uvicorn
+from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.applications import Starlette
+from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
+from starlette.types import Receive, Scope, Send
 
 from app.db.connection import create_pool
 from app.mcp_server.config import ServerSettings
 from app.mcp_server.server import build_server
 
 
-def http_app(server, secret: str, pool):
+def http_app(server: Server, secret: str, pool: asyncpg.Pool) -> Starlette:
     manager = StreamableHTTPSessionManager(server, json_response=True, stateless=True)
 
     @asynccontextmanager
-    async def lifespan(app):
+    async def lifespan(app: Starlette) -> AsyncGenerator[None]:
         async with manager.run():
             yield
 
-    async def health(request):
+    async def health(request: Request) -> JSONResponse:
         try:
             healthy = await pool.fetchval("SELECT 1", timeout=3) == 1
         except Exception:
@@ -34,7 +39,7 @@ def http_app(server, secret: str, pool):
             {"status": "ok" if healthy else "unavailable"}, status_code=200 if healthy else 503
         )
 
-    async def endpoint(scope, receive, send):
+    async def endpoint(scope: Scope, receive: Receive, send: Send) -> None:
         headers = {k.lower(): v for k, v in scope.get("headers", [])}
         authorization = headers.get(b"authorization", b"").decode("latin-1")
         if not hmac.compare_digest(authorization, f"Bearer {secret}"):
@@ -47,7 +52,7 @@ def http_app(server, secret: str, pool):
     )
 
 
-async def run(settings, transport):
+async def run(settings: ServerSettings, transport: str) -> None:
     pool = await create_pool(settings)
     try:
         async with httpx.AsyncClient(timeout=5) as http:
@@ -69,7 +74,7 @@ async def run(settings, transport):
         await pool.close()
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--transport", choices=["stdio", "streamable-http"])
     parser.add_argument("--env-file", default=".env")

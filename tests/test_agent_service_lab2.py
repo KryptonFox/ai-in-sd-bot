@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
@@ -7,7 +8,7 @@ import pytest
 from app.config import Settings
 from app.core.clock import FrozenClock
 from app.core.schemas.agent import AgentResult, EventContext
-from app.core.schemas.llm import LLMResponse
+from app.core.schemas.llm import LLMRequest, LLMResponse
 from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.mcp.client import MCPClient
 from app.mcp_server.server import tool_catalog
@@ -45,16 +46,20 @@ def weather_result(**updates) -> dict:
     return result
 
 
+class MockToolClient(MCPClient):
+    call_tool: AsyncMock
+
+
 def make_agent(
     responses: list[LLMResponse],
     *,
     max_tool_calls: int = 2,
     max_llm_steps: int = 4,
     confirmations=None,
-) -> tuple[AgentService, MagicMock, MCPClient]:
+) -> tuple[AgentService, MagicMock, MockToolClient]:
     llm = MagicMock()
     llm.generate = AsyncMock(side_effect=responses)
-    mcp = MCPClient(settings())
+    mcp = MockToolClient(settings())
     mcp.load_catalog(tool_catalog())
     mcp.call_tool = AsyncMock(return_value=weather_result())
     service = AgentService(
@@ -339,6 +344,7 @@ async def test_confirmation_prepare_receives_remaining_budget_after_read() -> No
     assert result.decision == "prepare"
     mcp.call_tool.assert_awaited_once_with("get_schedule", {"date": "2026-10-12"})
     confirmations.prepare.assert_awaited_once()
+    assert confirmations.prepare.await_args is not None
     assert confirmations.prepare.await_args.kwargs["calls_remaining"] == 1
 
 
@@ -418,3 +424,58 @@ async def test_dry_run_does_not_prepare_confirmation_or_call_mutation() -> None:
     assert result.decision == "prepare"
     confirmations.prepare.assert_not_awaited()
     mcp.call_tool.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_agent_runs_keep_tool_context_and_arguments_separate() -> None:
+    service, llm, mcp = make_agent([])
+    both_calls_started = asyncio.Event()
+    calls_started = 0
+
+    async def generate(request: LLMRequest) -> LLMResponse:
+        tool_messages = [msg for msg in request.messages if msg.role == MessageRole.TOOL]
+        if tool_messages:
+            payload = json.loads(tool_messages[0].content)
+            return LLMResponse(content=payload["data"]["date"])
+
+        query = next(msg.content for msg in request.messages if msg.role == MessageRole.USER)
+        return LLMResponse(
+            content="",
+            tool_calls=[tool_call("get_schedule", {"date": query}, identifier=query)],
+        )
+
+    async def read_schedule(name: str, arguments: dict[str, object]) -> dict[str, object]:
+        nonlocal calls_started
+        assert name == "get_schedule"
+        calls_started += 1
+        if calls_started == 2:
+            both_calls_started.set()
+
+        await both_calls_started.wait()
+        return {"date": arguments["date"], "lessons": []}
+
+    llm.generate = AsyncMock(side_effect=generate)
+    mcp.call_tool = AsyncMock(side_effect=read_schedule)
+
+    async def ask(user_id: int, date: str) -> AgentResult:
+        messages = [
+            ChatMessage(role=MessageRole.SYSTEM, content="System policy"),
+            ChatMessage(role=MessageRole.USER, content=date),
+        ]
+        request_context = EventContext(
+            user_id=user_id, event_id=f"event:{user_id}", request_id=f"request:{user_id}"
+        )
+        return await service.run(messages, request_context)
+
+    first, second = await asyncio.wait_for(
+        asyncio.gather(ask(1, "2026-10-12"), ask(2, "2026-10-13")),
+        timeout=2,
+    )
+
+    assert first.text == "2026-10-12"
+    assert second.text == "2026-10-13"
+    assert first.arguments == {"date": "2026-10-12"}
+    assert second.arguments == {"date": "2026-10-13"}
+    assert first.decision == second.decision == "tool"
+    assert mcp.call_tool.await_count == 2
+    assert llm.generate.await_count == 4

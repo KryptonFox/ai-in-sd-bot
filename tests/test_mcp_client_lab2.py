@@ -6,20 +6,21 @@ import time
 from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import cast
 from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
+import asyncpg
 import httpx
 import pytest
 import uvicorn
 from jsonschema import Draft202012Validator, FormatChecker
 from mcp import types
-from test_integration import database as database_fixture
 
 from app.config import Settings
 from app.core.clock import FrozenClock
 from app.core.schemas.agent import EventContext
-from app.core.schemas.tools import ToolFailure
+from app.core.schemas.tools import ScheduleResult, ToolFailure, WeekSchedule
 from app.db.connection import create_pool
 from app.mcp.client import MCPClient
 from app.mcp_server.__main__ import http_app
@@ -28,11 +29,6 @@ from app.mcp_server.server import build_server, tool_catalog
 from app.services.confirmation_service import ConfirmationService
 
 SECRET = "mcp-client-unit-secret"
-
-
-@pytest.fixture
-def integration_database():
-    yield from database_fixture.__wrapped__()
 
 
 def make_client() -> MCPClient:
@@ -119,6 +115,7 @@ def test_discovered_arguments_enforce_real_iso_date_and_nonblank_text() -> None:
 def test_tool_output_schemas_accept_error_structured_content_union() -> None:
     error_content = {"error": {"code": "invalid_arguments", "message": "Проверьте параметры."}}
     for tool in tool_catalog():
+        assert tool.outputSchema is not None
         Draft202012Validator(tool.outputSchema, format_checker=FormatChecker()).validate(
             error_content
         )
@@ -273,10 +270,10 @@ async def test_client_can_close_and_start_again(monkeypatch: pytest.MonkeyPatch)
     reason="Включите RUN_INTEGRATION=1 для Docker-тестов",
 )
 async def test_stdio_client_discovers_reads_and_confirms_reminder_with_database(
-    integration_database, tmp_path
+    database, tmp_path
 ) -> None:
 
-    base_settings, *_ = integration_database
+    base_settings, *_ = database
     today = datetime.now(ZoneInfo("Europe/Moscow")).date()
     monday = today.fromordinal(today.toordinal() - today.weekday())
     schedule = {
@@ -319,11 +316,15 @@ async def test_stdio_client_discovers_reads_and_confirms_reminder_with_database(
         assert await client.start() is True
         assert set(client.tools) == {"get_weather", "get_schedule", "add_reminder"}
         schedule_result = await client.call_tool("get_schedule", {"date": today.isoformat()})
-        assert schedule_result["lessons"][0]["title"] == "Интеграционная лекция"
+        assert (
+            ScheduleResult.model_validate(schedule_result).lessons[0].title
+            == "Интеграционная лекция"
+        )
         week_result = await client.read_week()
         assert week_result["start_date"] == monday.isoformat()
-        day = next(item for item in week_result["days"] if item["date"] == today.isoformat())
-        assert day["lessons"][0]["title"] == "Интеграционная лекция"
+        week = WeekSchedule.model_validate(week_result)
+        day = next(item for item in week.days if item.date == today.isoformat())
+        assert day.lessons[0].title == "Интеграционная лекция"
 
         prepared = await confirmations.prepare(
             context,
@@ -376,7 +377,7 @@ async def test_streamable_http_client_reads_and_rejects_bad_auth(tmp_path) -> No
     weather_http = httpx.AsyncClient(
         transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"results": []}))
     )
-    pool = ReadOnlyPool()
+    pool = cast(asyncpg.Pool, ReadOnlyPool())
     app = http_app(build_server(pool, server_settings, weather_http), secret, pool)
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))

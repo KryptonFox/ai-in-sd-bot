@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import math
 import uuid
 from contextlib import nullcontext
 
@@ -56,7 +57,7 @@ async def _send_typing(message: Message) -> None:
             await message.bot.send_chat_action(
                 chat_id=message.chat.id,
                 action=ChatAction.TYPING,
-                request_timeout=TYPING_INTERVAL,
+                request_timeout=math.ceil(TYPING_INTERVAL),
             )
         except Exception:
             logger.debug("Не удалось отправить статус typing")

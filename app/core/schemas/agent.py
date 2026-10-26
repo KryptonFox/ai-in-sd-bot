@@ -1,6 +1,8 @@
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+type AgentDecision = Literal["respond", "clarify", "tool", "prepare", "error"]
 
 
 class ResponseDecision(BaseModel):
@@ -11,10 +13,10 @@ class ResponseDecision(BaseModel):
 
 class AgentResult(BaseModel):
     text: str
-    decision: Literal["respond", "clarify", "tool", "prepare", "error"] = "respond"
+    decision: AgentDecision = "respond"
     confirmation_id: str | None = None
     tool_name: str | None = None
-    arguments: dict[str, Any] = Field(default_factory=dict)
+    arguments: dict[str, object] = Field(default_factory=dict)
 
 
 class EventContext(BaseModel):

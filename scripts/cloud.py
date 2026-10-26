@@ -1,3 +1,4 @@
+import argparse
 import base64
 import ipaddress
 import json
@@ -10,6 +11,7 @@ import time
 from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
+from typing import NotRequired, TypedDict
 from urllib.request import urlopen
 
 from app.config import Settings
@@ -100,9 +102,35 @@ def source_archive(root: Path) -> Path:
     return archive_path
 
 
+class ResourceReference(TypedDict, total=False):
+    id: str
+    name: str
+    managed: bool
+
+
+class CloudConfig(TypedDict):
+    zone: str
+    platform: str
+    cores: int
+    core_fraction: int
+    memory: int
+    disk_size: int
+
+
+class CloudState(TypedDict):
+    version: int
+    folder_id: str
+    owner: str
+    resources: dict[str, ResourceReference]
+    config: NotRequired[CloudConfig]
+    ssh_cidr: NotRequired[str]
+
+
 class Cloud:
     def __init__(self, root: Path, *, folder_id: str, yc: Callable):
-        self.root, self.yc = root, yc
+        self.root = root
+        self.yc = yc
+        self.state: CloudState
         self.directory = root / ".deploy"
         self.state_path = self.directory / "state.json"
         self.directory.mkdir(exist_ok=True)
@@ -264,8 +292,8 @@ class Cloud:
 
         return key
 
-    def provision(self, args) -> dict:
-        defaults = {
+    def provision(self, args: argparse.Namespace) -> dict:
+        defaults: CloudConfig = {
             "zone": "ru-central1-a",
             "platform": "standard-v2",
             "cores": 2,
@@ -273,9 +301,16 @@ class Cloud:
             "memory": 1,
             "disk_size": 20,
         }
-        config = {**defaults, **self.state.get("config", {})}
+        config: CloudConfig = {**defaults, **self.state.get("config", {})}
         config.update(
-            {key: getattr(args, key) for key in defaults if getattr(args, key) is not None}
+            zone=args.zone if args.zone is not None else config["zone"],
+            platform=args.platform if args.platform is not None else config["platform"],
+            cores=args.cores if args.cores is not None else config["cores"],
+            core_fraction=(
+                args.core_fraction if args.core_fraction is not None else config["core_fraction"]
+            ),
+            memory=args.memory if args.memory is not None else config["memory"],
+            disk_size=args.disk_size if args.disk_size is not None else config["disk_size"],
         )
 
         if "config" in self.state and config != self.state["config"]:
@@ -542,7 +577,7 @@ class Cloud:
         print("Доступ по SSH обновлён.")
 
 
-def cloud_main(root: Path, args) -> int:
+def cloud_main(root: Path, args: argparse.Namespace) -> int:
     for command in ["ssh", "ssh-keygen"]:
         if not shutil.which(command):
             raise CommandError(f"Установите OpenSSH: не найдена команда {command}.")
@@ -585,6 +620,7 @@ def cloud_main(root: Path, args) -> int:
         elif args.action == "access":
             deployment.access(args.ssh_cidr)
         elif args.action == "up":
+            assert settings is not None
             print("Перед деплоем остановите локальный бот с этим же токеном.", flush=True)
             instance = deployment.provision(args)
             if instance.get("status") == "STOPPED":

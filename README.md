@@ -17,7 +17,7 @@
 - **Форматирование Telegram:** `telegramify-markdown==1.4.1` (текст + entities, готовое разбиение)
 - **Служебный HTTP-сервер:** `aiohttp` (эндпоинт `/health` на порту 8080 для Docker и оркестраторов)
 - **Контейнеризация:** Docker, Docker Compose
-- **Тестирование и линтинг:** `pytest`, `pytest-asyncio`, `ruff`
+- **Проверки:** `pytest`, `pytest-asyncio`, `ruff`, `ty`; управление окружением через `uv`
 
 
 ---
@@ -289,6 +289,13 @@ bash scripts/start.sh --setup-only
   uv run --locked ruff check .
   ```
 
+- **Проверка типов приложения, скриптов и тестов:**
+  ```bash
+  uv run --locked ty check
+  ```
+  Версии инструментов зафиксированы в `uv.lock`; CI выполняет эту же команду.
+  Описания типов `asyncpg-stubs` установлены только в окружении разработки.
+
 - **Автоформатирование кода:**
   ```bash
   uv run --locked ruff format .
@@ -391,6 +398,11 @@ docker compose --profile cloud up --build -d
 приёмки: [план 04](docs/plans/lab2/04-lab2-implementation.md). Текущие результаты
 и оставшиеся проверки: [отчёт lab2](docs/report-lab2.md). Требования курса:
 [раздел lab2 методички](docs/labs-guide.md#lab2).
+
+Маршрут сообщения и обязанности методов описаны в
+[схеме AgentService](docs/architecture/agent-service.md). `run` проверяет повтор
+события, создаёт отдельное состояние обработки и запускает ограниченный цикл.
+Выполнение инструментов, подготовка подтверждений и аудит выделены в отдельные методы.
 
 ### Подготовка SDK, промптов и Telegram
 

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 import pytest
-from test_integration import database as database
+from conftest import DatabaseFixture
 
 from app.core.clock import FrozenClock
 from app.core.schemas.agent import EventContext
@@ -32,7 +32,9 @@ class InsertThenTimeoutMCP:
         self.fail_after_insert = fail_after_insert
         self.calls = 0
 
-    async def call_tool(self, name, arguments, *, user_id, confirmation_id):
+    async def call_tool(self, name, arguments, *, user_id=None, confirmation_id=None):
+        assert user_id is not None
+        assert confirmation_id is not None
         self.calls += 1
         assert name == "add_reminder"
         result = await reminder_repo.create_confirmed_reminder(
@@ -51,7 +53,9 @@ class TimeoutBeforeInsertMCP:
     def __init__(self):
         self.calls = 0
 
-    async def call_tool(self, name, arguments, *, user_id, confirmation_id):
+    async def call_tool(self, name, arguments, *, user_id=None, confirmation_id=None):
+        assert user_id is not None
+        assert confirmation_id is not None
         self.calls += 1
         assert name == "add_reminder"
         raise ToolFailure("mcp_timeout", "response lost")
@@ -72,7 +76,7 @@ def _arguments(now: datetime, text: str = "проверить расписани
     }
 
 
-async def test_confirmation_prepare_claim_and_reminder_idempotency(database):
+async def test_confirmation_prepare_claim_and_reminder_idempotency(database: DatabaseFixture):
     settings, *_ = database
     pool = await create_pool(settings)
     now = datetime(2031, 5, 1, 12, 0, tzinfo=ZoneInfo("Europe/Moscow"))
@@ -89,6 +93,7 @@ async def test_confirmation_prepare_claim_and_reminder_idempotency(database):
             service.prepare(context, original, "Europe/Moscow", position=0, calls_remaining=2),
         )
         row_before = await confirmation_repo.find_event(pool, context.user_id, context.event_id)
+        assert row_before is not None
         later_service = ConfirmationService(
             pool,
             mcp,
@@ -102,7 +107,9 @@ async def test_confirmation_prepare_claim_and_reminder_idempotency(database):
             position=0,
             calls_remaining=2,
         )
+        assert repeated.confirmation_id is not None
         row_after = await confirmation_repo.find_event(pool, context.user_id, context.event_id)
+        assert row_after is not None
 
         assert first.confirmation_id == second.confirmation_id == repeated.confirmation_id
         assert row_after["arguments"] == original
@@ -115,6 +122,7 @@ async def test_confirmation_prepare_claim_and_reminder_idempotency(database):
         assert await service.existing(_context(context.user_id + 1, context.event_id)) is None
         denied = await service.confirm(context.user_id + 1, row_after["id"])
         denied_audit = await latest_decision(pool, context.user_id + 1)
+        assert denied_audit is not None
         assert denied.decision == "error"
         assert denied_audit["event_id"] == "confirmation:denied"
         assert denied_audit["execution"] == "denied"
@@ -127,6 +135,7 @@ async def test_confirmation_prepare_claim_and_reminder_idempotency(database):
             position=0,
             calls_remaining=2,
         )
+        assert expired_result.confirmation_id is not None
         expired_service = ConfirmationService(
             pool,
             mcp,
@@ -142,7 +151,9 @@ async def test_confirmation_prepare_claim_and_reminder_idempotency(database):
             expired_context.user_id,
             expired_context.event_id,
         )
+        assert expired_row is not None
         expired_audit = await latest_decision(pool, expired_context.user_id)
+        assert expired_audit is not None
         assert expired_result_status.decision == "respond"
         assert expired_row["state"] == "expired"
         assert expired_audit["event_id"] == expired_context.event_id
@@ -157,6 +168,7 @@ async def test_confirmation_prepare_claim_and_reminder_idempotency(database):
             position=0,
             calls_remaining=2,
         )
+        assert cancelled_result.confirmation_id is not None
         cancelled_result_status = await service.confirm(
             cancelled_context.user_id,
             cancelled_result.confirmation_id,
@@ -167,7 +179,9 @@ async def test_confirmation_prepare_claim_and_reminder_idempotency(database):
             cancelled_context.user_id,
             cancelled_context.event_id,
         )
+        assert cancelled_row is not None
         cancelled_audit = await latest_decision(pool, cancelled_context.user_id)
+        assert cancelled_audit is not None
         assert cancelled_result_status.decision == "respond"
         assert cancelled_row["state"] == "cancelled"
         assert cancelled_audit["event_id"] == cancelled_context.event_id
@@ -182,6 +196,7 @@ async def test_confirmation_prepare_claim_and_reminder_idempotency(database):
             position=0,
             calls_remaining=2,
         )
+        assert prepared.confirmation_id is not None
         outcomes = await asyncio.gather(
             service.confirm(confirm_context.user_id, prepared.confirmation_id),
             service.confirm(confirm_context.user_id, prepared.confirmation_id),
@@ -189,6 +204,7 @@ async def test_confirmation_prepare_claim_and_reminder_idempotency(database):
         pending = await confirmation_repo.find_event(
             pool, confirm_context.user_id, confirm_context.event_id
         )
+        assert pending is not None
 
         assert mcp.calls == 1
         assert pending["state"] == "succeeded"
@@ -226,6 +242,7 @@ async def test_confirmation_prepare_claim_and_reminder_idempotency(database):
         assert changed_payload.value.code == "unauthorized"
 
         audit = await latest_decision(pool, confirm_context.user_id)
+        assert audit is not None
         assert audit["event_id"] == confirm_context.event_id
         assert audit["execution"] == "succeeded"
         assert set(audit["arguments"]) == {"text", "remind_at"}
@@ -234,7 +251,7 @@ async def test_confirmation_prepare_claim_and_reminder_idempotency(database):
         await pool.close()
 
 
-async def test_lost_mcp_response_recovers_from_committed_reminder(database):
+async def test_lost_mcp_response_recovers_from_committed_reminder(database: DatabaseFixture):
     settings, *_ = database
     pool = await create_pool(settings)
     now = datetime(2032, 6, 1, 12, 0, tzinfo=ZoneInfo("Europe/Moscow"))
@@ -251,8 +268,10 @@ async def test_lost_mcp_response_recovers_from_committed_reminder(database):
             position=0,
             calls_remaining=2,
         )
+        assert prepared.confirmation_id is not None
         result = await service.confirm(context.user_id, prepared.confirmation_id)
         pending = await confirmation_repo.find_event(pool, context.user_id, context.event_id)
+        assert pending is not None
 
         assert result.decision == "error"
         assert pending["state"] == "executing"
@@ -263,12 +282,15 @@ async def test_lost_mcp_response_recovers_from_committed_reminder(database):
         mcp.clock = service.clock
         await service.recover()
         recovered = await confirmation_repo.find_event(pool, context.user_id, context.event_id)
+        assert recovered is not None
+        assert recovered["result"] is not None
 
         assert mcp.calls == 1
         assert recovered["state"] == "succeeded"
         assert recovered["calls_remaining"] == 1
         assert await pool.fetchval("SELECT count(*) FROM reminders WHERE user_id=$1", 903) == 1
         audit = await latest_decision(pool, context.user_id)
+        assert audit is not None
         assert audit["event_id"] == context.event_id
         assert audit["execution"] == "succeeded"
         assert audit["reason"] == "recovered_committed_result"
@@ -276,7 +298,7 @@ async def test_lost_mcp_response_recovers_from_committed_reminder(database):
         await pool.close()
 
 
-async def test_event_retry_preserves_call_budget_and_caches_result(database):
+async def test_event_retry_preserves_call_budget_and_caches_result(database: DatabaseFixture):
     settings, *_ = database
     pool = await create_pool(settings)
     now = datetime(2033, 7, 1, 12, 0, tzinfo=ZoneInfo("Europe/Moscow"))
@@ -311,6 +333,7 @@ async def test_event_retry_preserves_call_budget_and_caches_result(database):
             user_id,
             event_id,
         )
+        assert row is not None
         stored_result = row["result"]
         if isinstance(stored_result, str):
             stored_result = json.loads(stored_result)
@@ -324,7 +347,9 @@ async def test_event_retry_preserves_call_budget_and_caches_result(database):
         await pool.close()
 
 
-async def test_new_pending_cancels_old_but_replay_does_not_cancel_other_pending(database):
+async def test_new_pending_cancels_old_but_replay_does_not_cancel_other_pending(
+    database: DatabaseFixture,
+):
     settings, *_ = database
     pool = await create_pool(settings)
     now = datetime(2034, 8, 1, 12, 0, tzinfo=ZoneInfo("Europe/Moscow"))
@@ -353,7 +378,9 @@ async def test_new_pending_cancels_old_but_replay_does_not_cancel_other_pending(
             position=0,
             calls_remaining=2,
         )
+        assert old_result.confirmation_id is not None
         old_before = await confirmation_repo.find_event(pool, 905, old_context.event_id)
+        assert old_before is not None
         new_result = await next_service.prepare(
             new_context,
             _arguments(now + timedelta(seconds=10), "новое напоминание"),
@@ -361,6 +388,7 @@ async def test_new_pending_cancels_old_but_replay_does_not_cancel_other_pending(
             position=0,
             calls_remaining=2,
         )
+        assert new_result.confirmation_id is not None
         replayed = await replay_service.prepare(
             old_context,
             _arguments(now + timedelta(seconds=20), "изменённый повтор"),
@@ -369,7 +397,9 @@ async def test_new_pending_cancels_old_but_replay_does_not_cancel_other_pending(
             calls_remaining=2,
         )
         old_after = await confirmation_repo.find_event(pool, 905, old_context.event_id)
+        assert old_after is not None
         new_after = await confirmation_repo.find_event(pool, 905, new_context.event_id)
+        assert new_after is not None
 
         assert old_before["state"] == "pending"
         assert old_after["state"] == "cancelled"
@@ -385,7 +415,7 @@ async def test_new_pending_cancels_old_but_replay_does_not_cancel_other_pending(
         await pool.close()
 
 
-async def test_recovery_exhausts_remaining_calls_without_third_rpc(database):
+async def test_recovery_exhausts_remaining_calls_without_third_rpc(database: DatabaseFixture):
     settings, *_ = database
     pool = await create_pool(settings)
     now = datetime(2035, 9, 1, 12, 0, tzinfo=ZoneInfo("Europe/Moscow"))
@@ -402,8 +432,10 @@ async def test_recovery_exhausts_remaining_calls_without_third_rpc(database):
             position=0,
             calls_remaining=2,
         )
+        assert prepared.confirmation_id is not None
         first_result = await service.confirm(context.user_id, prepared.confirmation_id)
         after_first = await confirmation_repo.find_event(pool, context.user_id, context.event_id)
+        assert after_first is not None
 
         assert first_result.decision == "error"
         assert mcp.calls == 1
@@ -414,6 +446,7 @@ async def test_recovery_exhausts_remaining_calls_without_third_rpc(database):
         service.clock = FrozenClock(now + timedelta(seconds=31))
         await service.recover()
         after_retry = await confirmation_repo.find_event(pool, context.user_id, context.event_id)
+        assert after_retry is not None
 
         assert mcp.calls == 2
         assert after_retry["state"] == "executing"
@@ -424,7 +457,9 @@ async def test_recovery_exhausts_remaining_calls_without_third_rpc(database):
         await service.recover()
         await service.recover()
         failed = await confirmation_repo.find_event(pool, context.user_id, context.event_id)
+        assert failed is not None
         audit = await latest_decision(pool, context.user_id)
+        assert audit is not None
 
         assert mcp.calls == 2
         assert failed["state"] == "failed"
@@ -438,7 +473,7 @@ async def test_recovery_exhausts_remaining_calls_without_third_rpc(database):
         await pool.close()
 
 
-async def test_exhausted_recovery_waits_for_inflight_commit(database):
+async def test_exhausted_recovery_waits_for_inflight_commit(database: DatabaseFixture):
     settings, *_ = database
     pool = await create_pool(settings)
     now = datetime(2036, 9, 1, 12, 0, tzinfo=ZoneInfo("Europe/Moscow"))
@@ -450,7 +485,9 @@ async def test_exhausted_recovery_waits_for_inflight_commit(database):
         proposal = await service.prepare(
             context, _arguments(now), "Europe/Moscow", position=0, calls_remaining=1
         )
+        assert proposal.confirmation_id is not None
         row = await confirmation_repo.claim(pool, proposal.confirmation_id, context.user_id, now)
+        assert row is not None
         assert row["calls_remaining"] == 0
         service.clock = FrozenClock(now + timedelta(seconds=31))
         async with pool.acquire() as conn, conn.transaction():
@@ -480,6 +517,8 @@ async def test_exhausted_recovery_waits_for_inflight_commit(database):
             )
         await asyncio.wait_for(recovery, timeout=5)
         recovered = await confirmation_repo.find_event(pool, context.user_id, context.event_id)
+        assert recovered is not None
+        assert recovered["result"] is not None
         assert recovered["state"] == "succeeded"
         assert recovered["result"]["created"] is False
         assert recovered["calls_remaining"] == 0

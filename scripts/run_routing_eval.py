@@ -3,13 +3,14 @@ import asyncio
 import hashlib
 import json
 import re
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Literal, NotRequired, TypedDict, cast
 
 from app.core.clock import FrozenClock
 from app.core.context import set_request_id
-from app.core.schemas.agent import EventContext
+from app.core.schemas.agent import AgentResult, EventContext
 from app.core.schemas.message import ChatMessage, MessageRole
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,7 +18,83 @@ DATASET_PATH = ROOT / "docs/evaluation/lab2-routing.json"
 TOOL_ACTIONS = {"get_weather", "get_schedule", "add_reminder"}
 
 
-def _datetime_instant(value: Any) -> str | None:
+class ExpectedDecision(TypedDict):
+    expected_action: str
+    expected_arguments: dict[str, object]
+
+
+class RoutingCase(ExpectedDecision):
+    id: str
+    query: str
+
+
+class EvaluationContext(TypedDict):
+    now: str
+    timezone: str
+
+
+class EvaluationDataset(TypedDict):
+    version: int
+    evaluation_context: EvaluationContext
+    cases: list[RoutingCase]
+
+
+class ScoredDecision(TypedDict):
+    route_correct: bool
+    arguments_applicable: bool
+    arguments_correct: bool | None
+
+
+class CaseScore(ScoredDecision):
+    success: bool
+
+
+class CaseResult(CaseScore, ExpectedDecision):
+    id: str
+    predicted_action: str
+    arguments: dict[str, object]
+    error_class: NotRequired[str]
+    public_answer: NotRequired[str]
+
+
+class EvaluationSummary(TypedDict):
+    routing_correct: int
+    routing_total: int
+    routing_accuracy: float
+    arguments_correct: int
+    arguments_total: int
+    arguments_accuracy: float
+
+
+class EvaluationCounts(TypedDict):
+    planned: int
+    attempted: int
+    decisions_received: int
+    not_run: int
+
+
+class MarkdownReport(TypedDict):
+    label: str
+    measurement_status: Literal["completed", "incomplete", "unavailable"]
+    counts: EvaluationCounts
+    summary: EvaluationSummary
+    cases: list[CaseResult]
+
+
+class EvaluationReport(MarkdownReport):
+    model: str
+    temperature: float
+    clock: str
+    timezone: str
+    revision: str | None
+    dirty: bool | None
+    app_python_sha256: str
+    created_at: str
+    max_tool_calls: int
+    max_llm_steps: int
+
+
+def _datetime_instant(value: object) -> str | None:
     if isinstance(value, datetime):
         parsed = value
     elif isinstance(value, str):
@@ -32,7 +109,7 @@ def _datetime_instant(value: Any) -> str | None:
     return parsed.astimezone(UTC).isoformat()
 
 
-def normalize_value(key: str, value: Any) -> Any:
+def normalize_value(key: str, value: object) -> object:
     if key == "remind_at":
         instant = _datetime_instant(value)
         return instant if instant is not None else value
@@ -45,17 +122,17 @@ def normalize_value(key: str, value: Any) -> Any:
     return value
 
 
-def normalize_arguments(arguments: dict[str, Any] | None) -> dict[str, Any]:
+def normalize_arguments(arguments: Mapping[str, object] | None) -> dict[str, object]:
     if not isinstance(arguments, dict):
         return {}
     return {key: normalize_value(key, value) for key, value in arguments.items()}
 
 
 def score_case(
-    case: dict[str, Any],
+    case: ExpectedDecision,
     predicted_action: str,
-    arguments: dict[str, Any],
-) -> dict[str, Any]:
+    arguments: Mapping[str, object],
+) -> CaseScore:
     expected_action = case["expected_action"]
     expected_arguments = case.get("expected_arguments", {})
     route_correct = predicted_action == expected_action
@@ -73,7 +150,7 @@ def score_case(
     }
 
 
-def summarize_cases(cases: list[dict[str, Any]]) -> dict[str, int | float]:
+def summarize_cases(cases: Sequence[ScoredDecision]) -> EvaluationSummary:
     route_total = len(cases)
     route_correct = sum(bool(case["route_correct"]) for case in cases)
     argument_cases = [case for case in cases if case["arguments_applicable"]]
@@ -88,7 +165,7 @@ def summarize_cases(cases: list[dict[str, Any]]) -> dict[str, int | float]:
     }
 
 
-def _action_for_result(result: Any) -> str:
+def _action_for_result(result: AgentResult) -> str:
     if result.decision in {"respond", "clarify"}:
         return result.decision
     if result.decision in {"tool", "prepare"}:
@@ -113,7 +190,7 @@ def _is_connection_failure(error: Exception) -> bool:
     return False
 
 
-def _markdown_report(result: dict[str, Any]) -> str:
+def _markdown_report(result: MarkdownReport) -> str:
     summary = result["summary"]
     counts = result["counts"]
     if result["measurement_status"] == "completed":
@@ -163,7 +240,7 @@ def _markdown_report(result: dict[str, Any]) -> str:
 
 async def run_evaluation(case_ids: set[str] | None, output_dir: Path, label: str) -> Path:
     dataset_text = await asyncio.to_thread(DATASET_PATH.read_text, encoding="utf-8")
-    dataset = json.loads(dataset_text)
+    dataset = cast(EvaluationDataset, json.loads(dataset_text))
     cases = dataset["cases"]
     if case_ids is not None:
         known = {case["id"] for case in cases}
@@ -193,7 +270,7 @@ async def run_evaluation(case_ids: set[str] | None, output_dir: Path, label: str
         max_tool_calls=settings.agent_max_tool_calls,
         max_llm_steps=settings.agent_max_llm_steps,
     )
-    result_cases: list[dict[str, Any]] = []
+    result_cases: list[CaseResult] = []
     connection_failures = 0
     stopped = False
     attempted = 0
@@ -201,7 +278,7 @@ async def run_evaluation(case_ids: set[str] | None, output_dir: Path, label: str
 
     try:
         for case in cases:
-            row: dict[str, Any] = {
+            row: CaseResult = {
                 "id": case["id"],
                 "expected_action": case["expected_action"],
                 "expected_arguments": case.get("expected_arguments", {}),
@@ -240,7 +317,11 @@ async def run_evaluation(case_ids: set[str] | None, output_dir: Path, label: str
                 row["predicted_action"] = predicted_action
                 row["public_answer"] = agent_result.text
                 row["arguments"] = predicted_arguments
-                row.update(score_case(case, predicted_action, predicted_arguments))
+                score = score_case(case, predicted_action, predicted_arguments)
+                row["route_correct"] = score["route_correct"]
+                row["arguments_applicable"] = score["arguments_applicable"]
+                row["arguments_correct"] = score["arguments_correct"]
+                row["success"] = score["success"]
                 if agent_result.decision == "error":
                     row["error_class"] = "AgentResultError"
             except Exception as exc:
@@ -259,13 +340,13 @@ async def run_evaluation(case_ids: set[str] | None, output_dir: Path, label: str
         await mcp.aclose()
 
     summary = summarize_cases(result_cases)
-    counts = {
+    counts: EvaluationCounts = {
         "planned": len(cases),
         "attempted": attempted,
         "decisions_received": decisions_received,
         "not_run": len(cases) - attempted,
     }
-    measurement_status = (
+    measurement_status: Literal["completed", "incomplete", "unavailable"] = (
         "completed"
         if counts["planned"] > 0 and decisions_received == counts["planned"]
         else "incomplete"
@@ -277,7 +358,7 @@ async def run_evaluation(case_ids: set[str] | None, output_dir: Path, label: str
     safe_label = re.sub(r"[^A-Za-z0-9_.-]+", "-", label).strip("-._") or "baseline"
     await asyncio.to_thread(output_dir.mkdir, parents=True, exist_ok=True)
     stem = f"lab2-routing-{safe_label}-{stamp}"
-    output = {
+    output: EvaluationReport = {
         "label": label,
         "model": settings.llm_model,
         "temperature": 0.0,

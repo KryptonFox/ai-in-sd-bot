@@ -1,10 +1,13 @@
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 from app.core.schemas.tools import ReminderArguments, ToolFailure
 
 
-def normalize_reminder(arguments: dict, timezone: str | None, now: datetime) -> ReminderArguments:
+def normalize_reminder(
+    arguments: Mapping[str, object], timezone: str | None, now: datetime
+) -> ReminderArguments:
     if timezone is None:
         raise ToolFailure(
             "timezone_required", "Сначала задайте часовой пояс: /timezone Europe/Moscow."

@@ -39,7 +39,7 @@ def test_tool_argument_dtos_strip_and_reject_invalid_values() -> None:
     with pytest.raises(ValidationError):
         ReminderArguments(text="  ", remind_at="2026-10-27T12:00:00")
     with pytest.raises(ValidationError):
-        ScheduleArguments(date="2026-10-26", path="/tmp/schedule.json")
+        ScheduleArguments.model_validate({"date": "2026-10-26", "path": "/tmp/schedule.json"})
     aware_datetime = datetime(2026, 10, 27, 12, tzinfo=UTC)
     assert ReminderArguments(text="work", remind_at=aware_datetime).remind_at == aware_datetime
     with pytest.raises(ValidationError):
@@ -57,6 +57,7 @@ def test_weather_schema_enforces_status_requirements_and_candidate_count() -> No
     from app.mcp_server.server import tool_catalog
 
     schema = next(tool.outputSchema for tool in tool_catalog() if tool.name == "get_weather")
+    assert schema is not None
     validator = Draft202012Validator(schema)
     valid_ok = {
         "status": "ok",
@@ -84,9 +85,9 @@ def test_weather_schema_enforces_status_requirements_and_candidate_count() -> No
         {"status": "ambiguous", "candidates": valid_ambiguous["candidates"][:1]}
     )
     with pytest.raises(ValidationError):
-        WeatherResult(**{**valid_ok, "temperature": float("inf")})
+        WeatherResult.model_validate({**valid_ok, "temperature": float("inf")})
     with pytest.raises(ValidationError):
-        WeatherResult(**{**valid_ok, "wind_speed": float("nan")})
+        WeatherResult.model_validate({**valid_ok, "wind_speed": float("nan")})
 
 
 def test_normalize_reminder_rejects_past_missing_timezone_and_offset_mismatch() -> None:

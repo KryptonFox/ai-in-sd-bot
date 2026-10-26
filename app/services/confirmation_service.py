@@ -1,22 +1,38 @@
-from app.core.clock import SystemClock
+from collections.abc import Mapping
+
+import asyncpg
+
+from app.core.clock import Clock, SystemClock
 from app.core.context import get_request_id
+from app.core.ports import ToolExecutor
 from app.core.schemas.agent import AgentResult, EventContext
 from app.core.schemas.tools import ToolFailure
 from app.core.timezones import normalize_reminder
+from app.db.records import ConfirmationRecord
 from app.db.repositories import confirmation_repo as repo
 from app.db.repositories.audit_repo import record_decision
 
 
 class ConfirmationService:
-    def __init__(self, pool, mcp, clock=None, ttl=300):
-        self.pool, self.mcp, self.clock, self.ttl = pool, mcp, clock or SystemClock(), ttl
+    def __init__(
+        self,
+        pool: asyncpg.Pool,
+        mcp: ToolExecutor,
+        clock: Clock | None = None,
+        ttl: int = 300,
+    ) -> None:
+        self.pool = pool
+        self.mcp = mcp
+        self.clock = clock or SystemClock()
+        self.ttl = ttl
 
-    async def existing(self, context: EventContext):
+    async def existing(self, context: EventContext) -> AgentResult | None:
         row = await repo.find_event(self.pool, context.user_id, context.event_id)
         return self.describe(row) if row else None
 
-    def describe(self, row):
+    def describe(self, row: ConfirmationRecord) -> AgentResult:
         if row["state"] == "succeeded":
+            assert row["result"] is not None
             return self.success(row["result"])
         if row["state"] != "pending":
             return AgentResult(
@@ -42,7 +58,7 @@ class ConfirmationService:
         )
 
     @staticmethod
-    def success(payload):
+    def success(payload: Mapping[str, object]) -> AgentResult:
         return AgentResult(
             text=(
                 f"Напоминание №{payload['id']} сохранено.\n{payload['text']}\n"
@@ -52,14 +68,23 @@ class ConfirmationService:
             tool_name="add_reminder",
         )
 
-    async def prepare(self, context, arguments, timezone, *, position, calls_remaining):
+    async def prepare(
+        self,
+        context: EventContext,
+        arguments: Mapping[str, object],
+        timezone: str | None,
+        *,
+        position: int,
+        calls_remaining: int,
+    ) -> AgentResult:
         normalized = normalize_reminder(arguments, timezone, self.clock.now())
+        assert timezone is not None
         row = await repo.prepare(
             self.pool,
             user_id=context.user_id,
             event_id=context.event_id,
             position=position,
-            arguments=normalized.model_dump(mode="json"),
+            arguments={"text": normalized.text, "remind_at": normalized.remind_at.isoformat()},
             timezone=timezone,
             now=self.clock.now(),
             ttl=self.ttl,
@@ -68,7 +93,7 @@ class ConfirmationService:
         )
         return self.describe(row)
 
-    async def confirm(self, user_id, identifier, *, cancel=False):
+    async def confirm(self, user_id: int, identifier: str, *, cancel: bool = False) -> AgentResult:
         try:
             row = await repo.claim(self.pool, identifier, user_id, self.clock.now(), cancel=cancel)
         except ValueError:
@@ -94,7 +119,14 @@ class ConfirmationService:
             return self.describe(row)
         return await self._execute(row)
 
-    async def _audit(self, row, execution, *, reason, duration_ms=0):
+    async def _audit(
+        self,
+        row: ConfirmationRecord,
+        execution: str,
+        *,
+        reason: str,
+        duration_ms: float = 0,
+    ) -> None:
         await record_decision(
             self.pool,
             user_id=row["user_id"],
@@ -109,7 +141,7 @@ class ConfirmationService:
             created_at=self.clock.now(),
         )
 
-    async def _execute(self, row):
+    async def _execute(self, row: ConfirmationRecord) -> AgentResult:
         now = self.clock.now()
         try:
             payload = await self.mcp.call_tool(
@@ -145,7 +177,7 @@ class ConfirmationService:
         )
         return result
 
-    async def recover(self):
+    async def recover(self) -> None:
         from app.db.repositories.reminder_repo import find_result
 
         for row in await repo.recoverable(self.pool, self.clock.now()):

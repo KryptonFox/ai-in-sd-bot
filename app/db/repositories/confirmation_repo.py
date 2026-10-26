@@ -1,22 +1,24 @@
 import json
 import uuid
 from datetime import datetime, timedelta
+from typing import cast
+
+import asyncpg
 
 from app.core.schemas.tools import ReminderResult
+from app.db.records import ConfirmationRecord
 
 
-def decode_record(row) -> dict | None:
-    if row is None:
-        return None
+def decode_record(row: asyncpg.Record) -> ConfirmationRecord:
     result = dict(row)
     for key in ("arguments", "result"):
         if isinstance(result.get(key), str):
             result[key] = json.loads(result[key])
     result["id"] = str(result["id"])
-    return result
+    return cast(ConfirmationRecord, result)
 
 
-async def find_event(pool, user_id: int, event_id: str) -> dict | None:
+async def find_event(pool: asyncpg.Pool, user_id: int, event_id: str) -> ConfirmationRecord | None:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT * FROM pending_confirmations WHERE user_id=$1 AND event_id=$2 "
@@ -24,22 +26,22 @@ async def find_event(pool, user_id: int, event_id: str) -> dict | None:
             user_id,
             event_id,
         )
-    return decode_record(row)
+    return decode_record(row) if row is not None else None
 
 
 async def prepare(
-    pool,
+    pool: asyncpg.Pool,
     *,
     user_id: int,
     event_id: str,
     position: int,
-    arguments: dict,
+    arguments: dict[str, str],
     timezone: str,
     now: datetime,
     ttl: int,
     calls_remaining: int,
     request_id: str,
-) -> dict:
+) -> ConfirmationRecord:
     identifier = uuid.uuid4()
     key = f"reminder:{identifier}"
     async with pool.acquire() as conn, conn.transaction():
@@ -77,10 +79,18 @@ async def prepare(
             calls_remaining,
             request_id,
         )
+    assert row is not None
     return decode_record(row)
 
 
-async def claim(pool, identifier: str, user_id: int, now: datetime, *, cancel=False) -> dict | None:
+async def claim(
+    pool: asyncpg.Pool,
+    identifier: str,
+    user_id: int,
+    now: datetime,
+    *,
+    cancel: bool = False,
+) -> ConfirmationRecord | None:
     async with pool.acquire() as conn, conn.transaction():
         row = await conn.fetchrow(
             "SELECT * FROM pending_confirmations WHERE id=$1 FOR UPDATE", uuid.UUID(identifier)
@@ -104,6 +114,8 @@ async def claim(pool, identifier: str, user_id: int, now: datetime, *, cancel=Fa
                 state,
                 now,
             )
+        assert row is not None
+
         if row["state"] == "confirmed":
             row = await conn.fetchrow(
                 """UPDATE pending_confirmations SET state='executing',execution_started_at=$2,
@@ -111,6 +123,7 @@ async def claim(pool, identifier: str, user_id: int, now: datetime, *, cancel=Fa
                 uuid.UUID(identifier),
                 now,
             )
+            assert row is not None
             result = decode_record(row)
             result["claimed"] = True
             return result
@@ -119,7 +132,9 @@ async def claim(pool, identifier: str, user_id: int, now: datetime, *, cancel=Fa
     return result
 
 
-async def complete(pool, identifier: str, result: dict, now: datetime) -> None:
+async def complete(
+    pool: asyncpg.Pool, identifier: str, result: dict[str, object], now: datetime
+) -> None:
     async with pool.acquire() as conn:
         await conn.execute(
             """UPDATE pending_confirmations SET state='succeeded',result=$2::jsonb,
@@ -130,7 +145,7 @@ async def complete(pool, identifier: str, result: dict, now: datetime) -> None:
         )
 
 
-async def mark_failed(pool, identifier: str, code: str, now: datetime) -> None:
+async def mark_failed(pool: asyncpg.Pool, identifier: str, code: str, now: datetime) -> None:
     async with pool.acquire() as conn:
         await conn.execute(
             """UPDATE pending_confirmations SET state='failed',error_code=$2,updated_at=$3
@@ -141,7 +156,7 @@ async def mark_failed(pool, identifier: str, code: str, now: datetime) -> None:
         )
 
 
-async def recoverable(pool, now: datetime) -> list[dict]:
+async def recoverable(pool: asyncpg.Pool, now: datetime) -> list[ConfirmationRecord]:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """SELECT * FROM pending_confirmations WHERE state IN ('confirmed','executing')
@@ -152,7 +167,9 @@ async def recoverable(pool, now: datetime) -> list[dict]:
     return [decode_record(row) for row in rows]
 
 
-async def recover_claim(pool, identifier: str, now: datetime) -> dict | None:
+async def recover_claim(
+    pool: asyncpg.Pool, identifier: str, now: datetime
+) -> ConfirmationRecord | None:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """UPDATE pending_confirmations SET state='executing',updated_at=$2,
@@ -164,10 +181,12 @@ async def recover_claim(pool, identifier: str, now: datetime) -> dict | None:
             uuid.UUID(identifier),
             now,
         )
-    return decode_record(row)
+    return decode_record(row) if row is not None else None
 
 
-async def finalize_exhausted(pool, identifier: str, now: datetime) -> dict | None:
+async def finalize_exhausted(
+    pool: asyncpg.Pool, identifier: str, now: datetime
+) -> ConfirmationRecord | None:
     async with pool.acquire() as conn, conn.transaction():
         row = await conn.fetchrow(
             "SELECT * FROM pending_confirmations WHERE id=$1 FOR UPDATE", uuid.UUID(identifier)
@@ -195,4 +214,4 @@ async def finalize_exhausted(pool, identifier: str, now: datetime) -> dict | Non
             None if result is not None else "call_budget",
             now,
         )
-    return decode_record(updated)
+    return decode_record(updated) if updated is not None else None

@@ -4,7 +4,7 @@ import logging
 import asyncpg
 
 from app.config import Settings
-from app.core.clock import SystemClock
+from app.core.clock import Clock, SystemClock
 from app.core.context import get_request_id
 from app.core.exceptions import InvalidModeError, InvalidTemperatureError, LLMServiceError
 from app.core.queue import UserQueueManager
@@ -28,6 +28,7 @@ from app.llm.base import BaseLLMClient
 from app.modes.base import BotMode
 from app.modes.registry import ModeRegistry, registry
 from app.prompts.compaction import compaction_messages, summary_message
+from app.services.agent_service import AgentService
 
 logger = logging.getLogger("app.services.dialog")
 
@@ -40,8 +41,8 @@ class DialogService:
         llm_client: BaseLLMClient,
         mode_registry: ModeRegistry = registry,
         queue_manager: UserQueueManager | None = None,
-        agent=None,
-        clock=None,
+        agent: AgentService | None = None,
+        clock: Clock | None = None,
     ) -> None:
         self._pool = pool
         self._settings = settings
@@ -207,7 +208,7 @@ class DialogService:
 
         return (user, mode)
 
-    async def tools_status(self):
+    async def tools_status(self) -> str:
         if self.agent is None or not self.agent.mcp.available:
             return "MCP-инструменты сейчас недоступны."
         lines = ["**Доступные инструменты:**"]
@@ -216,7 +217,7 @@ class DialogService:
             lines.append(f"- `{tool.name}` — {tool.description} ({access})")
         return "\n".join(lines)
 
-    async def timezone_status(self, user_id, zone=None):
+    async def timezone_status(self, user_id: int, zone: str | None = None) -> str:
         from zoneinfo import ZoneInfo
 
         if zone is not None:
@@ -229,7 +230,7 @@ class DialogService:
         local_now = self.clock.now().astimezone(ZoneInfo(zone)).isoformat()
         return f"Часовой пояс: {zone}. Текущее время: {local_now}"
 
-    async def why(self, user_id):
+    async def why(self, user_id: int) -> str:
         record = await latest_decision(self._pool, user_id)
         if record is None:
             return "Решений пока нет. Отправьте запрос."
@@ -240,7 +241,9 @@ class DialogService:
             f"Длительность: {record['duration_ms']:.0f} мс\nПричина: {record['reason']}"
         )
 
-    async def confirm_action(self, user_id, identifier, *, cancel=False):
+    async def confirm_action(
+        self, user_id: int, identifier: str, *, cancel: bool = False
+    ) -> AgentResult:
         if self.agent is None or self.agent.confirmations is None:
             return AgentResult(text="Подтверждения недоступны.", decision="error")
         return await self.agent.confirmations.confirm(user_id, identifier, cancel=cancel)

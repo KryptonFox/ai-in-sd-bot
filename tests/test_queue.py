@@ -140,7 +140,11 @@ async def test_sequential_messages_in_dialog_handler():
         return LLMResponse(content=f"Ответ {call_count}")
 
     mock_llm.generate = AsyncMock(side_effect=fake_generate)
-    service = DialogService(pool, settings, mock_llm, registry)
+    from typing import cast
+
+    import asyncpg
+
+    service = DialogService(cast(asyncpg.Pool, pool), settings, mock_llm, registry)
 
     bot = Bot(settings.bot_token)
     sent_methods = []

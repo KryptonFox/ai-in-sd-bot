@@ -122,17 +122,19 @@ async def test_application_closes_llm_at_every_lifecycle_boundary(monkeypatch, f
     runner = Mock(cleanup=AsyncMock())
     dispatcher = Mock(start_polling=AsyncMock())
     monkeypatch.setattr(application, "OpenAIClient", Mock(return_value=llm))
-    monkeypatch.setattr(application, "create_pool", AsyncMock(return_value=pool))
+    create_pool = AsyncMock(return_value=pool)
+    start_health_server = AsyncMock(return_value=runner)
+    monkeypatch.setattr(application, "create_pool", create_pool)
     monkeypatch.setattr(application, "create_bot", Mock(return_value=bot))
     monkeypatch.setattr(application, "Dispatcher", Mock(return_value=dispatcher))
     monkeypatch.setattr(application, "setup_bot_commands", AsyncMock())
-    monkeypatch.setattr(application, "start_health_server", AsyncMock(return_value=runner))
+    monkeypatch.setattr(application, "start_health_server", start_health_server)
     if failure == "db":
-        application.create_pool.side_effect = RuntimeError
+        create_pool.side_effect = RuntimeError
     elif failure == "telegram":
         bot.get_me.side_effect = RuntimeError
     elif failure == "health":
-        application.start_health_server.side_effect = RuntimeError
+        start_health_server.side_effect = RuntimeError
     elif failure == "polling":
         dispatcher.start_polling.side_effect = RuntimeError
     if failure == "none":

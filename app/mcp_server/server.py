@@ -2,28 +2,31 @@ import hmac
 import json
 from typing import Any
 
+import asyncpg
 import httpx
 from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.helper_types import ReadResourceContents
-from pydantic import ValidationError
+from pydantic import AnyUrl, BaseModel, ValidationError
 
-from app.core.clock import SystemClock
+from app.core.clock import Clock, SystemClock
 from app.core.schemas.tools import (
     ReminderArguments,
     ReminderResult,
     ScheduleArguments,
     ScheduleResult,
+    ToolDTO,
     ToolErrorResult,
     ToolFailure,
     WeatherArguments,
     WeatherResult,
 )
 from app.db.repositories.reminder_repo import create_confirmed_reminder
+from app.mcp_server.config import ServerSettings
 from app.mcp_server.schedule import ScheduleService
 from app.mcp_server.weather import WeatherService
 
-TOOL_MODELS = {
+TOOL_MODELS: dict[str, tuple[type[ToolDTO], type[ToolDTO], str]] = {
     "get_weather": (
         WeatherArguments,
         WeatherResult,
@@ -56,11 +59,11 @@ def tool_catalog() -> list[types.Tool]:
     ]
 
 
-def output_schema(result):
+def output_schema(result: type[BaseModel]) -> dict[str, Any]:
     success = result.model_json_schema()
     error = ToolErrorResult.model_json_schema()
     definitions = {**success.pop("$defs", {}), **error.pop("$defs", {})}
-    schema = {"type": "object", "anyOf": [success, error]}
+    schema: dict[str, Any] = {"type": "object", "anyOf": [success, error]}
     if definitions:
         schema["$defs"] = definitions
     return schema
@@ -75,22 +78,29 @@ def error_result(code: str, message: str) -> types.CallToolResult:
     )
 
 
-def build_server(pool, settings, http: httpx.AsyncClient, clock=None) -> Server:
+def build_server(
+    pool: asyncpg.Pool,
+    settings: ServerSettings,
+    http: httpx.AsyncClient,
+    clock: Clock | None = None,
+) -> Server:
     clock = clock or SystemClock()
     weather = WeatherService(http)
     schedule = ScheduleService(settings.schedule_path, settings.schedule_timezone, clock)
     server = Server("itmo-student-tools")
 
     @server.list_tools()
-    async def list_tools():
+    async def list_tools() -> list[types.Tool]:
         return tool_catalog()
 
     @server.call_tool(validate_input=False)
-    async def call_tool(name: str, arguments: dict[str, Any]):
+    async def call_tool(name: str, arguments: dict[str, Any]) -> types.CallToolResult:
         try:
             if name not in TOOL_MODELS:
                 raise ToolFailure("unknown_tool", "Инструмент не разрешён.")
             arguments = TOOL_MODELS[name][0].model_validate(arguments).model_dump(mode="json")
+            result: ToolDTO
+
             if name == "get_weather":
                 result = await weather.get_weather(arguments["city"])
             elif name == "get_schedule":
@@ -125,7 +135,7 @@ def build_server(pool, settings, http: httpx.AsyncClient, clock=None) -> Server:
             return error_result("service_unavailable", "Инструмент временно недоступен.")
 
     @server.list_resources()
-    async def list_resources():
+    async def list_resources() -> list[types.Resource]:
         return [
             types.Resource(
                 uri="schedule://current-week",
@@ -136,7 +146,7 @@ def build_server(pool, settings, http: httpx.AsyncClient, clock=None) -> Server:
         ]
 
     @server.read_resource()
-    async def read_resource(uri):
+    async def read_resource(uri: AnyUrl) -> list[ReadResourceContents]:
         if str(uri) != "schedule://current-week":
             raise ValueError("Ресурс не разрешён.")
         try:

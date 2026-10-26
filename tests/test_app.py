@@ -104,6 +104,9 @@ async def test_proxy_is_attached_to_bot_session(settings, proxy):
     config = replace(settings, telegram_proxy_url=proxy)
     bot = create_bot(config)
 
+    from aiogram.client.session.aiohttp import AiohttpSession
+
+    assert isinstance(bot.session, AiohttpSession)
     assert bot.session._proxy == proxy
 
     await bot.session.close()

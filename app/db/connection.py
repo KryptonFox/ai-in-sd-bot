@@ -1,10 +1,28 @@
+from typing import Protocol
+
 import asyncpg
 
-from app.config import Settings
 from app.db.migrations.runner import run_migrations
 
 
-async def create_pool(settings: Settings) -> asyncpg.Pool:
+class DatabaseSettings(Protocol):
+    @property
+    def postgres_host(self) -> str: ...
+
+    @property
+    def postgres_port(self) -> int: ...
+
+    @property
+    def postgres_db(self) -> str: ...
+
+    @property
+    def postgres_user(self) -> str: ...
+
+    @property
+    def postgres_password(self) -> str: ...
+
+
+async def create_pool(settings: DatabaseSettings) -> asyncpg.Pool:
     pool = await asyncpg.create_pool(
         host=settings.postgres_host,
         port=settings.postgres_port,

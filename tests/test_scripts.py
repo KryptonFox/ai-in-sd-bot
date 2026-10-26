@@ -19,7 +19,9 @@ def test_first_setup_and_repeat_preserve_secrets(tmp_path):
     prepare_env(root, cloud=False, ask=Mock(side_effect=AssertionError), environ={})
 
     assert path.read_bytes() == first
-    assert len(dotenv_values(path)["POSTGRES_PASSWORD"]) >= 24
+    password = dotenv_values(path)["POSTGRES_PASSWORD"]
+    assert password is not None
+    assert len(password) >= 24
     assert dotenv_values(path)["POSTGRES_HOST"] == "127.0.0.1"
 
 
@@ -38,7 +40,9 @@ def test_cloud_requires_proxy_and_has_separate_password(tmp_path):
     assert config["POSTGRES_HOST"] == "db"
     assert config["POSTGRES_PASSWORD"] != dotenv_values(tmp_path / ".env")["POSTGRES_PASSWORD"]
     assert config["TELEGRAM_PROXY_URL"] == "socks5://user:p%40ss@proxy:1080"
-    assert len(config["MCP_SHARED_SECRET"]) >= 32
+    mcp_secret = config["MCP_SHARED_SECRET"]
+    assert mcp_secret is not None
+    assert len(mcp_secret) >= 32
 
     first = path.read_bytes()
     prepare_env(tmp_path, cloud=True, ask=Mock(side_effect=AssertionError), environ={})
