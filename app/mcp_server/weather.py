@@ -1,66 +1,62 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from datetime import date
+from typing import cast
+from zoneinfo import ZoneInfo
 
 import httpx
 from pydantic import ValidationError
 
-from app.core.schemas.tools import CityCandidate, ToolFailure, WeatherResult
+from app.core.clock import Clock, SystemClock
+from app.core.schemas.tools import CityCandidate, DailyForecast, ToolFailure, WeatherResult
+from app.mcp_server.geocoding import GeoLocation, LocationResolver
 
 
 class WeatherService:
     geocoding_url = "https://geocoding-api.open-meteo.com/v1/search"
     forecast_url = "https://api.open-meteo.com/v1/forecast"
 
-    def __init__(self, client: httpx.AsyncClient) -> None:
+    def __init__(self, client: httpx.AsyncClient, *, clock: Clock | None = None) -> None:
         self._client = client
+        self._clock = clock or SystemClock()
+        self._locations = LocationResolver(self._fetch)
 
     async def get_weather(self, city: str) -> WeatherResult:
-        city = city.strip()
-        if not 1 <= len(city) <= 100:
-            raise ToolFailure("invalid_city", "Укажите город длиной от 1 до 100 символов.")
-        requested_city, requested_country = self._split_location(city)
-        params: dict[str, str | int] = {
-            "name": requested_city,
-            "count": 10,
-            "language": "ru",
-            "format": "json",
-        }
+        locations = await self._locations.resolve(city)
+        if not locations:
+            return WeatherResult(status="not_found")
+        if len(locations) > 1:
+            return WeatherResult(
+                status="ambiguous",
+                candidates=[
+                    CityCandidate(name=place.name, country=place.country, region=place.admin1)
+                    for place in locations
+                ],
+            )
+        return await self._weather_for(locations[0])
+
+    async def _fetch(self, url: str, params: dict[str, str | int]) -> dict[str, object]:
+        response = await self._get(url, params)
         try:
-            geo_response = await self._get(self.geocoding_url, params)
-            geo_data = geo_response.json()
-        except ToolFailure:
-            raise
-        except (ValueError, TypeError) as exc:
+            data = response.json()
+        except ValueError:
             raise ToolFailure(
                 "weather_unavailable", "Сервис погоды вернул некорректные данные."
-            ) from exc
-        if not isinstance(geo_data, dict) or not isinstance(geo_data.get("results", []), list):
-            raise ToolFailure(
-                "weather_unavailable", "Сервис геокодирования вернул некорректные данные."
-            )
-        results = geo_data.get("results") or []
-        if requested_country:
-            results = [item for item in results if self._qualifier_matches(item, requested_country)]
-        if not results:
-            return WeatherResult(status="not_found")
-        candidates = [self._candidate(item) for item in results if self._valid_geo(item)]
-        if not candidates:
-            raise ToolFailure(
-                "weather_unavailable", "Сервис геокодирования вернул некорректные данные."
-            )
-        if len(candidates) > 1:
-            return WeatherResult(status="ambiguous", candidates=candidates)
-        location = next(item for item in results if self._valid_geo(item))
-        return await self._weather_for(location)
+            ) from None
+        if not isinstance(data, dict):
+            raise ToolFailure("weather_unavailable", "Сервис погоды вернул некорректные данные.")
+        return cast(dict[str, object], data)
 
-    async def _weather_for(self, location: dict[str, Any]) -> WeatherResult:
-        params = {
-            "latitude": location["latitude"],
-            "longitude": location["longitude"],
+    async def _weather_for(self, location: GeoLocation) -> WeatherResult:
+        params: dict[str, str | int] = {
+            "latitude": str(location.latitude),
+            "longitude": str(location.longitude),
             "current": "temperature_2m,weather_code,wind_speed_10m",
             "timezone": "auto",
+            "daily": "precipitation_probability_max,precipitation_sum",
+            "forecast_days": 1,
+            "precipitation_unit": "mm",
         }
         try:
             response = await self._get(self.forecast_url, params)
@@ -85,14 +81,15 @@ class WeatherService:
         try:
             return WeatherResult(
                 status="ok",
-                city=location["name"],
-                country=location.get("country"),
+                city=location.name,
+                country=location.country,
                 temperature=float(current["temperature_2m"]),
                 weather_code=int(current["weather_code"]),
                 wind_speed=float(current["wind_speed_10m"]),
                 wind_unit=units.get("wind_speed_10m", "km/h"),
                 observed_at=str(current["time"]),
                 timezone=data["timezone"],
+                today=self._today(data),
             )
         except (ValueError, TypeError, KeyError, ValidationError) as exc:
             raise ToolFailure(
@@ -120,32 +117,36 @@ class WeatherService:
                 await asyncio.sleep(0)
         raise ToolFailure("weather_unavailable", "Сервис погоды сейчас недоступен.") from last_error
 
-    @staticmethod
-    def _split_location(city: str) -> tuple[str, str | None]:
-        pieces = [part.strip() for part in city.split(",", maxsplit=1)]
-        return pieces[0], pieces[1] if len(pieces) == 2 and pieces[1] else None
-
-    @staticmethod
-    def _qualifier_matches(item: object, qualifier: str) -> bool:
-        return isinstance(item, dict) and any(
-            str(item.get(key, "")).casefold() == qualifier.casefold()
-            for key in ("country", "admin1")
-        )
-
-    @staticmethod
-    def _valid_geo(item: object) -> bool:
-        return (
-            isinstance(item, dict)
-            and isinstance(item.get("name"), str)
-            and isinstance(item.get("country"), str)
-            and isinstance(item.get("latitude"), (int, float))
-            and isinstance(item.get("longitude"), (int, float))
-        )
-
-    @staticmethod
-    def _candidate(item: dict[str, Any]) -> CityCandidate:
-        return CityCandidate(
-            name=item["name"],
-            country=item["country"],
-            region=item.get("admin1") if isinstance(item.get("admin1"), str) else None,
+    def _today(self, data: dict[str, object]) -> DailyForecast | None:
+        daily = data.get("daily")
+        if daily is None:
+            return None
+        if not isinstance(daily, dict):
+            raise ValueError("invalid_daily_forecast")
+        dates = daily.get("time")
+        chances = daily.get("precipitation_probability_max")
+        amounts = daily.get("precipitation_sum")
+        units = data.get("daily_units")
+        if not all(
+            isinstance(values, list) and len(values) == 1 for values in (dates, chances, amounts)
+        ):
+            raise ValueError("invalid_daily_forecast")
+        assert isinstance(dates, list) and isinstance(chances, list) and isinstance(amounts, list)
+        if chances[0] is None or amounts[0] is None:
+            return None
+        if (
+            not isinstance(units, dict)
+            or units.get("precipitation_sum") != "mm"
+            or units.get("precipitation_probability_max") != "%"
+        ):
+            raise ValueError("invalid_daily_units")
+        forecast_date = date.fromisoformat(dates[0])
+        timezone = data.get("timezone")
+        if (
+            not isinstance(timezone, str)
+            or forecast_date != self._clock.now().astimezone(ZoneInfo(timezone)).date()
+        ):
+            raise ValueError("forecast_date_mismatch")
+        return DailyForecast(
+            date=forecast_date, precipitation_probability=chances[0], precipitation=amounts[0]
         )

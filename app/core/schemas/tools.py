@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -62,6 +62,14 @@ class CityCandidate(ToolDTO):
     region: str | None = None
 
 
+class DailyForecast(ToolDTO):
+    date: date
+    precipitation_probability: float = Field(ge=0, le=100, allow_inf_nan=False)
+    precipitation: float = Field(ge=0, allow_inf_nan=False)
+    precipitation_unit: Literal["mm"] = "mm"
+    period: Literal["whole_day"] = "whole_day"
+
+
 class WeatherResult(ToolDTO):
     model_config = ConfigDict(
         extra="forbid",
@@ -119,6 +127,7 @@ class WeatherResult(ToolDTO):
     observed_at: str | None = None
     timezone: str | None = None
     candidates: list[CityCandidate] = Field(default_factory=list)
+    today: DailyForecast | None = None
 
     @model_validator(mode="after")
     def validate_status_fields(self) -> "WeatherResult":

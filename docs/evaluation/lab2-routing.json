@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "evaluation_context": {
     "now": "2026-10-12T09:00:00+03:00",
     "timezone": "Europe/Moscow"
@@ -9,37 +9,49 @@
       "id": "weather_1",
       "query": "Какая сейчас погода в Санкт-Петербурге?",
       "expected_action": "get_weather",
-      "expected_arguments": {"city": "Санкт-Петербург"}
+      "expected_arguments": {
+        "city": "Санкт-Петербург"
+      }
     },
     {
       "id": "weather_2",
       "query": "Нужен ли сегодня зонт в Казани?",
       "expected_action": "get_weather",
-      "expected_arguments": {"city": "Казань"}
+      "expected_arguments": {
+        "city": "Казань"
+      }
     },
     {
       "id": "weather_3",
       "query": "Сколько сейчас градусов в Тбилиси, Грузия?",
       "expected_action": "get_weather",
-      "expected_arguments": {"city": "Тбилиси, Грузия"}
+      "expected_arguments": {
+        "city": "Тбилиси, Грузия"
+      }
     },
     {
       "id": "schedule_1",
       "query": "Какие занятия у меня сегодня?",
       "expected_action": "get_schedule",
-      "expected_arguments": {"date": "2026-10-12"}
+      "expected_arguments": {
+        "date": "2026-10-12"
+      }
     },
     {
       "id": "schedule_2",
       "query": "Покажи расписание на завтра.",
       "expected_action": "get_schedule",
-      "expected_arguments": {"date": "2026-10-13"}
+      "expected_arguments": {
+        "date": "2026-10-13"
+      }
     },
     {
       "id": "schedule_3",
       "query": "Есть ли у меня пары в ближайшее воскресенье?",
       "expected_action": "get_schedule",
-      "expected_arguments": {"date": "2026-10-18"}
+      "expected_arguments": {
+        "date": "2026-10-18"
+      }
     },
     {
       "id": "reminder_1",
@@ -83,6 +95,62 @@
     {
       "id": "clarify_1",
       "query": "Напомни вечером про лабораторную.",
+      "expected_action": "clarify",
+      "expected_arguments": {}
+    },
+    {
+      "id": "weather_4_lowercase",
+      "query": "Нужен ли сегодня зонт в казани?",
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Казань"
+      }
+    },
+    {
+      "id": "weather_5_clothing",
+      "query": "Как одеться сегодня в Нижнем Новгороде?",
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Нижний Новгород"
+      }
+    },
+    {
+      "id": "weather_6_followup",
+      "query": "А зонт сегодня нужен?",
+      "history": [
+        {
+          "role": "user",
+          "content": "Я сейчас в Казани."
+        },
+        {
+          "role": "assistant",
+          "content": "Понял."
+        }
+      ],
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Казань"
+      }
+    },
+    {
+      "id": "weather_7_region",
+      "query": "Погода в Springfield, Illinois?",
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Springfield, Illinois"
+      }
+    },
+    {
+      "id": "weather_8_country",
+      "query": "Будет дождь в Казани, Россия?",
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Казань, Россия"
+      }
+    },
+    {
+      "id": "clarify_weather_no_city",
+      "query": "Нужен ли сегодня зонт?",
       "expected_action": "clarify",
       "expected_arguments": {}
     }
