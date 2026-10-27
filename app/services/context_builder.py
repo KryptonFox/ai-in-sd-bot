@@ -48,7 +48,7 @@ class ContextBuilder:
                 window = self._settings.default_context_length
         except (LLMError, TypeError, ValueError):
             window = self._settings.default_context_length
-        return ContextBudget(window, min(self._settings.llm_max_tokens, window // 4))
+        return ContextBudget(window, min(self._settings.llm_max_tokens, window // 2))
 
     async def build(
         self,

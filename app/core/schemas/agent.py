@@ -9,7 +9,7 @@ type AgentDecision = Literal["respond", "clarify", "tool", "prepare", "error"]
 class ResponseDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
     action: Literal["respond", "clarify"]
-    text: str = Field(min_length=1, max_length=20000)
+    text: str = Field(min_length=1)
 
 
 class AgentResult(BaseModel):

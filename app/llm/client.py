@@ -174,7 +174,7 @@ class OpenAIClient(BaseLLMClient):
         model = request.model or self._settings.llm_model
         started = time.monotonic()
         code = "ok"
-        logger.info("[%s] llm_start model=%r", req_id, model)
+        logger.info("[%s] llm_start model=%r max_tokens=%s", req_id, model, request.max_tokens)
 
         try:
             result = await self._generate(request, model)

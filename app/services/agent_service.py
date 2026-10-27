@@ -28,7 +28,14 @@ FINISH_TOOL = ToolDefinition(
     parameters=ResponseDecision.model_json_schema(),
 )
 CLARIFICATION_ERRORS = frozenset(
-    {"timezone_required", "timezone_mismatch", "ambiguous_time", "past_time", "invalid_arguments"}
+    {
+        "timezone_required",
+        "timezone_mismatch",
+        "ambiguous_time",
+        "past_time",
+        "invalid_arguments",
+        "forecast_date_unavailable",
+    }
 )
 
 
@@ -97,14 +104,14 @@ class AgentService:
     ) -> AgentResult:
         definitions = self.definitions
         for step in range(self._max_steps):
-            budget.ensure(state.conversation, definitions)
+            output_limit = budget.generation_limit(state.conversation, definitions)
             response = await self._llm.generate(
                 LLMRequest(
                     messages=state.conversation,
                     temperature=temperature,
                     model=model,
                     tools=definitions,
-                    max_tokens=budget.output_tokens,
+                    max_tokens=output_limit,
                 )
             )
             outcome = await self._handle_response(state, response, step)

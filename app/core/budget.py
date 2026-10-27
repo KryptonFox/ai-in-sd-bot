@@ -10,7 +10,7 @@ from app.core.schemas.tools import ToolFailure
 @dataclass(frozen=True)
 class ContextBudget:
     window: int
-    output_tokens: int = 1024
+    output_tokens: int = 16384
 
     def estimate(self, messages: Sequence[ChatMessage], tools: Sequence[ToolDefinition]) -> int:
         return sum(len(message.model_dump_json().encode()) + 16 for message in messages) + len(
@@ -22,9 +22,13 @@ class ContextBudget:
     ) -> bool:
         return self.estimate(messages, tools) + self.output_tokens + extra <= self.window
 
-    def ensure(self, messages: Sequence[ChatMessage], tools: Sequence[ToolDefinition]) -> None:
-        if not self.fits(messages, tools):
+    def generation_limit(
+        self, messages: Sequence[ChatMessage], tools: Sequence[ToolDefinition]
+    ) -> int:
+        remaining = self.window - self.estimate(messages, tools)
+        if remaining < 64:
             raise ToolFailure(
                 "context_budget",
                 "Запрос или контекст слишком большой. Сократите запрос или очистите историю.",
             )
+        return min(self.output_tokens, remaining)
