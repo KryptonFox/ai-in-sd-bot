@@ -6,6 +6,11 @@
 `AgentService.run` получает готовый контекст и выполняет единственный цикл модели.
 SQL и Telegram SDK в этом цикле отсутствуют.
 
+При `LLM_STREAMING=true` SSE остаётся внутри `OpenAIClient`: SDK собирает дельты
+текста и tool arguments, затем адаптер проверяет завершённый snapshot и возвращает
+один `LLMResponse`. Tools не исполняются по фрагментам; незавершённый поток считается
+ошибкой, отмена закрывает соединение. Telegram получает только готовый публичный текст.
+
 `RunState` создаётся на каждый вызов и хранит conversation, доверенный EventContext,
 timezone, расход и последний tool call. `Continue`, `Final`, `AwaitConfirmation`
 различают переходы. `AgentResult` проверяет наличие confirmation ID у подготовленного

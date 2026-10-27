@@ -28,6 +28,7 @@ class Settings:
     llm_base_url: str = "https://openrouter.ai/api/v1"
     llm_model: str = "openai/gpt-4o-mini"
     llm_timeout: float = 180.0
+    llm_streaming: bool = True
     llm_max_tokens: int = 16384
     agent_timeout: float = 240.0
     summary_max_chars: int = 2000
@@ -103,6 +104,9 @@ class Settings:
                 raise ConfigError("LLM_BASE_URL: укажите корректный URL (http:// или https://).")
 
         llm_model = value("LLM_MODEL", "openai/gpt-4o-mini").strip() or "openai/gpt-4o-mini"
+        streaming = value("LLM_STREAMING", "true").strip().lower()
+        if streaming not in {"true", "false", "1", "0"}:
+            raise ConfigError("LLM_STREAMING: укажите true или false.")
 
         try:
             llm_timeout = float(value("LLM_TIMEOUT", "180.0"))
@@ -204,6 +208,7 @@ class Settings:
             llm_base_url=llm_url,
             llm_model=llm_model,
             llm_timeout=llm_timeout,
+            llm_streaming=streaming in {"true", "1"},
             llm_max_tokens=bounded("LLM_MAX_TOKENS", 16384, 64, 131072),
             agent_timeout=bounded("AGENT_TIMEOUT", 240, 1, 1800),
             summary_max_chars=bounded("SUMMARY_MAX_CHARS", 2000, 100, 8000),

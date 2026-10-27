@@ -5,6 +5,7 @@ import time
 from typing import Any, Self
 
 import httpx
+import httpx2
 from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError, AsyncOpenAI
 from openai.types.chat import ChatCompletion
 
@@ -174,7 +175,13 @@ class OpenAIClient(BaseLLMClient):
         model = request.model or self._settings.llm_model
         started = time.monotonic()
         code = "ok"
-        logger.info("[%s] llm_start model=%r max_tokens=%s", req_id, model, request.max_tokens)
+        logger.info(
+            "[%s] llm_start model=%r max_tokens=%s streaming=%s",
+            req_id,
+            model,
+            request.max_tokens,
+            self._settings.llm_streaming,
+        )
 
         try:
             result = await self._generate(request, model)
@@ -222,9 +229,11 @@ class OpenAIClient(BaseLLMClient):
         try:
             async with asyncio.timeout(self._settings.llm_timeout):
                 payload = self._payload(request)
+                if self._settings.llm_streaming:
+                    return await self._stream_response(payload, model)
                 data = await self._client.chat.completions.create(model=model, **payload)
                 return self._response(data)
-        except (APITimeoutError, TimeoutError):
+        except (APITimeoutError, TimeoutError, httpx2.TimeoutException):
             raise LLMTimeoutError("Превышено время ожидания ответа языковой модели.") from None
         except APIStatusError as exc:
             error_code = HTTP_ERROR_CODES.get(exc.status_code, LLMErrorCode.UNAVAILABLE)
@@ -234,7 +243,7 @@ class OpenAIClient(BaseLLMClient):
                 status_code=exc.status_code,
                 diagnostic_details=api_status_error_details(exc),
             ) from None
-        except APIConnectionError:
+        except (APIConnectionError, httpx2.HTTPError):
             raise LLMServiceError(
                 "Не удалось соединиться с сервисом языковой модели.",
                 code=LLMErrorCode.CONNECTION,
@@ -244,3 +253,14 @@ class OpenAIClient(BaseLLMClient):
                 "Не удалось получить корректный ответ языковой модели.",
                 code=LLMErrorCode.INVALID_RESPONSE,
             ) from None
+
+    async def _stream_response(self, payload: dict[str, Any], model: str) -> LLMResponse:
+        async with self._client.chat.completions.stream(
+            model=model, stream_options={"include_usage": True}, **payload
+        ) as stream:
+            await stream.until_done()
+            try:
+                completion = stream.current_completion_snapshot
+            except AssertionError:
+                raise LLMEmptyResponseError("Модель вернула пустой поток ответа.") from None
+            return self._response(completion)

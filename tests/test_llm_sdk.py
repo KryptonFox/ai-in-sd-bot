@@ -1,5 +1,6 @@
 import asyncio
 import json
+from collections.abc import AsyncIterator
 from dataclasses import replace
 from unittest.mock import AsyncMock
 
@@ -26,6 +27,7 @@ SETTINGS = Settings(
     llm_api_key="secret-key",
     llm_base_url="https://provider.test/v1",
     llm_model="configured-model",
+    llm_streaming=False,
 )
 
 
@@ -459,3 +461,204 @@ async def test_internal_sdk_is_closed_on_exit_and_exception(monkeypatch):
         async with OpenAIClient(SETTINGS):
             raise RuntimeError
     sdk.close.assert_awaited_once()
+
+
+def stream_event(
+    delta: dict,
+    finish: str | None = None,
+    usage: dict | None = None,
+    *,
+    empty_choices: bool = False,
+) -> str:
+    body = {
+        "id": "stream-test",
+        "object": "chat.completion.chunk",
+        "created": 1,
+        "model": "configured-model",
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+    }
+    if usage is not None:
+        body["usage"] = usage
+    if empty_choices:
+        body["choices"] = []
+    return "data: " + json.dumps(body) + "\n\n"
+
+
+def stream_response(events: list[str]) -> httpx2.Response:
+    return httpx2.Response(
+        200,
+        headers={"content-type": "text/event-stream"},
+        content=": OPENROUTER PROCESSING\n\n" + "".join(events) + "data: [DONE]\n\n",
+    )
+
+
+@pytest.mark.parametrize("empty_usage_choices", [False, True])
+async def test_stream_assembles_answer_and_usage_without_exposing_reasoning(
+    adapter, caplog, empty_usage_choices
+):
+    def handler(req):
+        payload = json.loads(req.content)
+        assert payload["stream"] is True
+        assert payload["stream_options"] == {"include_usage": True}
+        return stream_response(
+            [
+                stream_event({"role": "assistant", "reasoning": "PRIVATE REASONING"}),
+                stream_event({"content": "Публичный "}),
+                stream_event({"content": "ответ"}, "stop"),
+                stream_event(
+                    {},
+                    "stop",
+                    {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                    empty_choices=empty_usage_choices,
+                ),
+            ]
+        )
+
+    client, _ = adapter(handler, settings=replace(SETTINGS, llm_streaming=True))
+    result = await client.generate(request())
+    assert result.content == "Публичный ответ" and result.finish_reason == "stop"
+    assert result.total_tokens == 15
+    assert "PRIVATE REASONING" not in result.model_dump_json() + caplog.text
+
+
+async def test_reasoning_only_stream_reports_generation_limit(adapter):
+    client, _ = adapter(
+        lambda _: stream_response(
+            [stream_event({"role": "assistant", "reasoning": "PRIVATE REASONING"}, "length")]
+        ),
+        settings=replace(SETTINGS, llm_streaming=True),
+    )
+    with pytest.raises(LLMServiceError) as raised:
+        await client.generate(request())
+    assert raised.value.code == LLMErrorCode.GENERATION_LIMIT
+
+
+async def test_stream_reassembles_tool_argument_fragments_before_validation(adapter):
+    events = [
+        stream_event(
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {"name": "weather", "arguments": '{"city":'},
+                    }
+                ],
+            }
+        ),
+        stream_event(
+            {"tool_calls": [{"index": 0, "function": {"arguments": '"Казань"}'}}]},
+            "tool_calls",
+        ),
+    ]
+    client, _ = adapter(
+        lambda _: stream_response(events), settings=replace(SETTINGS, llm_streaming=True)
+    )
+    result = await client.generate(request(tools=[ToolDefinition(name="weather")]))
+    assert result.tool_calls == [
+        ToolCall(id="call-1", name="weather", arguments={"city": "Казань"})
+    ]
+
+
+async def test_stream_preserves_truncated_text_and_rejects_incomplete_tool_arguments(adapter):
+    settings = replace(SETTINGS, llm_streaming=True)
+    client, _ = adapter(
+        lambda _: stream_response(
+            [stream_event({"role": "assistant", "content": "Начало"}, "length")]
+        ),
+        settings=settings,
+    )
+    result = await client.generate(request())
+    assert result.content == "Начало" and result.finish_reason == "length"
+    broken, _ = adapter(
+        lambda _: stream_response(
+            [
+                stream_event(
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call-1",
+                                "type": "function",
+                                "function": {"name": "weather", "arguments": '{"city":'},
+                            }
+                        ],
+                    },
+                    "length",
+                )
+            ]
+        ),
+        settings=settings,
+    )
+    with pytest.raises(LLMServiceError):
+        await broken.generate(request(tools=[ToolDefinition(name="weather")]))
+
+
+async def test_stream_disconnection_never_returns_partial_answer(adapter, caplog):
+    class BrokenStream(httpx2.AsyncByteStream):
+        async def __aiter__(self) -> AsyncIterator[bytes]:
+            yield stream_event({"role": "assistant", "content": "Partial"}).encode()
+            raise httpx2.RemoteProtocolError("PRIVATE TRANSPORT DETAIL")
+
+    client, _ = adapter(
+        lambda _: httpx2.Response(
+            200, headers={"content-type": "text/event-stream"}, stream=BrokenStream()
+        ),
+        settings=replace(SETTINGS, llm_streaming=True),
+    )
+    with pytest.raises(LLMServiceError) as raised:
+        await client.generate(request())
+    assert raised.value.code == LLMErrorCode.CONNECTION
+    assert "PRIVATE TRANSPORT DETAIL" not in caplog.text
+
+
+async def test_stream_deadline_and_cancellation_close_transport(adapter):
+    entered = asyncio.Event()
+    closed = asyncio.Event()
+
+    class SlowStream(httpx2.AsyncByteStream):
+        async def __aiter__(self) -> AsyncIterator[bytes]:
+            yield stream_event({"role": "assistant", "content": "Partial"}).encode()
+            entered.set()
+            await asyncio.Event().wait()
+
+        async def aclose(self) -> None:
+            closed.set()
+
+    client, _ = adapter(
+        lambda _: httpx2.Response(
+            200, headers={"content-type": "text/event-stream"}, stream=SlowStream()
+        ),
+        settings=replace(SETTINGS, llm_streaming=True, llm_timeout=0.03),
+    )
+    with pytest.raises(LLMTimeoutError):
+        await client.generate(request())
+    assert closed.is_set()
+    closed.clear()
+    entered.clear()
+    task = asyncio.create_task(client.generate(request()))
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert closed.is_set()
+
+
+async def test_stream_error_event_and_missing_finish_are_failures(adapter):
+    settings = replace(SETTINGS, llm_streaming=True)
+    for body in (
+        'data: {"error":{"message":"PRIVATE PROVIDER ERROR","code":"server_error"}}\n\n',
+        stream_event({"role": "assistant", "content": "Partial"}),
+        "data: [DONE]\n\n",
+    ):
+        client, _ = adapter(
+            lambda _, body=body: httpx2.Response(
+                200, headers={"content-type": "text/event-stream"}, content=body
+            ),
+            settings=settings,
+        )
+        with pytest.raises((LLMServiceError, LLMEmptyResponseError)):
+            await client.generate(request())
