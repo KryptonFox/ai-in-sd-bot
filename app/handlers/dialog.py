@@ -165,8 +165,8 @@ async def _execute_dialog(
             f"⚠️ {error.user_message}",
         )
 
-    except Exception:
-        logger.error("[%s] dialog_error", req_id)
+    except Exception as error:
+        logger.error("[%s] dialog_error exception=%s", req_id, type(error).__name__)
         await send_formatted_message(
             target_message,
             "❌ Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже.",

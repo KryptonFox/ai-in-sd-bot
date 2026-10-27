@@ -275,6 +275,20 @@ async def test_total_deadline_interrupts_generation_and_releases_queue() -> None
     assert not await service.is_busy(1)
 
 
+async def test_component_timeout_is_not_reported_as_llm_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = InMemoryPool()
+    store = MemoryTurnStore(cast(MemoryHistory, pool))
+    monkeypatch.setattr(store, "complete", AsyncMock(side_effect=TimeoutError("storage timeout")))
+    llm = MagicMock(generate=AsyncMock(return_value=LLMResponse(content="answer")))
+    service = DialogService(cast(asyncpg.Pool, pool), SETTINGS, llm, store=store)
+    with pytest.raises(TimeoutError):
+        await service.process_user_message(1, "question", event_id="storage-timeout")
+    assert store.turns[1, "storage-timeout"].state == "failed"
+    assert not await service.is_busy(1)
+
+
 def test_context_budget_includes_tools_and_output_reserve() -> None:
     budget = ContextBudget(600, output_tokens=100)
     assert not budget.fits([ChatMessage(role=MessageRole.USER, content="я" * 500)], [])

@@ -86,8 +86,9 @@ class DialogService:
         )
         async with self._queue.acquire(user_id):
             started = time.monotonic()
+            deadline = asyncio.timeout(self._settings.agent_timeout)
             try:
-                async with asyncio.timeout(self._settings.agent_timeout):
+                async with deadline:
                     claim = await self._store.claim(context, self._clock.now())
                     if isinstance(claim, Replay):
                         if claim.result.confirmation_id:
@@ -105,7 +106,7 @@ class DialogService:
                     raise
                 if partial:
                     raise InterruptedRunError from error
-                if isinstance(error, TimeoutError):
+                if isinstance(error, TimeoutError) and deadline.expired():
                     raise LLMTimeoutError("Превышено общее время обработки запроса.") from None
                 raise
 
