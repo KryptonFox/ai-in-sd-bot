@@ -41,26 +41,57 @@ async def record_decision(
     created_at: datetime | None = None,
 ) -> None:
     async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO decision_audits (
-                user_id, event_id, request_id, decision, tool_name, arguments,
-                validation, execution, duration_ms, reason, created_at
-            )
-            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, COALESCE($11, NOW()))
-            """,
-            user_id,
-            event_id,
-            request_id,
-            decision,
-            tool_name,
-            _safe_arguments(arguments),
-            validation,
-            execution,
-            duration_ms,
-            reason[:200],
-            created_at,
+        await record_on_connection(
+            conn,
+            user_id=user_id,
+            event_id=event_id,
+            request_id=request_id,
+            decision=decision,
+            tool_name=tool_name,
+            arguments=arguments,
+            validation=validation,
+            execution=execution,
+            duration_ms=duration_ms,
+            reason=reason,
+            created_at=created_at,
         )
+
+
+async def record_on_connection(
+    conn: asyncpg.Connection | asyncpg.pool.PoolConnectionProxy,
+    *,
+    user_id: int,
+    event_id: str,
+    request_id: str,
+    decision: str,
+    tool_name: str | None = None,
+    arguments: Mapping[str, object] | None = None,
+    validation: str = "ok",
+    execution: str = "none",
+    duration_ms: float = 0,
+    reason: str = "",
+    created_at: datetime | None = None,
+) -> None:
+    await conn.execute(
+        """
+        INSERT INTO decision_audits (
+            user_id, event_id, request_id, decision, tool_name, arguments,
+            validation, execution, duration_ms, reason, created_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, COALESCE($11, NOW()))
+        """,
+        user_id,
+        event_id,
+        request_id,
+        decision,
+        tool_name,
+        _safe_arguments(arguments),
+        validation,
+        execution,
+        duration_ms,
+        reason[:200],
+        created_at,
+    )
 
 
 async def latest_decision(pool: asyncpg.Pool, user_id: int) -> DecisionAudit | None:

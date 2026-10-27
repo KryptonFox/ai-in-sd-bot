@@ -25,4 +25,4 @@ def test_migration_files_content_valid():
         text = f.read_text(encoding="utf-8")
 
         assert len(text.strip()) > 0
-        assert "CREATE TABLE" in text.upper()
+        assert any(statement in text.upper() for statement in ("CREATE TABLE", "ALTER TABLE"))

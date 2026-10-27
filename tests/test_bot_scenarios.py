@@ -1,3 +1,6 @@
+from copy import deepcopy
+from contextlib import asynccontextmanager
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -35,6 +38,15 @@ class _InMemoryConnectionContext:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         pass
+
+    @asynccontextmanager
+    async def transaction(self):
+        snapshot = deepcopy((self.pool.users, self.pool.messages, self.pool.summaries))
+        try:
+            yield
+        except BaseException:
+            self.pool.users, self.pool.messages, self.pool.summaries = snapshot
+            raise
 
     async def execute(self, query: str, *args):
         q = " ".join(query.split())

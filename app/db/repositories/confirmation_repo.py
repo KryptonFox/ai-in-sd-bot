@@ -29,6 +29,16 @@ async def find_event(pool: asyncpg.Pool, user_id: int, event_id: str) -> Confirm
     return decode_record(row) if row is not None else None
 
 
+async def latest(pool: asyncpg.Pool, user_id: int) -> ConfirmationRecord | None:
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM pending_confirmations WHERE user_id=$1 "
+            "ORDER BY created_at DESC,id DESC LIMIT 1",
+            user_id,
+        )
+    return decode_record(row) if row is not None else None
+
+
 async def prepare(
     pool: asyncpg.Pool,
     *,
