@@ -119,3 +119,7 @@ class QueueFullError(AppError):
 
 class LLMRefusalError(LLMError):
     code = LLMErrorCode.REFUSAL
+
+
+class InterruptedRunError(AppError):
+    pass

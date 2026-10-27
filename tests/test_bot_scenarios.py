@@ -1,8 +1,9 @@
-from copy import deepcopy
 from contextlib import asynccontextmanager
-
+from copy import deepcopy
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
+import asyncpg
 import pytest
 from aiogram import Bot
 from aiogram.methods import AnswerCallbackQuery, SendMessage
@@ -10,12 +11,15 @@ from aiogram.types import CallbackQuery, Chat, Message, User
 
 from app.config import Settings
 from app.core.exceptions import InvalidTemperatureError, LLMTimeoutError
+from app.core.schemas.agent import AgentResult
 from app.core.schemas.llm import LLMRequest, LLMResponse
 from app.core.schemas.message import MessageRole
 from app.handlers.commands import handle_role_callback, handle_start
 from app.handlers.dialog import handle_retry_callback, handle_user_text
-from app.modes.registry import registry
+from app.llm.base import BaseLLMClient
+from app.modes.registry import ModeRegistry, registry
 from app.services.dialog_service import DialogService
+from tests.fake_turns import MemoryHistory, MemoryTurnStore
 
 
 class InMemoryPool:
@@ -99,9 +103,16 @@ class _InMemoryConnectionContext:
             user_id, summary = args[0], args[1]
             self.pool.summaries[user_id] = summary
 
+        elif "DELETE FROM dialog_messages WHERE user_id=$1 AND id=ANY($2)" in q:
+            ids_to_del = set(args[1])
+            self.pool.messages = [m for m in self.pool.messages if m["id"] not in ids_to_del]
+
         elif "DELETE FROM dialog_messages WHERE id = ANY" in q:
             ids_to_del = set(args[0])
             self.pool.messages = [m for m in self.pool.messages if m["id"] not in ids_to_del]
+
+    async def fetchval(self, query: str, *args):
+        return self.pool.users.get(args[0], {}).get("timezone")
 
     async def fetchrow(self, query: str, *args):
         q = " ".join(query.split())
@@ -125,8 +136,23 @@ class _InMemoryConnectionContext:
         if "SELECT id, role, content, metadata, char_count FROM dialog_messages" in q:
             user_id = args[0]
             matching = [m for m in self.pool.messages if m["user_id"] == user_id]
-            return sorted(matching, key=lambda m: m["id"], reverse=False)
+            return sorted(matching, key=lambda m: m["id"], reverse=False)[: args[1]]
         return []
+
+
+def make_dialog(
+    pool: InMemoryPool,
+    settings: Settings,
+    llm: BaseLLMClient,
+    modes: ModeRegistry = registry,
+) -> DialogService:
+    return DialogService(
+        cast(asyncpg.Pool, pool),
+        settings,
+        llm,
+        modes,
+        store=MemoryTurnStore(cast(MemoryHistory, pool)),
+    )
 
 
 @pytest.fixture
@@ -151,11 +177,12 @@ async def test_scenario_1_message_sent_with_active_mode_instruction(in_memory_po
     mock_llm.generate = AsyncMock(
         return_value=LLMResponse(content="Генератор — это функция с yield.")
     )
-    service = DialogService(in_memory_pool, base_settings, mock_llm, registry)
+    service = make_dialog(in_memory_pool, base_settings, mock_llm, registry)
 
     response = await service.process_user_message(101, "Что такое генератор?")
 
-    assert response == "Генератор — это функция с yield."
+    assert isinstance(response, AgentResult)
+    assert response.text == "Генератор — это функция с yield."
     mock_llm.generate.assert_awaited_once()
 
     req: LLMRequest = mock_llm.generate.call_args.args[0]
@@ -174,7 +201,7 @@ async def test_scenario_2_user_history_isolation(in_memory_pool, base_settings):
             LLMResponse(content="Второй ответ для пользователя 1"),
         ]
     )
-    service = DialogService(in_memory_pool, base_settings, mock_llm, registry)
+    service = make_dialog(in_memory_pool, base_settings, mock_llm, registry)
 
     await service.process_user_message(1, "Вопрос 1 от U1")
     await service.process_user_message(2, "Вопрос 1 от U2")
@@ -202,7 +229,7 @@ async def test_scenario_3_history_truncation_preserves_order_and_current_message
     mock_llm.generate = AsyncMock(
         side_effect=lambda req: LLMResponse(content=f"Ans to {req.messages[-1].content}")
     )
-    service = DialogService(in_memory_pool, settings, mock_llm, registry)
+    service = make_dialog(in_memory_pool, settings, mock_llm, registry)
 
     for i in range(1, 5):
         await service.process_user_message(10, f"Q{i}")
@@ -221,7 +248,7 @@ async def test_scenario_3_history_truncation_preserves_order_and_current_message
 async def test_scenario_4_mode_switch_clears_history(in_memory_pool, base_settings):
     mock_llm = MagicMock()
     mock_llm.generate = AsyncMock(return_value=LLMResponse(content="Ok"))
-    service = DialogService(in_memory_pool, base_settings, mock_llm, registry)
+    service = make_dialog(in_memory_pool, base_settings, mock_llm, registry)
 
     await service.process_user_message(20, "Привет в study")
     assert len(in_memory_pool.messages) > 0
@@ -240,7 +267,7 @@ async def test_scenario_4_mode_switch_clears_history(in_memory_pool, base_settin
 async def test_scenario_5_reset_clears_only_caller_history(in_memory_pool, base_settings):
     mock_llm = MagicMock()
     mock_llm.generate = AsyncMock(return_value=LLMResponse(content="Ok"))
-    service = DialogService(in_memory_pool, base_settings, mock_llm, registry)
+    service = make_dialog(in_memory_pool, base_settings, mock_llm, registry)
 
     await service.process_user_message(100, "Сообщение U100")
     await service.process_user_message(200, "Сообщение U200")
@@ -256,7 +283,7 @@ async def test_scenario_5_reset_clears_only_caller_history(in_memory_pool, base_
 
 async def test_scenario_6_settings_accepts_valid_and_rejects_invalid(in_memory_pool, base_settings):
     mock_llm = MagicMock()
-    service = DialogService(in_memory_pool, base_settings, mock_llm, registry)
+    service = make_dialog(in_memory_pool, base_settings, mock_llm, registry)
 
     for val in (0.0, 0.3, 0.7, 1.0):
         updated = await service.set_temperature(30, val)
@@ -281,7 +308,7 @@ async def test_scenario_7_llm_error_converts_to_safe_user_message(in_memory_pool
     bot.session = AsyncMock(side_effect=fake_session)
     mock_llm = MagicMock()
     mock_llm.generate = AsyncMock(side_effect=LLMTimeoutError("Timeout"))
-    service = DialogService(in_memory_pool, base_settings, mock_llm, registry)
+    service = make_dialog(in_memory_pool, base_settings, mock_llm, registry)
 
     message = Message(
         message_id=1,
@@ -319,7 +346,7 @@ async def test_scenario_retry_on_timeout_successful(in_memory_pool, base_setting
     bot.session = AsyncMock(side_effect=fake_session)
     mock_llm = MagicMock()
     mock_llm.generate = AsyncMock(side_effect=LLMTimeoutError("Timeout"))
-    service = DialogService(in_memory_pool, base_settings, mock_llm, registry)
+    service = make_dialog(in_memory_pool, base_settings, mock_llm, registry)
 
     message = Message(
         message_id=1,
@@ -375,7 +402,7 @@ async def test_scenario_retry_not_found_alerts_user(in_memory_pool, base_setting
         return True
 
     bot.session = AsyncMock(side_effect=fake_session)
-    service = DialogService(in_memory_pool, base_settings, MagicMock(), registry)
+    service = make_dialog(in_memory_pool, base_settings, MagicMock(), registry)
 
     error_msg = Message(
         message_id=2,
@@ -416,7 +443,7 @@ async def test_scenario_8_long_response_chunking_without_loss(in_memory_pool, ba
     long_answer = "Часть первая.\n" + "X" * 3500 + "\n\nЧасть вторая.\n" + "Y" * 3200
     mock_llm = MagicMock()
     mock_llm.generate = AsyncMock(return_value=LLMResponse(content=long_answer))
-    service = DialogService(in_memory_pool, base_settings, mock_llm, registry)
+    service = make_dialog(in_memory_pool, base_settings, mock_llm, registry)
 
     message = Message(
         message_id=1,
@@ -470,7 +497,7 @@ async def test_scenario_main_menu_role_buttons_and_callback(in_memory_pool, base
 
     mock_llm = MagicMock()
     mock_llm.generate = AsyncMock(return_value=LLMResponse(content="Привет!"))
-    service = DialogService(in_memory_pool, base_settings, mock_llm, registry)
+    service = make_dialog(in_memory_pool, base_settings, mock_llm, registry)
 
     await service.process_user_message(42, "Привет")
     user_msgs = [m for m in in_memory_pool.messages if m["user_id"] == 42]
@@ -511,7 +538,7 @@ async def test_compaction_triggered_when_threshold_reached(in_memory_pool, base_
     mock_llm.generate = AsyncMock(side_effect=llm_responses)
     mock_llm.get_context_length = AsyncMock(return_value=32768)
 
-    service = DialogService(in_memory_pool, base_settings, mock_llm, registry)
+    service = make_dialog(in_memory_pool, base_settings, mock_llm, registry)
 
     for i in range(10):
         in_memory_pool.messages.append(
@@ -530,11 +557,12 @@ async def test_compaction_triggered_when_threshold_reached(in_memory_pool, base_
 
     response = await service.process_user_message(99, "Расскажи про Timsort")
 
-    assert response == answer_text
+    assert isinstance(response, AgentResult)
+    assert response.text == answer_text
     assert in_memory_pool.summaries.get(99) == summary_text
 
     kept_after_compaction = [m for m in in_memory_pool.messages if m["user_id"] == 99]
-    assert len(kept_after_compaction) == 3 + 2
+    assert len(kept_after_compaction) == 4 + 2
 
     last_call = mock_llm.generate.call_args_list[-1]
     last_req = last_call.args[0]
@@ -545,7 +573,7 @@ async def test_compaction_triggered_when_threshold_reached(in_memory_pool, base_
 
 async def test_reset_history_clears_messages_and_summary(in_memory_pool, base_settings):
     mock_llm = MagicMock()
-    service = DialogService(in_memory_pool, base_settings, mock_llm, registry)
+    service = make_dialog(in_memory_pool, base_settings, mock_llm, registry)
 
     in_memory_pool.messages.append(
         {
@@ -577,7 +605,7 @@ async def test_legacy_system_history_stays_untrusted(in_memory_pool, base_settin
             "metadata": {},
         }
     )
-    service = DialogService(in_memory_pool, base_settings, llm, registry)
+    service = make_dialog(in_memory_pool, base_settings, llm, registry)
     await service.process_user_message(42, "question")
     messages = llm.generate.call_args.args[0].messages
     assert sum(m.role == MessageRole.SYSTEM for m in messages) == 1
@@ -590,7 +618,7 @@ async def test_incomplete_compaction_keeps_original_history(in_memory_pool, base
     llm = MagicMock(
         generate=AsyncMock(return_value=LLMResponse(content="cut off", finish_reason="length"))
     )
-    service = DialogService(in_memory_pool, base_settings, llm, registry)
+    service = make_dialog(in_memory_pool, base_settings, llm, registry)
     for index in range(10):
         in_memory_pool.messages.append(
             {

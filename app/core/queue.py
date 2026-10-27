@@ -57,11 +57,14 @@ class UserQueueManager:
             user_lock = self._locks[user_id]
             queue_position = current_count
 
-        await user_lock.acquire()
+        acquired = False
         try:
+            await user_lock.acquire()
+            acquired = True
             yield queue_position
         finally:
-            user_lock.release()
+            if acquired:
+                user_lock.release()
             async with self._global_lock:
                 self._active_counts[user_id] -= 1
                 if self._active_counts[user_id] <= 0:

@@ -23,9 +23,15 @@ class ExpectedDecision(TypedDict):
     expected_arguments: dict[str, object]
 
 
+class HistoryEntry(TypedDict):
+    role: Literal["user", "assistant"]
+    content: str
+
+
 class RoutingCase(ExpectedDecision):
     id: str
     query: str
+    history: NotRequired[list[HistoryEntry]]
 
 
 class EvaluationContext(TypedDict):
@@ -213,6 +219,8 @@ def _markdown_report(result: MarkdownReport) -> str:
         f"Cases attempted: {counts['attempted']}/{counts['planned']}",
         f"Cases not run: {counts['not_run']}",
         interpretation,
+        "Scope: dry-run routing and arguments only; "
+        "geocoding, forecast and final weather answers are not measured.",
         "",
         "Routing: "
         f"{summary['routing_correct']}/{summary['routing_total']} "
@@ -255,6 +263,7 @@ async def run_evaluation(case_ids: set[str] | None, output_dir: Path, label: str
     from app.mcp_server.server import tool_catalog
     from app.modes.definitions import STUDY_MODE
     from app.services.agent_service import AgentService
+    from app.services.tool_execution import ToolExecutionService
 
     settings = Settings.load()
     from app.logging_setup import configure_logging
@@ -265,9 +274,12 @@ async def run_evaluation(case_ids: set[str] | None, output_dir: Path, label: str
     mcp.load_catalog(tool_catalog())
     service = AgentService(
         client,
-        mcp,
+        ToolExecutionService(
+            mcp,
+            clock=FrozenClock(datetime.fromisoformat(dataset["evaluation_context"]["now"])),
+            max_calls=settings.agent_max_tool_calls,
+        ),
         clock=FrozenClock(datetime.fromisoformat(dataset["evaluation_context"]["now"])),
-        max_tool_calls=settings.agent_max_tool_calls,
         max_llm_steps=settings.agent_max_llm_steps,
     )
     result_cases: list[CaseResult] = []
@@ -300,6 +312,10 @@ async def run_evaluation(case_ids: set[str] | None, output_dir: Path, label: str
             )
             set_request_id(context.request_id)
             messages = STUDY_MODE.build_initial_messages(case["query"])
+            messages.extend(
+                ChatMessage(role=MessageRole(entry["role"]), content=entry["content"])
+                for entry in case.get("history", [])
+            )
             messages.append(ChatMessage(role=MessageRole.USER, content=case["query"]))
             try:
                 attempted += 1

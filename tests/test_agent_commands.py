@@ -7,7 +7,9 @@ import pytest
 from aiogram.types import Chat, Message, User
 
 from app.core.schemas.agent import AgentResult
+from app.core.schemas.status import TimezoneStatus, ToolStatus
 from app.handlers import agent_commands
+from app.presentation.agent import timezone_text, tools_text
 
 
 class QueueSpy:
@@ -38,9 +40,11 @@ def make_message(text: str = "/tools") -> Message:
 def make_service() -> MagicMock:
     service = MagicMock()
     service.queue_manager = QueueSpy()
-    service.tools_status = AsyncMock(return_value="Инструменты доступны")
-    service.timezone_status = AsyncMock(return_value="Часовой пояс: Europe/Moscow")
-    service.why = AsyncMock(return_value="Подготовлено напоминание")
+    service.tools_status = AsyncMock(return_value=[ToolStatus("get_weather", "Погода", False)])
+    service.timezone_status = AsyncMock(
+        return_value=TimezoneStatus("Europe/Moscow", datetime(2026, 10, 27, tzinfo=UTC))
+    )
+    service.why = AsyncMock(return_value=None)
     service.confirm_action = AsyncMock(return_value=AgentResult(text="Готово", decision="respond"))
     return service
 
@@ -59,8 +63,8 @@ async def test_tools_and_why_are_read_only(monkeypatch: pytest.MonkeyPatch) -> N
     service.why.assert_awaited_once_with(42)
     assert service.queue_manager.acquisitions == []
     assert [call.args[1] for call in send.await_args_list] == [
-        "Инструменты доступны",
-        "Подготовлено напоминание",
+        tools_text(service.tools_status.return_value),
+        "Решений пока нет. Отправьте запрос.",
     ]
 
 
@@ -75,14 +79,14 @@ async def test_timezone_status_and_update_use_expected_queue_behavior(
 
     await agent_commands.handle_timezone(message, service)
     assert service.queue_manager.acquisitions == []
-    service.timezone_status.assert_awaited_once_with(42)
+    service.timezone_status.assert_awaited_once_with(42, None)
 
     await agent_commands.handle_timezone(make_message("/timezone Europe/Berlin"), service)
-    assert service.queue_manager.acquisitions == [(42, True)]
+    assert service.queue_manager.acquisitions == []
     service.timezone_status.assert_awaited_with(42, "Europe/Berlin")
     assert [call.args[1] for call in send.await_args_list] == [
-        "Часовой пояс: Europe/Moscow",
-        "Часовой пояс: Europe/Moscow",
+        timezone_text(service.timezone_status.return_value),
+        timezone_text(service.timezone_status.return_value),
     ]
 
 
@@ -101,7 +105,7 @@ async def test_timezone_invalid_zone_gets_friendly_response(
     response = send.await_args.args[1]
     assert "часовой пояс" in response
     assert "Invalid/Zone" not in response
-    assert service.queue_manager.acquisitions == [(42, True)]
+    assert service.queue_manager.acquisitions == []
 
 
 def make_callback(data: str, message: object | None = None) -> MagicMock:
@@ -132,7 +136,7 @@ async def test_confirmation_callback_calls_service_under_queue_and_sends_result(
         make_callback(f"{action}:{identifier}", message), service
     )
 
-    assert service.queue_manager.acquisitions == [(42, True)]
+    assert service.queue_manager.acquisitions == []
     service.confirm_action.assert_awaited_once_with(42, identifier, cancel=cancel)
     edit_markup.assert_awaited_once_with(reply_markup=None)
     assert send.await_args is not None

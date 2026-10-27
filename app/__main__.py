@@ -6,6 +6,7 @@ from aiogram import Dispatcher
 
 from app.config import ConfigError, Settings
 from app.db.connection import create_pool
+from app.db.repositories.turn_repo import PostgresTurnStore
 from app.handlers import router
 from app.health import HealthState, start_health_server
 from app.llm.client import OpenAIClient
@@ -14,6 +15,7 @@ from app.mcp.client import MCPClient
 from app.services.agent_service import AgentService
 from app.services.confirmation_service import ConfirmationService
 from app.services.dialog_service import DialogService
+from app.services.tool_execution import ToolExecutionService
 from app.telegram import create_bot, setup_bot_commands, setup_bot_description
 
 logger = logging.getLogger("app")
@@ -51,15 +53,19 @@ async def run(settings: Settings) -> None:
         await mcp_client.start()
         state.mcp = mcp_client
         confirmations = ConfirmationService(state.pool, mcp_client, ttl=settings.confirmation_ttl)
-        agent = AgentService(
-            llm_client,
+        store = PostgresTurnStore(state.pool)
+        tools = ToolExecutionService(
             mcp_client,
             confirmations,
-            state.pool,
-            max_tool_calls=settings.agent_max_tool_calls,
-            max_llm_steps=settings.agent_max_llm_steps,
+            store,
+            max_calls=settings.agent_max_tool_calls,
+            max_output_chars=settings.tool_result_max_chars,
         )
-        dialog_service = DialogService(state.pool, settings, llm_client, agent=agent)
+        agent = AgentService(llm_client, tools, max_llm_steps=settings.agent_max_llm_steps)
+        dialog_service = DialogService(
+            state.pool, settings, llm_client, agent=agent, tools=tools, store=store
+        )
+        await dialog_service.recover()
 
         async def recovery_loop() -> None:
             while True:

@@ -12,8 +12,7 @@ from app.core.queue import UserQueueManager
 from app.core.schemas.llm import LLMResponse
 from app.handlers.dialog import handle_user_text
 from app.modes.registry import registry
-from app.services.dialog_service import DialogService
-from tests.test_bot_scenarios import InMemoryPool
+from tests.test_bot_scenarios import InMemoryPool, make_dialog
 
 
 @pytest.fixture
@@ -140,11 +139,7 @@ async def test_sequential_messages_in_dialog_handler():
         return LLMResponse(content=f"Ответ {call_count}")
 
     mock_llm.generate = AsyncMock(side_effect=fake_generate)
-    from typing import cast
-
-    import asyncpg
-
-    service = DialogService(cast(asyncpg.Pool, pool), settings, mock_llm, registry)
+    service = make_dialog(pool, settings, mock_llm, registry)
 
     bot = Bot(settings.bot_token)
     sent_methods = []

@@ -13,6 +13,7 @@ from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.mcp.client import MCPClient
 from app.mcp_server.server import tool_catalog
 from app.services.agent_service import AgentService
+from app.services.tool_execution import ToolExecutionService
 
 EVALUATION_TIME = datetime.fromisoformat("2026-10-12T09:00:00+03:00")
 
@@ -64,10 +65,10 @@ def make_agent(
     mcp.call_tool = AsyncMock(return_value=weather_result())
     service = AgentService(
         llm,
-        mcp,
-        confirmations=confirmations,
+        ToolExecutionService(
+            mcp, confirmations, clock=FrozenClock(EVALUATION_TIME), max_calls=max_tool_calls
+        ),
         clock=FrozenClock(EVALUATION_TIME),
-        max_tool_calls=max_tool_calls,
         max_llm_steps=max_llm_steps,
     )
     return service, llm, mcp
@@ -232,7 +233,6 @@ async def test_reminder_dry_run_normalizes_without_calling_mcp_or_confirmation()
             )
         ]
     )
-    service.confirmations = None
 
     result = await service.run(system_message(), context(), timezone="Europe/Moscow", dry_run=True)
 
@@ -317,7 +317,9 @@ async def test_confirmation_prepare_receives_remaining_budget_after_read() -> No
     confirmations = MagicMock()
     confirmations.existing = AsyncMock(return_value=None)
     confirmations.prepare = AsyncMock(
-        return_value=AgentResult(text="Подтвердите напоминание", decision="prepare")
+        return_value=AgentResult(
+            text="Подтвердите напоминание", decision="prepare", confirmation_id="saved-id"
+        )
     )
     service, _, mcp = make_agent(
         [

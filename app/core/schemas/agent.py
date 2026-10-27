@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 type AgentDecision = Literal["respond", "clarify", "tool", "prepare", "error"]
 
@@ -21,6 +21,14 @@ class AgentResult(BaseModel):
     reason: str = "completed"
     truncated: bool = False
     planned: bool = False
+
+    @model_validator(mode="after")
+    def validate_confirmation(self) -> "AgentResult":
+        if self.decision == "prepare" and not self.planned and not self.confirmation_id:
+            raise ValueError("prepared action requires confirmation_id")
+        if self.confirmation_id and (self.decision != "prepare" or self.planned):
+            raise ValueError("confirmation_id is only valid for a prepared action")
+        return self
 
 
 class EventContext(BaseModel):

@@ -10,6 +10,7 @@ from aiogram.enums import ChatAction
 from aiogram.types import Chat, Message
 
 from app.core.exceptions import LLMTimeoutError
+from app.core.schemas.agent import AgentResult
 from app.handlers import dialog
 from app.services.dialog_service import DialogService
 
@@ -39,17 +40,20 @@ async def test_typing_repeats_and_stops_with_generation(
             refreshed.set()
         return True
 
-    async def generate(user_id: int, text: str) -> str:
+    async def generate(user_id: int, text: str) -> AgentResult:
         await finish_generation.wait()
         if outcome == "error":
             raise LLMTimeoutError("timeout")
-        return "Ответ"
+        return AgentResult(text="Ответ")
 
     send_message = AsyncMock()
     monkeypatch.setattr(bot, "send_chat_action", send_action)
     monkeypatch.setattr(dialog, "TYPING_INTERVAL", 0.001)
     monkeypatch.setattr(dialog, "send_formatted_message", send_message)
-    service = cast(DialogService, SimpleNamespace(process_user_message=generate))
+    service = cast(
+        DialogService,
+        SimpleNamespace(process_user_message=generate, is_busy=AsyncMock(return_value=False)),
+    )
     task = asyncio.create_task(dialog._execute_dialog(message, service, 42, "Вопрос"))
     try:
         await asyncio.wait_for(refreshed.wait(), timeout=1)

@@ -273,8 +273,8 @@ async def test_lost_mcp_response_recovers_from_committed_reminder(database: Data
         pending = await confirmation_repo.find_event(pool, context.user_id, context.event_id)
         assert pending is not None
 
-        assert result.decision == "error"
-        assert pending["state"] == "executing"
+        assert result.decision == "tool"
+        assert pending["state"] == "succeeded"
         assert pending["calls_remaining"] == 1
         assert await pool.fetchval("SELECT count(*) FROM reminders WHERE user_id=$1", 903) == 1
 

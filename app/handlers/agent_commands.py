@@ -13,6 +13,7 @@ from aiogram.types import (
 
 from app.core.formatters import send_formatted_message
 from app.core.schemas.agent import AgentResult
+from app.presentation.agent import decision_text, timezone_text, tools_text
 from app.services.dialog_service import DialogService
 
 logger = logging.getLogger("app.handlers.agent_commands")
@@ -35,7 +36,7 @@ def get_confirmation_keyboard(identifier: str) -> InlineKeyboardMarkup:
 @router.message(Command("tools"), F.chat.type == "private")
 async def handle_tools(message: Message, dialog_service: DialogService) -> None:
     status = await dialog_service.tools_status()
-    await send_formatted_message(message, status)
+    await send_formatted_message(message, tools_text(status))
 
 
 @router.message(Command("timezone"), F.chat.type == "private")
@@ -44,24 +45,22 @@ async def handle_timezone(message: Message, dialog_service: DialogService) -> No
     parts = (message.text or "").split(maxsplit=1)
     zone = parts[1].strip() if len(parts) == 2 else None
     try:
-        if zone:
-            async with dialog_service.queue_manager.acquire(user_id, ignore_limits=True):
-                status = await dialog_service.timezone_status(user_id, zone)
-        else:
-            status = await dialog_service.timezone_status(user_id)
+        status = await dialog_service.timezone_status(user_id, zone)
     except (ValueError, ZoneInfoNotFoundError):
-        status = (
+        text = (
             "❌ Не удалось распознать часовой пояс. Укажите зону IANA, например "
             "`/timezone Europe/Moscow`."
         )
-    await send_formatted_message(message, status)
+    else:
+        text = timezone_text(status)
+    await send_formatted_message(message, text)
 
 
 @router.message(Command("why"), F.chat.type == "private")
 async def handle_why(message: Message, dialog_service: DialogService) -> None:
     user_id = message.from_user.id if message.from_user else message.chat.id
     explanation = await dialog_service.why(user_id)
-    await send_formatted_message(message, explanation)
+    await send_formatted_message(message, decision_text(explanation))
 
 
 @router.callback_query(F.data.startswith("confirm:") | F.data.startswith("cancel:"))
@@ -84,10 +83,9 @@ async def handle_confirmation_callback(
 
     await callback.answer()
     user_id = callback.from_user.id
-    async with dialog_service.queue_manager.acquire(user_id, ignore_limits=True):
-        result: AgentResult = await dialog_service.confirm_action(
-            user_id, identifier, cancel=action == "cancel"
-        )
+    result: AgentResult = await dialog_service.confirm_action(
+        user_id, identifier, cancel=action == "cancel"
+    )
     if result.decision != "error":
         try:
             await message.edit_reply_markup(reply_markup=None)

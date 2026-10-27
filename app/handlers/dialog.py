@@ -2,7 +2,6 @@ import asyncio
 import logging
 import math
 import uuid
-from contextlib import nullcontext
 
 from aiogram import F, Router
 from aiogram.enums import ChatAction
@@ -10,6 +9,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from app.core.context import generate_request_id, set_request_id
 from app.core.exceptions import (
+    InterruptedRunError,
     LLMEmptyResponseError,
     LLMRefusalError,
     LLMServiceError,
@@ -19,6 +19,7 @@ from app.core.exceptions import (
 from app.core.formatters import send_formatted_message
 from app.core.schemas.agent import AgentResult
 from app.handlers.agent_commands import get_confirmation_keyboard
+from app.presentation.agent import reply_text
 from app.services.dialog_service import DialogService
 
 logger = logging.getLogger("app.handlers.dialog")
@@ -74,10 +75,8 @@ async def _execute_dialog(
     req_id = generate_request_id()
     set_request_id(req_id)
 
-    queue_manager = getattr(dialog_service, "queue_manager", None)
     queue_msg = None
-
-    if queue_manager and await queue_manager.is_user_busy(user_id):
+    if await dialog_service.is_busy(user_id):
         try:
             queue_msg = await target_message.answer(
                 "⏳ Ваше сообщение поставлено в очередь. Дождитесь ответа на предыдущий запрос..."
@@ -86,40 +85,28 @@ async def _execute_dialog(
             pass
 
     try:
-        ctx = queue_manager.acquire(user_id) if queue_manager else nullcontext()
-        async with ctx:
-            if queue_msg and hasattr(queue_msg, "delete") and callable(queue_msg.delete):
+        typing_task = asyncio.create_task(_send_typing(target_message))
+        try:
+            if event_id is None:
+                result = await dialog_service.process_user_message(user_id, user_text)
+            else:
+                result = await dialog_service.process_user_message(
+                    user_id, user_text, event_id=event_id
+                )
+        finally:
+            typing_task.cancel()
+            await asyncio.gather(typing_task, return_exceptions=True)
+            if queue_msg:
                 try:
                     await queue_msg.delete()
                 except Exception:
                     pass
-
-            typing_task = asyncio.create_task(_send_typing(target_message))
-            try:
-                if (
-                    event_id is not None
-                    and isinstance(dialog_service, DialogService)
-                    and dialog_service.agent is not None
-                ):
-                    response_text = await dialog_service.process_user_message(
-                        user_id, user_text, event_id=event_id
-                    )
-                else:
-                    response_text = await dialog_service.process_user_message(user_id, user_text)
-            finally:
-                typing_task.cancel()
-                await asyncio.gather(typing_task, return_exceptions=True)
-            if isinstance(response_text, AgentResult):
-                keyboard = (
-                    get_confirmation_keyboard(response_text.confirmation_id)
-                    if response_text.confirmation_id
-                    else None
-                )
-                await send_formatted_message(
-                    target_message, response_text.text, reply_markup=keyboard
-                )
-            else:
-                await send_formatted_message(target_message, response_text)
+        keyboard = (
+            get_confirmation_keyboard(result.confirmation_id)
+            if isinstance(result, AgentResult) and result.confirmation_id
+            else None
+        )
+        await send_formatted_message(target_message, reply_text(result), reply_markup=keyboard)
 
     except QueueFullError:
         logger.warning("[%s] user_queue_full", req_id)
@@ -132,6 +119,13 @@ async def _execute_dialog(
             target_message,
             "⏳ В очереди уже находится максимальное количество ваших сообщений. "
             "Пожалуйста, дождитесь ответа бота перед отправкой новых запросов.",
+        )
+
+    except InterruptedRunError:
+        await send_formatted_message(
+            target_message,
+            "Запрос прерван после обращения к инструменту. Отправьте новый запрос. "
+            "Состояние подтверждённых действий сверяется отдельно.",
         )
 
     except LLMTimeoutError:

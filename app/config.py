@@ -28,6 +28,10 @@ class Settings:
     llm_base_url: str = "https://openrouter.ai/api/v1"
     llm_model: str = "openai/gpt-4o-mini"
     llm_timeout: float = 180.0
+    llm_max_tokens: int = 1024
+    agent_timeout: float = 240.0
+    summary_max_chars: int = 2000
+    tool_result_max_chars: int = 12000
     llm_context_provider: str = "auto"
     history_max_messages: int = 10
     history_max_chars: int = 8000
@@ -200,6 +204,10 @@ class Settings:
             llm_base_url=llm_url,
             llm_model=llm_model,
             llm_timeout=llm_timeout,
+            llm_max_tokens=bounded("LLM_MAX_TOKENS", 1024, 64, 16384),
+            agent_timeout=bounded("AGENT_TIMEOUT", 240, 1, 1800),
+            summary_max_chars=bounded("SUMMARY_MAX_CHARS", 2000, 100, 8000),
+            tool_result_max_chars=bounded("TOOL_RESULT_MAX_CHARS", 12000, 100, 64000),
             llm_context_provider=context_provider,
             history_max_messages=max_messages,
             history_max_chars=max_chars,

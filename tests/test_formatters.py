@@ -8,6 +8,7 @@ from telegramify_markdown.entity import MessageEntity as ConvertedEntity
 
 from app.core import formatters
 from app.core.formatters import send_formatted_message
+from app.core.schemas.agent import AgentResult
 
 
 @pytest.fixture
@@ -363,7 +364,8 @@ async def test_conversion_failure_does_not_request_another_llm_answer(message, m
 
     monkeypatch.setattr(formatters, "convert", broken_convert)
     service = SimpleNamespace(
-        process_user_message=AsyncMock(return_value="**answer**"), queue_manager=None
+        process_user_message=AsyncMock(return_value=AgentResult(text="**answer**")),
+        is_busy=AsyncMock(return_value=False),
     )
     from typing import cast
 
