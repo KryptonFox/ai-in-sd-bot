@@ -90,7 +90,13 @@ class ToolExecutionService:
             raise ToolFailure("call_budget", "Достигнут лимит двух вызовов инструментов.")
         if self._mcp is None or not self.available:
             raise ToolFailure("mcp_unavailable", "MCP-сервер недоступен.")
-        if call.name not in {"get_weather", "get_schedule", "add_reminder"}:
+        if call.name not in {
+            "get_weather",
+            "get_schedule",
+            "get_schedule_week",
+            "read_resource",
+            "add_reminder",
+        }:
             raise ToolFailure("unknown_tool", "Инструмент не разрешён.")
         self._mcp.validate_arguments(call.name, call.arguments)
 

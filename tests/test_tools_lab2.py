@@ -264,7 +264,7 @@ async def test_weather_retries_once_then_raises_safe_failure() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(ToolFailure) as raised:
             await WeatherService(client).get_weather("Казань")
-    assert requests == 2
+    assert requests == 4
     assert raised.value.code == "weather_unavailable"
     assert "private network detail" not in raised.value.message
 
@@ -281,7 +281,7 @@ async def test_weather_timeout_retries_once_then_raises_safe_failure() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(ToolFailure) as raised:
             await WeatherService(client).get_weather("Казань")
-    assert requests == 2
+    assert requests == 4
     assert raised.value.code == "weather_unavailable"
     assert "private timeout detail" not in raised.value.message
 

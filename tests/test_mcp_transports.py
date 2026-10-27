@@ -155,6 +155,7 @@ async def test_stdio_transport_discovers_and_calls_server(tmp_path):
             assert {tool.name for tool in tools.tools} == {
                 "get_weather",
                 "get_schedule",
+                "get_schedule_week",
                 "add_reminder",
             }
             assert [str(resource.uri) for resource in resources.resources] == [
@@ -167,6 +168,9 @@ async def test_stdio_transport_discovers_and_calls_server(tmp_path):
             assert schedule.structuredContent["lessons"][0]["title"] == "Распределённые системы"
             repeated = await session.call_tool("get_schedule", {"date": "2030-01-02"})
             assert repeated.structuredContent == schedule.structuredContent
+            next_week = await session.call_tool("get_schedule_week", {"week_offset": 1})
+            assert not next_week.isError and next_week.structuredContent is not None
+            assert len(next_week.structuredContent["days"]) == 7
 
             weather = await session.call_tool("get_weather", {"city": "Москва"})
             assert weather.structuredContent is not None
@@ -222,7 +226,7 @@ async def test_streamable_http_transport_auth_and_mcp_contract(tmp_path):
                         await session.initialize()
                         tools = await session.list_tools()
                         resources = await session.list_resources()
-                        assert len(tools.tools) == 3
+                        assert len(tools.tools) == 4
                         assert len(resources.resources) == 1
 
                         schedule = await session.call_tool("get_schedule", {"date": "2030-01-02"})

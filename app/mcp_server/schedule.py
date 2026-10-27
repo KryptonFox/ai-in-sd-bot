@@ -22,7 +22,7 @@ class ScheduleService:
             raise ValueError("timezone must be a valid IANA timezone") from exc
 
     async def get_schedule(self, date: str) -> ScheduleResult:
-        self._parse_date(date)
+        parsed = self._parse_date(date)
         data = self._read_data()
         raw_lessons = data.get(date, [])
         try:
@@ -31,11 +31,33 @@ class ScheduleService:
             raise ToolFailure(
                 "schedule_unavailable", "В расписании обнаружены некорректные данные."
             ) from exc
-        return ScheduleResult(date=date, lessons=lessons)
+        weekdays = (
+            "понедельник",
+            "вторник",
+            "среда",
+            "четверг",
+            "пятница",
+            "суббота",
+            "воскресенье",
+        )
+        return ScheduleResult(
+            date=date,
+            lessons=lessons,
+            data_available=date in data,
+            is_free_day=not lessons if date in data else None,
+            weekday=weekdays[parsed.weekday()],
+        )
 
     async def current_week(self) -> WeekSchedule:
+        return await self.relative_week(0)
+
+    async def relative_week(self, offset: int) -> WeekSchedule:
         today = self._clock.now().astimezone(self._zone).date()
-        monday = today - timedelta(days=today.weekday())
+        return await self.week_containing((today + timedelta(weeks=offset)).isoformat())
+
+    async def week_containing(self, value: str) -> WeekSchedule:
+        day = self._parse_date(value)
+        monday = day - timedelta(days=day.weekday())
         days: list[ScheduleResult] = []
         for offset in range(7):
             current = monday + timedelta(days=offset)
@@ -45,6 +67,7 @@ class ScheduleService:
             start_date=monday.isoformat(),
             end_date=(monday + timedelta(days=6)).isoformat(),
             days=days,
+            free_days=[day.date for day in days if day.is_free_day is True],
         )
 
     @staticmethod

@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "evaluation_context": {
     "now": "2026-10-12T09:00:00+03:00",
     "timezone": "Europe/Moscow"
@@ -153,6 +153,48 @@
       "query": "Нужен ли сегодня зонт?",
       "expected_action": "clarify",
       "expected_arguments": {}
+    },
+    {
+      "id": "schedule_week",
+      "query": "Покажи моё расписание на эту неделю.",
+      "expected_action": "read_resource",
+      "expected_arguments": {
+        "uri": "schedule://current-week"
+      }
+    },
+    {
+      "id": "schedule_free_days",
+      "query": "В какие дни на этой неделе нет пар?",
+      "expected_action": "read_resource",
+      "expected_arguments": {
+        "uri": "schedule://current-week"
+      }
+    },
+    {
+      "id": "weather_tomorrow",
+      "query": "Нужен ли завтра зонт в казани?",
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Казань",
+        "date": "2026-10-13"
+      }
+    },
+    {
+      "id": "weather_day_after",
+      "query": "Как послезавтра одеться в Санкт-Петербурге?",
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Санкт-Петербург",
+        "date": "2026-10-14"
+      }
+    },
+    {
+      "id": "schedule_next_week",
+      "query": "Какие у меня пары на следующей неделе?",
+      "expected_action": "get_schedule_week",
+      "expected_arguments": {
+        "week_offset": 1
+      }
     }
   ]
 }

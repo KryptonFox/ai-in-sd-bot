@@ -73,7 +73,14 @@ async def test_unique_exact_city_wins_over_duplicates_and_prefix_matches() -> No
     assert result.today is not None and result.today.date.isoformat() == "2026-10-27"
     assert result.today.precipitation_probability == 80
     assert result.today.period == "whole_day"
-    assert requests[1].url.params["daily"] == "precipitation_probability_max,precipitation_sum"
+    assert set(requests[1].url.params["daily"].split(",")) == {
+        "precipitation_probability_max",
+        "precipitation_sum",
+        "temperature_2m_min",
+        "temperature_2m_max",
+        "weather_code",
+        "wind_speed_10m_max",
+    }
 
 
 @pytest.mark.parametrize("qualifier", ["Russia", "RU", "Татарстан"])

@@ -15,11 +15,13 @@ from app.core.schemas.tools import (
     ReminderResult,
     ScheduleArguments,
     ScheduleResult,
+    ScheduleWeekArguments,
     ToolDTO,
     ToolErrorResult,
     ToolFailure,
     WeatherArguments,
     WeatherResult,
+    WeekSchedule,
 )
 from app.db.repositories.reminder_repo import create_confirmed_reminder
 from app.mcp_server.config import ServerSettings
@@ -30,7 +32,8 @@ TOOL_MODELS: dict[str, tuple[type[ToolDTO], type[ToolDTO], str]] = {
     "get_weather": (
         WeatherArguments,
         WeatherResult,
-        "Текущая погода и прогноз осадков на сегодня в часовом поясе города. "
+        "Текущая погода и дневной прогноз: температура, осадки, ветер. "
+        "Для завтра, послезавтра или другой даты передавай date=YYYY-MM-DD; горизонт 16 дней. "
         "Используй также для вопросов про зонт, дождь и одежду. "
         "Неоднозначное место требует уточнения. "
         "В city передавай название в нормальной форме на исходном языке: в Казани → Казань, "
@@ -39,6 +42,13 @@ TOOL_MODELS: dict[str, tuple[type[ToolDTO], type[ToolDTO], str]] = {
         "Не переводи, не сокращай и не добавляй географические уточнения от себя.",
     ),
     "get_schedule": (ScheduleArguments, ScheduleResult, "Занятия на дату YYYY-MM-DD."),
+    "get_schedule_week": (
+        ScheduleWeekArguments,
+        WeekSchedule,
+        "Расписание на всю неделю (понедельник–воскресенье), содержащую date=YYYY-MM-DD. "
+        "Для следующей недели передавай week_offset=1 без date: календарь вычисляет сервер. "
+        "Текущая неделя также доступна через ресурс schedule://current-week.",
+    ),
     "add_reminder": (
         ReminderArguments,
         ReminderResult,
@@ -59,6 +69,17 @@ def tool_catalog() -> list[types.Tool]:
             ),
         )
         for name, (args, result, description) in TOOL_MODELS.items()
+    ]
+
+
+def resource_catalog() -> list[types.Resource]:
+    return [
+        types.Resource(
+            uri="schedule://current-week",
+            name="Текущая неделя",
+            mimeType="application/json",
+            description="Расписание текущей недели целиком, понедельник–воскресенье.",
+        )
     ]
 
 
@@ -88,7 +109,7 @@ def build_server(
     clock: Clock | None = None,
 ) -> Server:
     clock = clock or SystemClock()
-    weather = WeatherService(http)
+    weather = WeatherService(http, clock=clock)
     schedule = ScheduleService(settings.schedule_path, settings.schedule_timezone, clock)
     server = Server("itmo-student-tools")
 
@@ -105,9 +126,15 @@ def build_server(
             result: ToolDTO
 
             if name == "get_weather":
-                result = await weather.get_weather(arguments["city"])
+                result = await weather.get_weather(arguments["city"], arguments["date"])
             elif name == "get_schedule":
                 result = await schedule.get_schedule(arguments["date"])
+            elif name == "get_schedule_week":
+                result = (
+                    await schedule.week_containing(arguments["date"])
+                    if arguments["date"] is not None
+                    else await schedule.relative_week(arguments["week_offset"])
+                )
             else:
                 metadata = server.request_context.meta
                 meta = metadata.model_dump() if metadata else {}
@@ -139,14 +166,7 @@ def build_server(
 
     @server.list_resources()
     async def list_resources() -> list[types.Resource]:
-        return [
-            types.Resource(
-                uri="schedule://current-week",
-                name="Текущая неделя",
-                mimeType="application/json",
-                description="Расписание понедельник–воскресенье.",
-            )
-        ]
+        return resource_catalog()
 
     @server.read_resource()
     async def read_resource(uri: AnyUrl) -> list[ReadResourceContents]:

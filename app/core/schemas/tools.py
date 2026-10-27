@@ -10,6 +10,21 @@ class ToolDTO(BaseModel):
 
 class WeatherArguments(ToolDTO):
     city: str = Field(min_length=1, max_length=100, pattern=r"\S")
+    date: str | None = Field(
+        default=None,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+        json_schema_extra={"format": "date"},
+        description=(
+            "Дата прогноза YYYY-MM-DD. Если не задана — текущая погода и прогноз на сегодня."
+        ),
+    )
+
+    @field_validator("date")
+    @classmethod
+    def validate_forecast_date(cls, value: str | None) -> str | None:
+        if value is not None and datetime.strptime(value, "%Y-%m-%d").strftime("%Y-%m-%d") != value:
+            raise ValueError("date must be a real date in YYYY-MM-DD format")
+        return value
 
     @field_validator("city", mode="before")
     @classmethod
@@ -30,6 +45,31 @@ class ScheduleArguments(ToolDTO):
         if parsed.strftime("%Y-%m-%d") != value:
             raise ValueError("date must be a real date in YYYY-MM-DD format")
         return value
+
+
+class ScheduleWeekArguments(ToolDTO):
+    date: str | None = Field(
+        default=None,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+        json_schema_extra={"format": "date"},
+        description=(
+            "Дата внутри конкретной недели. Для относительных недель используй week_offset."
+        ),
+    )
+    week_offset: int = Field(
+        default=0, ge=-52, le=52, description="0 — эта неделя, 1 — следующая, 2 — через две недели."
+    )
+
+    @field_validator("date")
+    @classmethod
+    def validate_week_date(cls, value: str | None) -> str | None:
+        return ScheduleArguments(date=value).date if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_selection(self) -> "ScheduleWeekArguments":
+        if self.date is not None and self.week_offset != 0:
+            raise ValueError("choose date or week_offset")
+        return self
 
 
 class ReminderArguments(ToolDTO):
@@ -68,6 +108,23 @@ class DailyForecast(ToolDTO):
     precipitation: float = Field(ge=0, allow_inf_nan=False)
     precipitation_unit: Literal["mm"] = "mm"
     period: Literal["whole_day"] = "whole_day"
+    temperature_min: float | None = Field(default=None, allow_inf_nan=False)
+    temperature_max: float | None = Field(default=None, allow_inf_nan=False)
+    temperature_unit: Literal["°C"] = "°C"
+    weather_code: int | None = None
+    condition: str | None = None
+    wind_speed_max: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    wind_unit: Literal["km/h"] = "km/h"
+
+    @model_validator(mode="after")
+    def validate_temperature_range(self) -> "DailyForecast":
+        if (
+            self.temperature_min is not None
+            and self.temperature_max is not None
+            and self.temperature_min > self.temperature_max
+        ):
+            raise ValueError("minimum temperature exceeds maximum")
+        return self
 
 
 class WeatherResult(ToolDTO):
@@ -125,9 +182,12 @@ class WeatherResult(ToolDTO):
     wind_speed: float | None = Field(default=None, allow_inf_nan=False)
     wind_unit: str | None = None
     observed_at: str | None = None
+    condition: str | None = None
     timezone: str | None = None
     candidates: list[CityCandidate] = Field(default_factory=list)
     today: DailyForecast | None = None
+    requested_date: date | None = None
+    forecast: DailyForecast | None = None
 
     @model_validator(mode="after")
     def validate_status_fields(self) -> "WeatherResult":
@@ -160,6 +220,9 @@ class Lesson(ToolDTO):
 class ScheduleResult(ToolDTO):
     date: str
     lessons: list[Lesson] = Field(default_factory=list)
+    data_available: bool = True
+    is_free_day: bool | None = None
+    weekday: str | None = None
 
 
 class WeekSchedule(ToolDTO):
@@ -167,6 +230,7 @@ class WeekSchedule(ToolDTO):
     start_date: str
     end_date: str
     days: list[ScheduleResult] = Field(default_factory=list)
+    free_days: list[str] = Field(default_factory=list)
 
 
 class ReminderResult(ToolDTO):

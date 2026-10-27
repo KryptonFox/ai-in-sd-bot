@@ -15,7 +15,7 @@ from app.core.schemas.message import ChatMessage, MessageRole
 
 ROOT = Path(__file__).resolve().parents[1]
 DATASET_PATH = ROOT / "docs/evaluation/lab2-routing.json"
-TOOL_ACTIONS = {"get_weather", "get_schedule", "add_reminder"}
+TOOL_ACTIONS = {"get_weather", "get_schedule", "get_schedule_week", "read_resource", "add_reminder"}
 
 
 class ExpectedDecision(TypedDict):
@@ -131,23 +131,29 @@ def normalize_value(key: str, value: object) -> object:
 def normalize_arguments(arguments: Mapping[str, object] | None) -> dict[str, object]:
     if not isinstance(arguments, dict):
         return {}
-    return {key: normalize_value(key, value) for key, value in arguments.items()}
+    return {
+        key: normalize_value(key, value)
+        for key, value in arguments.items()
+        if key != "date" or value is not None
+    }
 
 
 def score_case(
     case: ExpectedDecision,
     predicted_action: str,
     arguments: Mapping[str, object],
+    *,
+    today: str | None = None,
 ) -> CaseScore:
     expected_action = case["expected_action"]
     expected_arguments = case.get("expected_arguments", {})
     route_correct = predicted_action == expected_action
     args_applicable = expected_action in TOOL_ACTIONS
-    args_correct = (
-        route_correct and normalize_arguments(arguments) == normalize_arguments(expected_arguments)
-        if args_applicable
-        else None
-    )
+    actual = normalize_arguments(arguments)
+    expected = normalize_arguments(expected_arguments)
+    if expected_action == "get_weather" and "date" not in expected and actual.get("date") == today:
+        actual.pop("date", None)
+    args_correct = route_correct and actual == expected if args_applicable else None
     return {
         "route_correct": route_correct,
         "arguments_applicable": args_applicable,
@@ -260,7 +266,7 @@ async def run_evaluation(case_ids: set[str] | None, output_dir: Path, label: str
     from app.config import Settings
     from app.llm.client import OpenAIClient
     from app.mcp.client import MCPClient
-    from app.mcp_server.server import tool_catalog
+    from app.mcp_server.server import resource_catalog, tool_catalog
     from app.modes.definitions import STUDY_MODE
     from app.services.agent_service import AgentService
     from app.services.tool_execution import ToolExecutionService
@@ -272,6 +278,7 @@ async def run_evaluation(case_ids: set[str] | None, output_dir: Path, label: str
     client = OpenAIClient(settings)
     mcp = MCPClient(settings)
     mcp.load_catalog(tool_catalog())
+    mcp.load_resources(resource_catalog())
     service = AgentService(
         client,
         ToolExecutionService(
@@ -333,7 +340,14 @@ async def run_evaluation(case_ids: set[str] | None, output_dir: Path, label: str
                 row["predicted_action"] = predicted_action
                 row["public_answer"] = agent_result.text
                 row["arguments"] = predicted_arguments
-                score = score_case(case, predicted_action, predicted_arguments)
+                score = score_case(
+                    case,
+                    predicted_action,
+                    predicted_arguments,
+                    today=datetime.fromisoformat(dataset["evaluation_context"]["now"])
+                    .date()
+                    .isoformat(),
+                )
                 row["route_correct"] = score["route_correct"]
                 row["arguments_applicable"] = score["arguments_applicable"]
                 row["arguments_correct"] = score["arguments_correct"]

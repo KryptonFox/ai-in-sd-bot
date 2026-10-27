@@ -24,7 +24,7 @@ from app.config import Settings
 from app.core.schemas.llm import ToolDefinition
 from app.core.schemas.tools import ToolFailure, WeekSchedule
 
-ALLOWED_TOOLS = frozenset({"get_weather", "get_schedule", "add_reminder"})
+ALLOWED_TOOLS = frozenset({"get_weather", "get_schedule", "get_schedule_week", "add_reminder"})
 logger = logging.getLogger("app.mcp.client")
 
 type _CommandMethod = Literal["call_tool", "read_resource"]
@@ -77,6 +77,26 @@ class MCPClient:
         self.tools = tools
         self.outputs = outputs
         self.available = bool(tools)
+
+    def load_resources(self, catalog: Sequence[types.Resource]) -> None:
+        resources = [item for item in catalog if str(item.uri) == "schedule://current-week"]
+        self.resources = {str(item.uri) for item in resources}
+        self.tools.pop("read_resource", None)
+        if not resources:
+            return
+        descriptions = "; ".join(
+            f"{item.uri}: {item.description or item.name}" for item in resources
+        )
+        self.tools["read_resource"] = ToolDefinition(
+            name="read_resource",
+            description=f"Прочитать обнаруженный MCP-ресурс. {descriptions}",
+            parameters={
+                "type": "object",
+                "properties": {"uri": {"type": "string", "enum": sorted(self.resources)}},
+                "required": ["uri"],
+                "additionalProperties": False,
+            },
+        )
 
     def validate_arguments(self, name: str, arguments: Mapping[str, object]) -> None:
         if name not in self.tools:
@@ -182,7 +202,7 @@ class MCPClient:
     async def _discover(self, session: ClientSession) -> None:
         await session.initialize()
         self.load_catalog((await session.list_tools()).tools)
-        self.resources = {str(item.uri) for item in (await session.list_resources()).resources}
+        self.load_resources((await session.list_resources()).resources)
         self._ready.set()
         logger.info(
             "mcp_connected transport=%s tools=%d",
@@ -271,6 +291,8 @@ class MCPClient:
         confirmation_id: str | None = None,
     ) -> dict[str, object]:
         self.validate_arguments(name, arguments)
+        if name == "read_resource":
+            return await self.read_week()
         meta: dict[str, object] | None = None
 
         if name == "add_reminder":
@@ -296,7 +318,12 @@ class MCPClient:
         safe_code = (
             code if isinstance(code, str) and code.replace("_", "").isalnum() else "tool_failed"
         )
-        return ToolFailure(safe_code, "Инструмент не смог выполнить запрос.")
+        message = {
+            "forecast_date_unavailable": "Прогноз доступен на сегодня и следующие 15 дней.",
+            "weather_unavailable": "Сервис погоды сейчас недоступен. Попробуйте позже.",
+            "schedule_unavailable": "Не удалось прочитать расписание. Попробуйте позже.",
+        }.get(safe_code, "Инструмент не смог выполнить запрос.")
+        return ToolFailure(safe_code, message)
 
     def _validated_output(self, name: str, payload: object) -> dict[str, object]:
         try:

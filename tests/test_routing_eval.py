@@ -44,6 +44,22 @@ def test_argument_normalization_uses_trim_casefold_and_instant():
     assert normalize_value("city", " St. Petersburg ") == "st. petersburg"
 
 
+def test_weather_default_date_accepts_null_or_today_but_rejects_tomorrow():
+    case: ExpectedDecision = {
+        "expected_action": "get_weather",
+        "expected_arguments": {"city": "Казань"},
+    }
+    for arguments in (
+        {"city": "Казань"},
+        {"city": "Казань", "date": None},
+        {"city": "Казань", "date": "2026-10-12"},
+    ):
+        assert score_case(case, "get_weather", arguments, today="2026-10-12")["success"]
+    assert not score_case(
+        case, "get_weather", {"city": "Казань", "date": "2026-10-13"}, today="2026-10-12"
+    )["success"]
+
+
 def test_summary_uses_full_routing_and_tool_argument_denominators():
     cases: list[ScoredDecision] = [
         {"route_correct": True, "arguments_applicable": True, "arguments_correct": True},

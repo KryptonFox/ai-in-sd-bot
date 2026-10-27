@@ -314,7 +314,13 @@ async def test_stdio_client_discovers_reads_and_confirms_reminder_with_database(
 
     try:
         assert await client.start() is True
-        assert set(client.tools) == {"get_weather", "get_schedule", "add_reminder"}
+        assert set(client.tools) == {
+            "get_weather",
+            "get_schedule",
+            "get_schedule_week",
+            "read_resource",
+            "add_reminder",
+        }
         schedule_result = await client.call_tool("get_schedule", {"date": today.isoformat()})
         assert (
             ScheduleResult.model_validate(schedule_result).lessons[0].title
@@ -410,7 +416,13 @@ async def test_streamable_http_client_reads_and_rejects_bad_auth(tmp_path) -> No
         assert await client.start() is True
         assert "get_schedule" in client.tools
         schedule_result = await client.call_tool("get_schedule", {"date": "2026-10-26"})
-        assert schedule_result == {"date": "2026-10-26", "lessons": []}
+        assert schedule_result == {
+            "date": "2026-10-26",
+            "lessons": [],
+            "data_available": True,
+            "is_free_day": True,
+            "weekday": "понедельник",
+        }
 
         unauthorized_client = MCPClient(
             Settings(
