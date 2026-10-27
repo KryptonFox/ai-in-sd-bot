@@ -12,5 +12,6 @@ dist/
 .coverage
 htmlcov/
 .idea/
+.vscode/
 /docs/verification.md
 /docs/presentations/*-notes.md
