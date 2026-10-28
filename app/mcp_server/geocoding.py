@@ -9,6 +9,8 @@ from app.core.schemas.tools import ToolFailure
 
 type FetchJSON = Callable[[str, dict[str, str | int]], Awaitable[dict[str, object]]]
 logger = logging.getLogger("app.mcp_server.geocoding")
+MAJOR_CITY_POPULATION = 100_000
+DOMINANT_POPULATION_RATIO = 20
 
 
 def normalized_name(value: str) -> str:
@@ -22,6 +24,7 @@ class GeoLocation(BaseModel):
     country: str = Field(min_length=1)
     country_code: str | None = None
     admin1: str | None = None
+    population: int = Field(default=0, ge=0)
     latitude: float = Field(ge=-90, le=90, allow_inf_nan=False)
     longitude: float = Field(ge=-180, le=180, allow_inf_nan=False)
 
@@ -111,7 +114,22 @@ class LocationResolver:
             for place in unique.values()
             if normalized_name(place.name) == normalized_name(name)
         ]
-        return exact or list(unique.values())
+        matches = exact or list(unique.values())
+        return self._prefer_major_city(matches) if exact else matches
+
+    @staticmethod
+    def _prefer_major_city(locations: list[GeoLocation]) -> list[GeoLocation]:
+        if len(locations) < 2:
+            return locations
+        ranked = sorted(locations, key=lambda place: place.population, reverse=True)
+        largest, runner_up = ranked[:2]
+        if (
+            largest.population >= MAJOR_CITY_POPULATION
+            and runner_up.population < MAJOR_CITY_POPULATION
+            and largest.population >= DOMINANT_POPULATION_RATIO * max(runner_up.population, 1)
+        ):
+            return [largest]
+        return locations
 
     async def _photon(self, city: str) -> dict[str, object]:
         data = await self._fetch(

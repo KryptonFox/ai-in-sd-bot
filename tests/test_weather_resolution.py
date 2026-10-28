@@ -123,6 +123,74 @@ async def test_distinct_exact_places_remain_ambiguous() -> None:
     assert result.candidates[0].region != result.candidates[1].region
 
 
+@pytest.mark.parametrize("village_population", [None, 0, 500])
+async def test_major_city_wins_over_homonymous_villages(village_population: int | None) -> None:
+    requests: list[httpx.Request] = []
+    village = {**CITY, "id": 999, "admin1": "Кировская область", "latitude": 60}
+    if village_population is not None:
+        village["population"] = village_population
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if "geocoding" in request.url.host:
+            return httpx.Response(
+                200,
+                json={"results": [village, {**CITY, "population": 1_300_000}]},
+            )
+        assert request.url.params["latitude"] == str(CITY["latitude"])
+        assert request.url.params["longitude"] == str(CITY["longitude"])
+        return httpx.Response(200, json=forecast())
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        result = await WeatherService(client, clock=CLOCK).get_weather("Казань")
+    assert result.status == "ok" and result.city == "Казань"
+    assert len(requests) == 2
+
+
+@pytest.mark.parametrize(
+    ("largest_population", "other_population"),
+    [(1_300_000, 200_000), (10_000_000, 100_000), (150_000, 30_000), (90_000, 100)],
+)
+async def test_population_does_not_hide_genuinely_ambiguous_places(
+    largest_population: int, other_population: int
+) -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert "geocoding" in request.url.host
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {**CITY, "population": largest_population},
+                    {**CITY, "id": 999, "latitude": 60, "population": other_population},
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        result = await WeatherService(client, clock=CLOCK).get_weather("Казань")
+    assert result.status == "ambiguous" and len(result.candidates) == 2
+
+
+async def test_explicit_region_takes_priority_over_city_population() -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        if "geocoding" in request.url.host:
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {**CITY, "population": 1_300_000},
+                        {**CITY, "id": 999, "admin1": "Кировская область", "latitude": 60},
+                    ]
+                },
+            )
+        assert request.url.params["latitude"] == "60.0"
+        return httpx.Response(200, json=forecast())
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        result = await WeatherService(client, clock=CLOCK).get_weather("Казань, Кировская область")
+    assert result.status == "ok"
+
+
 @pytest.mark.parametrize(
     "change", ["wrong_day", "negative_rain", "invalid_probability", "wrong_units"]
 )
@@ -177,7 +245,21 @@ async def test_weather_pipeline_separates_routing_location_forecast_and_answer(
         requests.append(request)
         if "geocoding" in request.url.host:
             assert request.url.params["name"] == city
-            return httpx.Response(200, json={"results": [{**CITY, "name": city}]})
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {**CITY, "name": city, "population": 1_300_000},
+                        {
+                            **CITY,
+                            "id": 999,
+                            "name": city,
+                            "admin1": "Кировская область",
+                            "latitude": 60,
+                        },
+                    ]
+                },
+            )
         return httpx.Response(200, json=forecast(chance, 3 if chance else 0))
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
