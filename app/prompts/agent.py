@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta
 
+from app.core.schemas.tools import DEFAULT_WEATHER_CITY
+
 
 def agent_rules(now: datetime, timezone: str | None, *, tools_available: bool) -> str:
     today = now.date()
@@ -18,6 +20,8 @@ def agent_rules(now: datetime, timezone: str | None, *, tools_available: bool) -
         f"Следующая неделя: {monday + timedelta(weeks=1)} — {monday + timedelta(days=13)}. "
         "Используй эти даты, не вычисляй дни недели по памяти. "
         "Погоду и расписание получай только инструментом. Не придумывай актуальные данные. "
+        "Без периода погоду и расписание запрашивай на сегодня, не передавая date. "
+        "Явные даты и периоды, включая неделю, имеют приоритет. "
         "Для расписания на эту неделю вызови read_resource с uri=schedule://current-week. "
         "Для следующей недели вызови get_schedule_week с week_offset=1 и без date. "
         "Для недели с конкретной датой передавай date, не смешивай его с week_offset. "
@@ -37,7 +41,8 @@ def agent_rules(now: datetime, timezone: str | None, *, tools_available: bool) -
         "Страну и регион не угадывай; используй только явно указанные пользователем. "
         "Если страна или регион названы явно, обязательно сохрани их в city через запятую. "
         "Если город не назван сейчас, используй ранее явно названный город из диалога; "
-        "если такого нет, спроси город. Не выводи город из timezone, языка или IP. "
+        f"если такого нет, используй {DEFAULT_WEATHER_CITY} по умолчанию, не спрашивай город. "
+        "Не выводи город из timezone, языка или IP. "
         "Для зонта на сегодня используй today, прогноз за весь день в timezone города. "
         "Для завтра, послезавтра или конкретного дня передавай get_weather.date в YYYY-MM-DD "
         "и отвечай по forecast за requested_date. На будущую дату нельзя подставлять "

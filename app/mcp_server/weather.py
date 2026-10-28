@@ -9,7 +9,13 @@ import httpx
 from pydantic import ValidationError
 
 from app.core.clock import Clock, SystemClock
-from app.core.schemas.tools import CityCandidate, DailyForecast, ToolFailure, WeatherResult
+from app.core.schemas.tools import (
+    DEFAULT_WEATHER_CITY,
+    CityCandidate,
+    DailyForecast,
+    ToolFailure,
+    WeatherResult,
+)
 from app.mcp_server.conditions import weather_condition
 from app.mcp_server.geocoding import GeoLocation, LocationResolver
 
@@ -23,7 +29,9 @@ class WeatherService:
         self._clock = clock or SystemClock()
         self._locations = LocationResolver(self._fetch)
 
-    async def get_weather(self, city: str, forecast_date: str | None = None) -> WeatherResult:
+    async def get_weather(
+        self, city: str = DEFAULT_WEATHER_CITY, forecast_date: str | None = None
+    ) -> WeatherResult:
         requested = date.fromisoformat(forecast_date) if forecast_date is not None else None
         try:
             async with asyncio.timeout(8):

@@ -305,7 +305,9 @@ async def test_weather_pipeline_separates_routing_location_forecast_and_answer(
         )
     first_request = llm.generate.await_args_list[0].args[0]
     assert "в Казани → Казань" in first_request.messages[0].content
-    assert "если такого нет, спроси город" in first_request.messages[0].content
+    assert "используй Санкт-Петербург по умолчанию, не спрашивай город" in (
+        first_request.messages[0].content
+    )
     tool.call_tool.assert_awaited_once_with("get_weather", {"city": city})
     assert len(requests) == 2
     assert result.decision == "tool" and str(float(chance)) in result.text
@@ -370,27 +372,20 @@ async def test_unknown_location_returns_clarification_without_forecast_or_second
     llm.generate.assert_awaited_once()
 
 
-async def test_missing_city_control_response_does_not_invent_location() -> None:
-    llm = MagicMock(
-        generate=AsyncMock(
-            return_value=LLMResponse(
-                content="",
-                tool_calls=[
-                    ToolCall(
-                        id="finish",
-                        name="finish_response",
-                        arguments={"action": "clarify", "text": "В каком городе?"},
-                    )
-                ],
-            )
-        )
-    )
+async def test_missing_weather_arguments_use_saint_petersburg_and_today() -> None:
     tool = LocalToolClient(Settings(bot_token="unused", postgres_password="unused"))
     tool.load_catalog(tool_catalog())
-    tool.call_tool = AsyncMock()
-    result = await AgentService(llm, ToolExecutionService(tool)).run(
-        [ChatMessage(role=MessageRole.USER, content="Нужен ли зонт?")],
-        EventContext(user_id=1, event_id="missing-city", request_id="test"),
-    )
-    assert result.decision == "clarify" and result.tool_name is None
-    tool.call_tool.assert_not_awaited()
+    tool.validate_arguments("get_weather", {})
+    tool.validate_arguments("get_schedule", {})
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if "geocoding" in request.url.host:
+            assert request.url.params["name"] == "Санкт-Петербург"
+            return httpx.Response(200, json={"results": [{**CITY, "name": "Санкт-Петербург"}]})
+        return httpx.Response(200, json=forecast())
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        result = await WeatherService(client, clock=CLOCK).get_weather()
+    assert result.status == "ok" and result.city == "Санкт-Петербург"
+    assert result.requested_date is not None
+    assert result.requested_date.isoformat() == "2026-10-27"

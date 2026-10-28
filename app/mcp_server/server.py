@@ -33,6 +33,7 @@ TOOL_MODELS: dict[str, tuple[type[ToolDTO], type[ToolDTO], str]] = {
         WeatherArguments,
         WeatherResult,
         "Текущая погода и дневной прогноз: температура, осадки, ветер. "
+        "По умолчанию — Санкт-Петербург и сегодня; не запрашивай эти параметры без необходимости. "
         "Для завтра, послезавтра или другой даты передавай date=YYYY-MM-DD; горизонт 16 дней. "
         "Используй также для вопросов про зонт, дождь и одежду. "
         "Неоднозначное место требует уточнения. "
@@ -41,7 +42,11 @@ TOOL_MODELS: dict[str, tuple[type[ToolDTO], type[ToolDTO], str]] = {
         "добавляя через запятую страну/регион только если пользователь сам их указал. "
         "Не переводи, не сокращай и не добавляй географические уточнения от себя.",
     ),
-    "get_schedule": (ScheduleArguments, ScheduleResult, "Занятия на дату YYYY-MM-DD."),
+    "get_schedule": (
+        ScheduleArguments,
+        ScheduleResult,
+        "Занятия на дату YYYY-MM-DD. Если дата не указана — сегодня в часовом поясе расписания.",
+    ),
     "get_schedule_week": (
         ScheduleWeekArguments,
         WeekSchedule,

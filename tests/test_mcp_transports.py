@@ -1,5 +1,6 @@
 import json
 import sys
+from datetime import datetime
 from unittest.mock import AsyncMock, Mock
 
 import httpx
@@ -9,6 +10,7 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
 from pydantic import AnyUrl
 
+from app.core.clock import FrozenClock
 from app.mcp_server.__main__ import http_app
 from app.mcp_server.config import ServerSettings
 from app.mcp_server.server import build_server
@@ -51,7 +53,12 @@ def weather_handler(request):
             200,
             json={
                 "results": [
-                    {"name": "Москва", "country": "Россия", "latitude": 55.75, "longitude": 37.62}
+                    {
+                        "name": request.url.params["name"],
+                        "country": "Россия",
+                        "latitude": 55.75,
+                        "longitude": 37.62,
+                    }
                 ]
             },
         )
@@ -200,7 +207,12 @@ async def test_streamable_http_transport_auth_and_mcp_contract(tmp_path):
     pool = fake_pool()
     transport = httpx.MockTransport(weather_handler)
     async with httpx.AsyncClient(transport=transport) as weather_http:
-        server = build_server(pool, settings(path), weather_http)
+        server = build_server(
+            pool,
+            settings(path),
+            weather_http,
+            FrozenClock(datetime.fromisoformat("2030-01-01T22:00:00+00:00")),
+        )
         app = http_app(server, SECRET, pool)
 
         async with app.router.lifespan_context(app):
@@ -240,6 +252,17 @@ async def test_streamable_http_transport_auth_and_mcp_contract(tmp_path):
                         assert weather.structuredContent is not None
                         assert weather.isError is not True
                         assert weather.structuredContent["status"] == "ok"
+
+                        default_weather = await session.call_tool("get_weather", {})
+                        assert not default_weather.isError
+                        assert default_weather.structuredContent is not None
+                        assert default_weather.structuredContent["city"] == "Санкт-Петербург"
+                        assert default_weather.structuredContent["requested_date"] == "2030-01-02"
+                        default_schedule = await session.call_tool("get_schedule", {})
+                        assert not default_schedule.isError
+                        assert default_schedule.structuredContent is not None
+                        assert default_schedule.structuredContent["date"] == "2030-01-02"
+                        assert len(default_schedule.structuredContent["lessons"]) == 1
 
                         week = await session.read_resource(AnyUrl("schedule://current-week"))
                         content = week.contents[0]

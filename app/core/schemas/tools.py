@@ -3,13 +3,21 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+DEFAULT_WEATHER_CITY = "Санкт-Петербург"
+
 
 class ToolDTO(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
 class WeatherArguments(ToolDTO):
-    city: str = Field(min_length=1, max_length=100, pattern=r"\S")
+    city: str = Field(
+        default=DEFAULT_WEATHER_CITY,
+        min_length=1,
+        max_length=100,
+        pattern=r"\S",
+        description="Город. Если не указан — Санкт-Петербург.",
+    )
     date: str | None = Field(
         default=None,
         pattern=r"^\d{4}-\d{2}-\d{2}$",
@@ -33,11 +41,18 @@ class WeatherArguments(ToolDTO):
 
 
 class ScheduleArguments(ToolDTO):
-    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$", json_schema_extra={"format": "date"})
+    date: str | None = Field(
+        default=None,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+        json_schema_extra={"format": "date"},
+        description="Дата YYYY-MM-DD. Если не задана — сегодня в часовом поясе расписания.",
+    )
 
     @field_validator("date")
     @classmethod
-    def validate_date(cls, value: str) -> str:
+    def validate_date(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         try:
             parsed = datetime.strptime(value, "%Y-%m-%d")
         except ValueError as exc:

@@ -21,7 +21,9 @@ class ScheduleService:
         except (ValueError, ZoneInfoNotFoundError) as exc:
             raise ValueError("timezone must be a valid IANA timezone") from exc
 
-    async def get_schedule(self, date: str) -> ScheduleResult:
+    async def get_schedule(self, date: str | None = None) -> ScheduleResult:
+        if date is None:
+            date = self._clock.now().astimezone(self._zone).date().isoformat()
         parsed = self._parse_date(date)
         data = self._read_data()
         raw_lessons = data.get(date, [])

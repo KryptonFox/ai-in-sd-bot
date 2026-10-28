@@ -22,6 +22,10 @@ from app.mcp_server.weather import WeatherService
 
 
 def test_tool_argument_dtos_strip_and_reject_invalid_values() -> None:
+    assert WeatherArguments().city == "Санкт-Петербург"
+    assert WeatherArguments().date is None
+    assert ScheduleArguments().date is None
+    assert ScheduleArguments(date=None).date is None
     assert WeatherArguments(city="  Казань  ").city == "Казань"
     assert (
         ReminderArguments(text="  купить молоко ", remind_at="2026-10-27T12:00:00+03:00").text
@@ -367,3 +371,14 @@ async def test_schedule_rejects_invalid_date_before_reading_file(tmp_path):
         with pytest.raises(ToolFailure) as failure:
             await service.get_schedule(invalid)
         assert failure.value.code == "invalid_date"
+
+
+async def test_default_schedule_day_uses_schedule_timezone_and_clock(tmp_path: Path) -> None:
+    path = tmp_path / "schedule.json"
+    path.write_text('{"2026-10-28": [], "2026-10-29": []}', encoding="utf-8")
+    clock = FrozenClock(datetime(2026, 10, 28, 22, tzinfo=UTC))
+    service = ScheduleService(path, "Europe/Moscow", clock)
+    today = await service.get_schedule()
+    explicit = await service.get_schedule("2026-10-28")
+    assert today.date == "2026-10-29" and today.data_available
+    assert explicit.date == "2026-10-28" and explicit.data_available
