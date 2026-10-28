@@ -295,12 +295,15 @@ def generation_error_details(error: BaseException) -> str:
             details.append(f"invalid_json_line={current.lineno} column={current.colno}")
         elif isinstance(current, ValidationError):
             details.append(f"validation_errors={current.error_count()}")
-            for failure in current.errors(include_input=False, include_context=False)[:8]:
+            for failure in current.errors(include_context=False)[:8]:
                 path = ".".join(
                     str(part) if isinstance(part, int) or part in SAFE_RESPONSE_FIELDS else "field"
                     for part in failure["loc"]
                 )
                 details.append(f"field={path} problem={failure['type']}")
+                if path.endswith(".message.role"):
+                    details.append(f"received_role={_safe_role_value(failure.get('input'))}")
+                    details.append("expected_role=assistant")
                 reason = {
                     "missing": "Отсутствует обязательное поле ответа",
                     "string_type": "Поле ответа должно быть строкой",
@@ -322,6 +325,18 @@ def generation_error_details(error: BaseException) -> str:
         current = current.__cause__ or current.__context__
 
     return "; ".join(details)
+
+
+def _safe_role_value(value: object) -> str:
+    if value is None:
+        return "missing_or_null"
+    if isinstance(value, str):
+        if value in {"assistant", "user", "system", "tool", "function", "developer"}:
+            return value
+        if value and value == "assistant" * (len(value) // len("assistant")):
+            return "repeated_assistant"
+        return "unrecognized_string"
+    return "invalid_type"
 
 
 def _error_origin(error: BaseException) -> str | None:

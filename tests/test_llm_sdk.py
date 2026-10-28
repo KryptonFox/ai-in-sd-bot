@@ -574,6 +574,57 @@ async def test_stream_assembles_answer_and_usage_without_exposing_reasoning(
     assert "PRIVATE REASONING" not in result.model_dump_json() + caplog.text
 
 
+async def test_stream_accepts_repeated_assistant_role_in_usage_chunk(adapter):
+    client, _ = adapter(
+        lambda _: stream_response(
+            [
+                stream_event({"role": "assistant", "content": "Ответ"}),
+                stream_event({}, "stop"),
+                stream_event(
+                    {"role": "assistant", "content": ""},
+                    "stop",
+                    {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                ),
+            ]
+        ),
+        settings=replace(SETTINGS, llm_streaming=True),
+    )
+    result = await client.generate(request())
+    assert result.content == "Ответ" and result.total_tokens == 15
+
+
+async def test_stream_infers_assistant_when_role_is_omitted(adapter):
+    client, _ = adapter(
+        lambda _: stream_response([stream_event({"content": "Ответ"}, "stop")]),
+        settings=replace(SETTINGS, llm_streaming=True),
+    )
+    result = await client.generate(request())
+    assert result.content == "Ответ" and result.finish_reason == "stop"
+
+
+@pytest.mark.parametrize("role", ["user", "system", "tool", "assistantuser", "PRIVATE PROMPT"])
+async def test_stream_still_rejects_conflicting_or_unknown_role(adapter, role, caplog):
+    client, _ = adapter(
+        lambda _: stream_response([stream_event({"role": role, "content": "Answer"}, "stop")]),
+        settings=replace(SETTINGS, llm_streaming=True),
+    )
+    with pytest.raises(LLMServiceError) as raised:
+        await client.generate(request())
+    details = raised.value.diagnostic_details or ""
+    assert "field=choices.0.message.role" in details
+    expected = role if role in {"user", "system", "tool"} else "unrecognized_string"
+    assert f"received_role={expected}" in details
+    assert "expected_role=assistant" in details
+    assert "PRIVATE PROMPT" not in details + caplog.text
+
+
+async def test_nonstream_response_keeps_strict_role_validation(adapter):
+    client, _ = adapter(lambda _: httpx2.Response(200, json=completion(role="assistantassistant")))
+    with pytest.raises(LLMServiceError) as raised:
+        await client.generate(request())
+    assert "field=choices.0.message.role" in (raised.value.diagnostic_details or "")
+
+
 async def test_reasoning_only_stream_reports_generation_limit(adapter):
     client, _ = adapter(
         lambda _: stream_response(
@@ -602,7 +653,10 @@ async def test_stream_reassembles_tool_argument_fragments_before_validation(adap
             }
         ),
         stream_event(
-            {"tool_calls": [{"index": 0, "function": {"arguments": '"Казань"}'}}]},
+            {
+                "role": "assistant",
+                "tool_calls": [{"index": 0, "function": {"arguments": '"Казань"}'}}],
+            },
             "tool_calls",
         ),
     ]

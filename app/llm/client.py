@@ -56,6 +56,35 @@ def _reject_json_constant(value: str) -> None:
     raise ValueError("invalid_json_constant")
 
 
+def _normalize_stream_roles(payload: dict[str, Any]) -> None:
+    choices = payload.get("choices")
+    if not isinstance(choices, list):
+        return
+    missing = repeated = 0
+    for choice in choices:
+        message = choice.get("message") if isinstance(choice, dict) else None
+        if not isinstance(message, dict):
+            continue
+        role = message.get("role")
+        if role is None:
+            message["role"] = "assistant"
+            missing += 1
+        elif (
+            isinstance(role, str)
+            and len(role) > len("assistant")
+            and role == "assistant" * (len(role) // len("assistant"))
+        ):
+            message["role"] = "assistant"
+            repeated += 1
+    if missing or repeated:
+        logger.info(
+            "[%s] llm_stream_role_normalized missing=%d repeated=%d",
+            get_request_id() or "local",
+            missing,
+            repeated,
+        )
+
+
 class OpenAIClient(BaseLLMClient):
     def __init__(
         self,
@@ -136,9 +165,12 @@ class OpenAIClient(BaseLLMClient):
         return payload
 
     @staticmethod
-    def _response(data: ChatCompletion) -> LLMResponse:
+    def _response(data: ChatCompletion, *, streamed: bool = False) -> LLMResponse:
         try:
-            validated = ChatCompletion.model_validate(data.model_dump(warnings=False))
+            payload = data.model_dump(warnings=False)
+            if streamed:
+                _normalize_stream_roles(payload)
+            validated = ChatCompletion.model_validate(payload)
             return OpenAIClient._parse_response(validated)
         except (ValueError, TypeError, AttributeError) as error:
             raise LLMServiceError(
@@ -319,4 +351,4 @@ class OpenAIClient(BaseLLMClient):
                 completion = stream.current_completion_snapshot
             except AssertionError:
                 raise LLMEmptyResponseError("Модель вернула пустой поток ответа.") from None
-            return self._response(completion)
+            return self._response(completion, streamed=True)
