@@ -80,6 +80,36 @@ async def test_handler_llm_error_log_includes_safe_api_reason(
     assert "PRIVATE PROMPT" not in caplog.text
 
 
+async def test_handler_retains_format_diagnosis_and_handles_legacy_causes(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    diagnosis = (
+        "stage=response_validation; exception=JSONDecodeError; "
+        "problem=invalid_json; invalid_json_line=1 column=12"
+    )
+    explicit = LLMServiceError(
+        "PRIVATE ERROR", code=LLMErrorCode.INVALID_RESPONSE, diagnostic_details=diagnosis
+    )
+    legacy = LLMServiceError("PRIVATE ERROR", code=LLMErrorCode.INVALID_RESPONSE)
+    legacy.__cause__ = ValueError("missing_tool_calls")
+    message = MagicMock()
+    message.bot = None
+    service = MagicMock()
+    service.is_busy = AsyncMock(return_value=False)
+    send = AsyncMock()
+    monkeypatch.setattr(dialog, "send_formatted_message", send)
+    for error in (explicit, legacy):
+        service.process_user_message = AsyncMock(side_effect=error)
+        await dialog._execute_dialog(message, service, 42, "PRIVATE PROMPT")
+    assert diagnosis in caplog.text
+    assert "problem=missing_tool_calls" in caplog.text
+    assert "no_provider_details" not in caplog.text
+    assert "PRIVATE ERROR" not in caplog.text
+    assert "PRIVATE PROMPT" not in caplog.text
+    assert "stage=" not in str(send.await_args_list)
+
+
 async def test_agent_preserves_failure_reason_and_releases_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

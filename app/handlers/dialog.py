@@ -19,6 +19,7 @@ from app.core.exceptions import (
 from app.core.formatters import send_formatted_message
 from app.core.schemas.agent import AgentResult
 from app.handlers.agent_commands import get_confirmation_keyboard
+from app.llm.diagnostics import generation_error_details
 from app.presentation.agent import reply_text
 from app.services.dialog_service import DialogService
 
@@ -158,7 +159,7 @@ async def _execute_dialog(
             error.code,
             error.status_code,
             error.user_message,
-            error.diagnostic_details or "no_provider_details",
+            error.diagnostic_details or generation_error_details(error),
         )
         await send_formatted_message(
             target_message,

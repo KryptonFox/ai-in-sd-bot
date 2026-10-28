@@ -321,12 +321,16 @@ async def test_http_status_has_safe_reason_without_provider_code(
 async def test_invalid_response_logs_field_and_validation_problem(adapter, caplog):
     client, _ = adapter(lambda _: httpx2.Response(200, json=completion(123)))
 
-    with caplog.at_level("INFO", logger="app.llm"), pytest.raises(LLMServiceError):
+    with caplog.at_level("INFO", logger="app.llm"), pytest.raises(LLMServiceError) as raised:
         await client.generate(request())
 
     assert "field=choices.0.message.content problem=string_type" in caplog.text
     assert "code=llm_invalid_response" in caplog.text
     assert "PRIVATE PROMPT" not in caplog.text
+    assert raised.value.diagnostic_details is not None
+    assert "stage=response_validation" in raised.value.diagnostic_details
+    assert "field=choices.0.message.content problem=string_type" in raised.value.diagnostic_details
+    assert "Поле ответа должно быть строкой" in raised.value.diagnostic_details
 
 
 async def test_missing_api_key_is_reported_without_network_request(adapter):
@@ -443,15 +447,64 @@ async def test_invalid_tool_arguments_are_service_errors(adapter, arguments, cap
             200, json=completion(None, reason="tool_calls", tool_calls=[call])
         )
     )
-    with pytest.raises(LLMServiceError):
+    with pytest.raises(LLMServiceError) as raised:
         await client.generate(request())
     assert "code=llm_invalid_response" in caplog.text
+    assert raised.value.diagnostic_details is not None
+    assert "stage=tool_arguments" in raised.value.diagnostic_details
+    assert (
+        "field=choices.0.message.tool_calls.0.function.arguments" in raised.value.diagnostic_details
+    )
     if arguments == "broken":
         assert "invalid_json_line=1 column=1" in caplog.text
     elif arguments == '{"x": NaN}':
         assert "problem=invalid_json_constant" in caplog.text
     else:
         assert "problem=tool arguments must be an object" in caplog.text
+
+
+async def test_stream_provider_failure_keeps_api_diagnosis_in_exception(adapter, caplog):
+    body = (
+        'data: {"error":{"code":"server_error",'
+        '"message":"PRIVATE PROVIDER ERROR secret-key PRIVATE PROMPT"}}\n\n'
+    )
+    client, _ = adapter(
+        lambda _: httpx2.Response(200, headers={"content-type": "text/event-stream"}, content=body),
+        settings=replace(SETTINGS, llm_streaming=True),
+    )
+    with pytest.raises(LLMServiceError) as raised:
+        await client.generate(request())
+    assert raised.value.code == LLMErrorCode.UNAVAILABLE
+    details = raised.value.diagnostic_details or ""
+    assert "stage=stream_decode" in details
+    assert "provider_code=server_error" in details
+    assert "provider_reason_code=provider_server_error" in details
+    for private in ("PRIVATE PROVIDER ERROR", "secret-key", "PRIVATE PROMPT"):
+        assert private not in details + caplog.text
+
+
+async def test_incomplete_stream_identifies_missing_finish_reason(adapter, caplog):
+    client, _ = adapter(
+        lambda _: stream_response([stream_event({"role": "assistant", "content": "PRIVATE"})]),
+        settings=replace(SETTINGS, llm_streaming=True),
+    )
+    with pytest.raises(LLMServiceError) as raised:
+        await client.generate(request())
+    details = raised.value.diagnostic_details or ""
+    assert "stage=response_validation" in details
+    assert "field=choices.0.finish_reason" in details
+    assert "Поле ответа содержит неподдерживаемое значение" in details
+    assert "PRIVATE" not in details + caplog.text
+
+
+async def test_unsupported_legacy_finish_reason_has_actual_and_expected_values(adapter):
+    client, _ = adapter(lambda _: httpx2.Response(200, json=completion(reason="function_call")))
+    with pytest.raises(LLMServiceError) as raised:
+        await client.generate(request())
+    details = raised.value.diagnostic_details or ""
+    assert "field=choices.0.finish_reason" in details
+    assert "received=function_call" in details
+    assert "expected=stop|length|tool_calls|content_filter" in details
 
 
 async def test_internal_sdk_is_closed_on_exit_and_exception(monkeypatch):

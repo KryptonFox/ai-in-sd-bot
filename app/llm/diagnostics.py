@@ -66,6 +66,15 @@ SAFE_VALUE_ERRORS = frozenset(
         "missing_tool_calls",
     }
 )
+RESPONSE_PROBLEM_REASONS = {
+    "unsupported_finish_reason": "API вернул неподдерживаемую причину завершения ответа",
+    "unsupported_tool_call": "API вернул неподдерживаемый тип вызова инструмента",
+    "tool arguments must be an object": "Аргументы инструмента должны быть JSON-объектом",
+    "missing_tool_calls": "Ответ завершён как вызов инструментов, но сами вызовы отсутствуют",
+    "invalid_json_constant": "JSON содержит недопустимую константу NaN или Infinity",
+    "tool_calls require assistant": "В исходном запросе tool_calls указаны у неверной роли",
+    "tool result requires tool_call_id": "В исходном запросе результат инструмента не имеет ID",
+}
 SAFE_RESPONSE_FIELDS = frozenset(
     {
         "id",
@@ -93,7 +102,15 @@ SAFE_RESPONSE_FIELDS = frozenset(
 
 
 def api_status_error_details(error: APIStatusError) -> str:
+    return api_error_details(error)
+
+
+def api_error_details(error: APIError) -> str:
     details: list[str] = []
+    status_code = error.status_code if isinstance(error, APIStatusError) else 0
+    if type(error.code) is int and 400 <= error.code <= 599:
+        details.append(f"provider_status={error.code}")
+        status_code = status_code or error.code
     code = _safe_provider_value(error.code, SAFE_PROVIDER_CODES)
     error_type = _safe_provider_value(error.type, SAFE_PROVIDER_TYPES)
     param = _safe_provider_value(error.param, SAFE_PROVIDER_PARAMS)
@@ -103,7 +120,7 @@ def api_status_error_details(error: APIStatusError) -> str:
     body_message = _field(api_error, "message")
     provider_message = body_message if isinstance(body_message, str) else None
     if provider_message is None and isinstance(error.message, str):
-        sdk_wrapper = f"Error code: {error.status_code} -"
+        sdk_wrapper = f"Error code: {status_code} -"
         if not error.message.startswith(sdk_wrapper):
             provider_message = error.message
     code = code or _safe_provider_value(_field(api_error, "code"), SAFE_PROVIDER_CODES)
@@ -121,7 +138,7 @@ def api_status_error_details(error: APIStatusError) -> str:
         code,
         error_type,
         param,
-        error.status_code,
+        status_code,
     )
     details.extend((f"provider_reason_code={reason_code}", f"provider_reason={reason}"))
     return "; ".join(details)
@@ -179,7 +196,7 @@ def _provider_diagnosis(
         return "authentication_rejected", "API отклонил учётные данные"
     if error_type == "permission_error":
         return "permission_denied", "API запретил доступ к ресурсу"
-    if error_type == "server_error":
+    if code == "server_error" or error_type == "server_error":
         return "provider_server_error", "API вернул внутреннюю ошибку сервера"
 
     if _contains(message, "context length"):
@@ -263,17 +280,18 @@ def generation_error_details(error: BaseException) -> str:
     while current is not None and id(current) not in seen and len(seen) < 6:
         seen.add(id(current))
         details.append(f"exception={type(current).__name__}")
+        origin = _error_origin(current)
+        if origin:
+            details.append(f"origin={origin}")
 
         if isinstance(current, LLMServiceError) and current.diagnostic_details is not None:
             details.append(current.diagnostic_details)
+            break
 
-        if (
-            isinstance(current, APIError)
-            and isinstance(current.code, str)
-            and current.code in SAFE_PROVIDER_CODES
-        ):
-            details.append(f"provider_code={current.code}")
+        if isinstance(current, APIError):
+            details.append(api_error_details(current))
         if isinstance(current, json.JSONDecodeError):
+            details.append("problem=invalid_json reason=Получен некорректный JSON")
             details.append(f"invalid_json_line={current.lineno} column={current.colno}")
         elif isinstance(current, ValidationError):
             details.append(f"validation_errors={current.error_count()}")
@@ -283,11 +301,38 @@ def generation_error_details(error: BaseException) -> str:
                     for part in failure["loc"]
                 )
                 details.append(f"field={path} problem={failure['type']}")
+                reason = {
+                    "missing": "Отсутствует обязательное поле ответа",
+                    "string_type": "Поле ответа должно быть строкой",
+                    "list_type": "Поле ответа должно быть списком",
+                    "dict_type": "Поле ответа должно быть объектом",
+                    "literal_error": "Поле ответа содержит неподдерживаемое значение",
+                }.get(failure["type"])
+                if reason:
+                    details.append(f"reason={reason}")
         elif type(current) is ValueError and str(current) in SAFE_VALUE_ERRORS:
             details.append(f"problem={current}")
+            details.append(f"reason={RESPONSE_PROBLEM_REASONS[str(current)]}")
+        elif isinstance(current, AttributeError):
+            name = current.name if current.name in SAFE_RESPONSE_FIELDS else "field"
+            details.append(f"missing_attribute={name}")
         elif isinstance(current, OSError) and current.errno is not None:
             details.append(f"errno={current.errno}")
 
         current = current.__cause__ or current.__context__
 
     return "; ".join(details)
+
+
+def _error_origin(error: BaseException) -> str | None:
+    frame = error.__traceback__
+    if frame is None:
+        return None
+    while frame.tb_next is not None:
+        frame = frame.tb_next
+    module = frame.tb_frame.f_globals.get("__name__", "")
+    if not isinstance(module, str) or not module.startswith(
+        ("app.llm.", "openai.", "json.", "pydantic.", "pydantic_core.")
+    ):
+        return None
+    return f"{module}.{frame.tb_frame.f_code.co_name}:{frame.tb_lineno}"

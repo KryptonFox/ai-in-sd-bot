@@ -6,7 +6,14 @@ from typing import Any, Self
 
 import httpx
 import httpx2
-from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError, AsyncOpenAI
+from openai import (
+    APIConnectionError,
+    APIError,
+    APIResponseValidationError,
+    APIStatusError,
+    APITimeoutError,
+    AsyncOpenAI,
+)
 from openai.types.chat import ChatCompletion
 
 from app.config import Settings
@@ -130,7 +137,20 @@ class OpenAIClient(BaseLLMClient):
 
     @staticmethod
     def _response(data: ChatCompletion) -> LLMResponse:
-        data = ChatCompletion.model_validate(data.model_dump(warnings=False))
+        try:
+            validated = ChatCompletion.model_validate(data.model_dump(warnings=False))
+            return OpenAIClient._parse_response(validated)
+        except (ValueError, TypeError, AttributeError) as error:
+            raise LLMServiceError(
+                "Не удалось проверить формат ответа языковой модели.",
+                code=LLMErrorCode.INVALID_RESPONSE,
+                diagnostic_details=(
+                    f"stage=response_validation; {generation_error_details(error)}"
+                ),
+            ) from None
+
+    @staticmethod
+    def _parse_response(data: ChatCompletion) -> LLMResponse:
         if not data.choices:
             raise LLMEmptyResponseError("Модель вернула пустой ответ.")
         choice = data.choices[0]
@@ -138,18 +158,21 @@ class OpenAIClient(BaseLLMClient):
         if message.refusal or choice.finish_reason == "content_filter":
             raise LLMRefusalError("Модель отказалась выполнять запрос.")
         if choice.finish_reason not in {"stop", "length", "tool_calls"}:
-            raise ValueError("unsupported_finish_reason")
+            raise LLMServiceError(
+                "API вернул неподдерживаемую причину завершения ответа.",
+                code=LLMErrorCode.INVALID_RESPONSE,
+                diagnostic_details=(
+                    "stage=response_validation; field=choices.0.finish_reason; "
+                    f"problem=unsupported_finish_reason; received={choice.finish_reason}; "
+                    "expected=stop|length|tool_calls|content_filter"
+                ),
+            )
         content = message.content or ""
         calls = []
-        for call in message.tool_calls or []:
+        for position, call in enumerate(message.tool_calls or []):
             if call.type != "function":
                 raise ValueError("unsupported_tool_call")
-            arguments = json.loads(
-                call.function.arguments,
-                parse_constant=_reject_json_constant,
-            )
-            if not isinstance(arguments, dict):
-                raise ValueError("tool arguments must be an object")
+            arguments = OpenAIClient._tool_arguments(call.function.arguments, position)
             calls.append(ToolCall(id=call.id, name=call.function.name, arguments=arguments))
         if choice.finish_reason == "tool_calls" and not calls:
             raise ValueError("missing_tool_calls")
@@ -169,6 +192,24 @@ class OpenAIClient(BaseLLMClient):
             total_tokens=usage.total_tokens if usage else None,
             tool_calls=calls,
         )
+
+    @staticmethod
+    def _tool_arguments(value: str, position: int) -> dict[str, Any]:
+        try:
+            arguments = json.loads(value, parse_constant=_reject_json_constant)
+            if not isinstance(arguments, dict):
+                raise ValueError("tool arguments must be an object")
+            return arguments
+        except (ValueError, TypeError) as error:
+            raise LLMServiceError(
+                "Модель вернула некорректные аргументы инструмента.",
+                code=LLMErrorCode.INVALID_RESPONSE,
+                diagnostic_details=(
+                    "stage=tool_arguments; "
+                    f"field=choices.0.message.tool_calls.{position}.function.arguments; "
+                    f"{generation_error_details(error)}"
+                ),
+            ) from None
 
     async def generate(self, request: LLMRequest) -> LLMResponse:
         req_id = get_request_id() or "local"
@@ -226,11 +267,14 @@ class OpenAIClient(BaseLLMClient):
                 code=LLMErrorCode.NOT_CONFIGURED,
             )
 
+        stage = "request_payload"
         try:
             async with asyncio.timeout(self._settings.llm_timeout):
                 payload = self._payload(request)
                 if self._settings.llm_streaming:
+                    stage = "stream_decode"
                     return await self._stream_response(payload, model)
+                stage = "response_decode"
                 data = await self._client.chat.completions.create(model=model, **payload)
                 return self._response(data)
         except (APITimeoutError, TimeoutError, httpx2.TimeoutException):
@@ -248,10 +292,22 @@ class OpenAIClient(BaseLLMClient):
                 "Не удалось соединиться с сервисом языковой модели.",
                 code=LLMErrorCode.CONNECTION,
             ) from None
-        except (APIError, ValueError, TypeError, AttributeError):
+        except APIError as error:
+            code = (
+                LLMErrorCode.INVALID_RESPONSE
+                if isinstance(error, APIResponseValidationError)
+                else LLMErrorCode.UNAVAILABLE
+            )
+            raise LLMServiceError(
+                "Ошибка API языковой модели.",
+                code=code,
+                diagnostic_details=f"stage={stage}; {generation_error_details(error)}",
+            ) from None
+        except (ValueError, TypeError, AttributeError) as error:
             raise LLMServiceError(
                 "Не удалось получить корректный ответ языковой модели.",
                 code=LLMErrorCode.INVALID_RESPONSE,
+                diagnostic_details=f"stage={stage}; {generation_error_details(error)}",
             ) from None
 
     async def _stream_response(self, payload: dict[str, Any], model: str) -> LLMResponse:
