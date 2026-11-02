@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import asyncpg
 
 from app.config import Settings
-from app.core.budget import ContextBudget
+from app.core.budget import MIN_GENERATION_TOKENS, ContextBudget
 from app.core.exceptions import LLMError
 from app.core.schemas.llm import FinishReason, LLMRequest, ToolDefinition
 from app.core.schemas.message import ChatMessage, MessageRole
@@ -107,16 +107,14 @@ class ContextBuilder:
         budget: ContextBudget,
     ) -> PreparedContext:
         fixed_size = budget.estimate([*initial, current], tools) + overhead
-        available_output = budget.window - fixed_size
-        output_tokens = min(budget.output_tokens, available_output)
-        if output_tokens < 64:
+        available_context = budget.window - fixed_size
+        if min(budget.output_tokens, available_context) < MIN_GENERATION_TOKENS:
             raise ToolFailure(
                 "context_budget",
                 "Запрос или контекст слишком большой. Сократите запрос или очистите историю.",
             )
 
-        fitted_budget = ContextBudget(budget.window, output_tokens)
-        history_limit = available_output - output_tokens
+        history_limit = available_context - MIN_GENERATION_TOKENS
         pair_sizes: list[int] = []
 
         for user_message, assistant_message in pairs:
@@ -131,6 +129,8 @@ class ContextBuilder:
             history_size -= pair_sizes[first_pair]
             first_pair += 1
 
+        output_tokens = min(budget.output_tokens, available_context - history_size)
+        fitted_budget = ContextBudget(budget.window, output_tokens)
         messages = list(initial)
 
         for pair in pairs[first_pair:]:

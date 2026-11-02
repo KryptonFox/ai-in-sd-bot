@@ -6,6 +6,8 @@ from app.core.schemas.llm import ToolDefinition
 from app.core.schemas.message import ChatMessage
 from app.core.schemas.tools import ToolFailure
 
+MIN_GENERATION_TOKENS = 64
+
 
 @dataclass(frozen=True)
 class ContextBudget:
@@ -42,7 +44,7 @@ class ContextBudget:
         self, messages: Sequence[ChatMessage], tools: Sequence[ToolDefinition]
     ) -> int:
         remaining = self.window - self.estimate(messages, tools)
-        if remaining < 64:
+        if remaining < MIN_GENERATION_TOKENS:
             raise ToolFailure(
                 "context_budget",
                 "Запрос или контекст слишком большой. Сократите запрос или очистите историю.",

@@ -72,7 +72,7 @@ def test_complete_pairs_skip_orphans_and_keep_latest_pending_user() -> None:
     ]
 
 
-@pytest.mark.parametrize("available_extra", [0, -1])
+@pytest.mark.parametrize("available_extra", [0, -1, -64, -65])
 async def test_context_keeps_only_complete_recent_pairs_at_budget_boundary(
     builder: ContextBuilder, monkeypatch: pytest.MonkeyPatch, available_extra: int
 ) -> None:
@@ -117,10 +117,12 @@ async def test_context_keeps_only_complete_recent_pairs_at_budget_boundary(
         action,
     )
 
-    expected_history = history[2:] if available_extra == 0 else []
+    expected_history = history[2:] if available_extra >= -64 else []
     assert result.messages == [*initial, *expected_history, current]
     assert len(history) == 4
-    assert budget.fits(result.messages, tools, overhead)
+    assert result.budget.fits(result.messages, tools, overhead)
+    expected_output = 128 + available_extra if expected_history else 128
+    assert result.budget.output_tokens == expected_output
 
 
 async def test_context_rejects_base_prompt_that_cannot_fit(
@@ -137,6 +139,33 @@ async def test_context_rejects_base_prompt_that_cannot_fit(
 
     assert failure.value.code == "context_budget"
     llm.generate.assert_not_awaited()
+
+
+@pytest.mark.parametrize("remaining_for_answer", [64, 1024])
+async def test_recent_history_takes_priority_over_maximum_output_reserve(
+    builder: ContextBuilder,
+    monkeypatch: pytest.MonkeyPatch,
+    remaining_for_answer: int,
+) -> None:
+    history = [
+        ChatMessage(role=MessageRole.USER, content="Код проекта: Альфа"),
+        ChatMessage(role=MessageRole.ASSISTANT, content="Запомнил код проекта."),
+    ]
+    current = ChatMessage(role=MessageRole.USER, content="Какой код проекта?")
+    initial = MODE.build_initial_messages(current.content)
+    instructions = "Инструкции"
+    overhead = len(instructions.encode()) + 64
+    input_size = ContextBudget(0).estimate([*initial, *history, current], []) + overhead
+    budget = ContextBudget(input_size + remaining_for_answer, 16384)
+    monkeypatch.setattr(builder, "budget", AsyncMock(return_value=budget))
+    monkeypatch.setattr(history_repo, "get_dialog_history", AsyncMock(return_value=history))
+
+    prepared = await builder.build(1, current.content, MODE, [], instructions)
+
+    assert prepared.messages == [*initial, *history, current]
+    assert prepared.budget.output_tokens == remaining_for_answer
+    assert prepared.budget.fits(prepared.messages, [], overhead)
+    assert budget.output_tokens == 16384
 
 
 @pytest.mark.parametrize("available_output", [64, 127, 128])

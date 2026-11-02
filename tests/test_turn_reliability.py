@@ -15,7 +15,7 @@ from app.core.schemas.agent import AgentDecision, AgentResult, EventContext, InP
 from app.core.schemas.llm import FinishReason, LLMResponse, ToolDefinition
 from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.mcp.client import MCPClient
-from app.mcp_server.server import tool_catalog
+from app.mcp_server.server import resource_catalog, tool_catalog
 from app.services.agent_service import AgentService
 from app.services.confirmation_service import ConfirmationService
 from app.services.dialog_service import DialogService
@@ -40,6 +40,44 @@ async def test_replay_precedes_compaction_and_writes_one_turn() -> None:
     assert first == second
     assert len(pool.messages) == 2
     llm.generate.assert_awaited_once()
+
+
+async def test_dialog_with_full_tool_catalog_keeps_previous_turn_in_model_context() -> None:
+    pool = InMemoryPool()
+    store = MemoryTurnStore(cast(MemoryHistory, pool))
+    mcp = MCPClient(SETTINGS)
+    mcp.load_catalog(tool_catalog())
+    mcp.load_resources(resource_catalog())
+    clock = FrozenClock(NOW)
+    llm = MagicMock(
+        generate=AsyncMock(
+            side_effect=[
+                LLMResponse(content="Слово запомнил."),
+                LLMResponse(content="Ты назвал слово Альфа."),
+            ]
+        )
+    )
+    agent = AgentService(llm, ToolExecutionService(mcp, store=store, clock=clock), clock=clock)
+    service = DialogService(
+        cast(asyncpg.Pool, pool),
+        SETTINGS,
+        llm,
+        agent=agent,
+        clock=clock,
+        tool_client=mcp,
+        store=store,
+    )
+
+    await service.process_user_message(1, "Запомни слово Альфа", event_id="remember")
+    await service.process_user_message(1, "Какое слово я назвал?", event_id="recall")
+
+    assert llm.generate.await_count == 2
+    request = llm.generate.await_args_list[1].args[0]
+    conversation = [
+        message.content for message in request.messages if message.role != MessageRole.SYSTEM
+    ]
+    assert conversation == ["Запомни слово Альфа", "Слово запомнил.", "Какое слово я назвал?"]
+    assert len(pool.messages) == 4
 
 
 @pytest.mark.parametrize("cancel", [False, True])
