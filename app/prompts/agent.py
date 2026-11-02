@@ -13,8 +13,8 @@ def agent_rules(now: datetime, timezone: str | None, *, tools_available: bool) -
     )
     rules = (
         f"Сейчас {now.isoformat()}. "
-        f"Сохранённая IANA-зона пользователя: {timezone or 'не задана'}. "
-        "Относительные даты вычисляй по этому времени и сохранённой зоне. "
+        f"Часовой пояс пользователя (IANA): {timezone or 'не задана'}. "
+        "Относительные даты вычисляй по этому времени и зоне пользователя. "
         f"Точный календарь приложения: сегодня={today}, завтра={today + timedelta(days=1)}, "
         f"послезавтра={today + timedelta(days=2)}. Дни этой недели: {calendar}. "
         f"Следующая неделя: {monday + timedelta(weeks=1)} — {monday + timedelta(days=13)}. "

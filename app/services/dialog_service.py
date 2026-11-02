@@ -30,6 +30,7 @@ from app.core.schemas.message import ChatMessage, MessageRole
 from app.core.schemas.status import TimezoneStatus, ToolStatus
 from app.core.schemas.tools import ToolFailure
 from app.core.schemas.user import VALID_TEMPERATURES, UserSettings
+from app.core.timezones import DEFAULT_USER_TIMEZONE
 from app.db.records import DecisionAudit
 from app.db.repositories.audit_repo import latest_decision
 from app.db.repositories.history_repo import clear_dialog_history
@@ -175,7 +176,7 @@ class DialogService:
     ) -> AgentResult:
         try:
             user = await get_or_create_user(self._pool, context.user_id)
-            timezone = await get_timezone(self._pool, context.user_id)
+            timezone = await get_timezone(self._pool, context.user_id) or DEFAULT_USER_TIMEZONE
             mode = self._registry.get_or_default(user.mode)
             action = None
             if self._confirmations is not None:
@@ -274,10 +275,10 @@ class DialogService:
             async with self._queue.acquire(user_id, ignore_limits=True):
                 await set_timezone(self._pool, user_id, zone)
         else:
-            zone = await get_timezone(self._pool, user_id)
+            zone = await get_timezone(self._pool, user_id) or DEFAULT_USER_TIMEZONE
 
         now = self._clock.now()
-        return TimezoneStatus(zone, now.astimezone(ZoneInfo(zone)) if zone else now)
+        return TimezoneStatus(zone, now.astimezone(ZoneInfo(zone)))
 
     async def why(self, user_id: int) -> DecisionAudit | None:
         return await latest_decision(self._pool, user_id)

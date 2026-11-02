@@ -1,5 +1,6 @@
 import os
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock
 
 import asyncpg
 import pytest
@@ -7,13 +8,19 @@ from conftest import DatabaseFixture
 
 from app.core.clock import FrozenClock
 from app.core.schemas.agent import Acquired, AgentDecision, AgentResult, EventContext, Replay
+from app.core.schemas.llm import LLMResponse
 from app.core.schemas.message import ChatMessage, MessageRole
 from app.core.schemas.tools import ToolFailure
 from app.db.connection import create_pool
-from app.db.repositories import confirmation_repo, history_repo, reminder_repo
+from app.db.repositories import confirmation_repo, history_repo, reminder_repo, timezone_repo
 from app.db.repositories.turn_repo import PostgresTurnStore
 from app.db.repositories.user_repo import get_or_create_user
+from app.mcp.client import MCPClient
+from app.mcp_server.server import resource_catalog, tool_catalog
+from app.services.agent_service import AgentService
 from app.services.confirmation_service import ConfirmationService
+from app.services.dialog_service import DialogService
+from app.services.tool_execution import ToolExecutionService
 
 pytestmark = [
     pytest.mark.integration,
@@ -22,6 +29,72 @@ pytestmark = [
     ),
 ]
 NOW = datetime(2031, 5, 1, 12, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    ("saved_zone", "expected_zone", "offset_hours"),
+    [(None, "Europe/Moscow", 3), ("Asia/Yekaterinburg", "Asia/Yekaterinburg", 5)],
+)
+async def test_dialog_restores_history_and_effective_timezone_from_database(
+    database: DatabaseFixture,
+    saved_zone: str | None,
+    expected_zone: str,
+    offset_hours: int,
+) -> None:
+    settings = database[0]
+    pool = await create_pool(settings)
+    clock = FrozenClock(NOW)
+    llm = MagicMock(
+        get_context_length=AsyncMock(return_value=32768),
+        generate=AsyncMock(
+            side_effect=[
+                LLMResponse(content="Слово запомнил."),
+                LLMResponse(content="Ты назвал слово Альфа."),
+            ]
+        ),
+    )
+    mcp = MCPClient(settings)
+    mcp.load_catalog(tool_catalog())
+    mcp.load_resources(resource_catalog())
+
+    def make_service() -> DialogService:
+        store = PostgresTurnStore(pool)
+        tools = ToolExecutionService(mcp, store=store, clock=clock)
+        agent = AgentService(llm, tools, clock=clock)
+        return DialogService(
+            pool,
+            settings,
+            llm,
+            agent=agent,
+            clock=clock,
+            tool_client=mcp,
+            store=store,
+        )
+
+    try:
+        first = make_service()
+        if saved_zone is not None:
+            await first.timezone_status(1, saved_zone)
+        await first.process_user_message(1, "Запомни слово Альфа", event_id="remember")
+
+        restarted = make_service()
+        status = await restarted.timezone_status(1)
+        assert status.zone == expected_zone
+        assert status.now.utcoffset() == timedelta(hours=offset_hours)
+        assert await timezone_repo.get_timezone(pool, 1) == saved_zone
+
+        await restarted.process_user_message(1, "Какое слово я назвал?", event_id="recall")
+
+        assert llm.generate.await_count == 2
+        request = llm.generate.await_args_list[1].args[0]
+        assert f"Часовой пояс пользователя (IANA): {expected_zone}." in request.messages[0].content
+        conversation = [
+            message.content for message in request.messages if message.role != MessageRole.SYSTEM
+        ]
+        assert conversation == ["Запомни слово Альфа", "Слово запомнил.", "Какое слово я назвал?"]
+        assert len(await history_repo.get_user_messages_with_ids(pool, 1)) == 4
+    finally:
+        await pool.close()
 
 
 async def install_failure(pool: asyncpg.Pool, table: str) -> None:

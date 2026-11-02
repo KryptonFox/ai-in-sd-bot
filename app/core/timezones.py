@@ -4,6 +4,8 @@ from zoneinfo import ZoneInfo
 
 from app.core.schemas.tools import ReminderArguments, ToolFailure
 
+DEFAULT_USER_TIMEZONE = "Europe/Moscow"
+
 
 def normalize_reminder(
     arguments: Mapping[str, object], timezone: str | None, now: datetime

@@ -135,6 +135,7 @@ class ToolExecutionService:
                 content=content,
             )
         )
+        # todo отдельный инструмент для clarification
         if call.name == "get_weather":
             return self._weather_clarification(state, payload)
 
