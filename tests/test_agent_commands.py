@@ -6,10 +6,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiogram.types import Chat, Message, User
 
-from app.core.schemas.agent import AgentResult
+from app.core.schemas.agent import AgentDecision, AgentResult
 from app.core.schemas.status import TimezoneStatus, ToolStatus
+from app.db.records import DecisionAudit
 from app.handlers import agent_commands
-from app.presentation.agent import timezone_text, tools_text
+from app.presentation.agent import decision_text, timezone_text, tools_text
 
 
 class QueueSpy:
@@ -45,7 +46,9 @@ def make_service() -> MagicMock:
         return_value=TimezoneStatus("Europe/Moscow", datetime(2026, 10, 27, tzinfo=UTC))
     )
     service.why = AsyncMock(return_value=None)
-    service.confirm_action = AsyncMock(return_value=AgentResult(text="Готово", decision="respond"))
+    service.confirm_action = AsyncMock(
+        return_value=AgentResult(text="Готово", decision=AgentDecision.RESPOND)
+    )
     return service
 
 
@@ -149,7 +152,7 @@ async def test_error_result_preserves_confirmation_markup(monkeypatch: pytest.Mo
     message = make_message()
     service = make_service()
     service.confirm_action = AsyncMock(
-        return_value=AgentResult(text="Действие недоступно", decision="error")
+        return_value=AgentResult(text="Действие недоступно", decision=AgentDecision.ERROR)
     )
     send = AsyncMock()
     edit_markup = AsyncMock()
@@ -204,3 +207,44 @@ def test_confirmation_keyboard_callback_data_fits_telegram_limit() -> None:
     callback_values = [button.callback_data for row in keyboard.inline_keyboard for button in row]
     assert callback_values == [f"confirm:{identifier}", f"cancel:{identifier}"]
     assert all(value is not None and len(value) < 64 for value in callback_values)
+
+
+@pytest.mark.parametrize(
+    ("decision", "tool", "reason", "expected"),
+    [
+        ("tool", "get_weather", "structured_response", "актуальные погодные данные"),
+        ("tool", "get_schedule_week", "structured_response", "расписание выбранной недели"),
+        ("respond", None, "plain_response", "без обращения к внешним данным"),
+        ("clarify", None, "structured_response", "уточнить недостающие параметры"),
+        ("error", None, "call_budget", "лимит обращений к инструментам"),
+        ("tool", "add_reminder", "confirmed_operation", "Владелец подтвердил"),
+    ],
+)
+def test_why_explains_route_without_internal_completion_codes(
+    decision: str,
+    tool: str | None,
+    reason: str,
+    expected: str,
+) -> None:
+    record: DecisionAudit = {
+        "id": 1,
+        "user_id": 1,
+        "event_id": "event",
+        "request_id": "request",
+        "decision": decision,
+        "tool_name": tool,
+        "arguments": {},
+        "validation": "ok",
+        "execution": "completed",
+        "duration_ms": 42,
+        "reason": reason,
+        "created_at": datetime(2026, 11, 2, tzinfo=UTC),
+    }
+
+    text = decision_text(record)
+
+    assert expected in text
+    assert "Проверка: пройдена" in text
+    assert "Выполнение: обработка завершена" in text
+    assert "structured_response" not in text
+    assert "plain_response" not in text

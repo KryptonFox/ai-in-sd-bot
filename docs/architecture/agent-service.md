@@ -12,8 +12,8 @@ SQL и Telegram SDK в этом цикле отсутствуют.
 ошибкой, отмена закрывает соединение. Telegram получает только готовый публичный текст.
 
 `RunState` создаётся на каждый вызов и хранит conversation, доверенный EventContext,
-timezone, расход и последний tool call. `Continue`, `Final`, `AwaitConfirmation`
-различают переходы. `AgentResult` проверяет наличие confirmation ID у подготовленного
+timezone, расход и последний tool call. Завершающий шаг возвращает `AgentResult`,
+а `None` после чтения запрашивает следующий шаг модели. `AgentResult` проверяет наличие confirmation ID у подготовленного
 действия; планирование dry run явно помечается `planned`.
 
 ```mermaid
@@ -31,7 +31,7 @@ flowchart TD
     Loop --> Budget[Проверка полного ContextBudget]
     Budget --> Model[llm.generate]
     Model --> Handle[_handle_response]
-    Handle -->|Текст| Final[Final: ответ]
+    Handle -->|Текст| Final[AgentResult: ответ]
     Handle -->|finish_response| Finish[_finish_response]
     Finish --> Final
     Handle -->|length| Truncated[Обрезанный текст или отказ исполнения tools]
@@ -40,12 +40,12 @@ flowchart TD
     Tools --> Validate[_validate: политика, discovery, бюджет]
     Validate -->|Чтение| Read[_read: reserve и MCP call]
     Read --> ToolResult[Проверенный tool result в conversation]
-    ToolResult -->|Нужен город| Clarify[Final: уточнение места]
-    ToolResult -->|Пакет завершён| Loop
+    ToolResult -->|Нужен город| Clarify[AgentResult: уточнение места]
+    ToolResult -->|None: пакет завершён| Loop
     ToolResult -->|Ещё вызовы| Validate
     Validate -->|Напоминание| Prepare[_prepare: ConfirmationService.prepare]
-    Prepare --> Await[AwaitConfirmation: сохранённое предложение]
-    Validate -->|dry_run| Planned[Final: план без RPC и БД]
+    Prepare --> Await[AgentResult: сохранённое предложение]
+    Validate -->|dry_run| Planned[AgentResult: план без RPC и БД]
     Final --> Commit[TurnStore.complete: две реплики, аудит, результат]
     Clarify --> Commit
     Await --> Commit
@@ -61,10 +61,13 @@ flowchart TD
 ```
 
 Прогноз погоды и уточнение города интерпретируются только для `get_weather`.
-Схемы обнаруживаются MCP-клиентом; доверенная локальная политика разрешает два чтения
-и подготовку `add_reminder`. Одно событие имеет не более двух фактических MCP-вызовов,
+MCP-клиент проверяет разрешённое имя и обнаруженную схему аргументов; ToolExecutionService
+отвечает за бюджет, чтения и подготовку `add_reminder`, не дублируя список разрешённых имён.
+Одно событие имеет не более двух фактических MCP-вызовов,
 включая подтверждённую мутацию. Бюджет контекста проверяется перед каждым шагом;
-после tool results резерв вывода ограничивается оставшимся местом, а JSON не обрезается.
+резерв вывода ограничивается оставшимся местом уже при подготовке первого запроса
+и повторно после tool results. Если остаётся менее 64 токенов для генерации,
+запрос отклоняется; JSON не обрезается.
 
 Обнаруженный ресурс `schedule://current-week` публикуется модели как `read_resource`
 с разрешёнными URI в схеме. `MCPClient.call_tool` направляет его в MCP `read_resource`,
@@ -77,10 +80,17 @@ flowchart TD
 `today` — к текущему дню города. Прогноз и текущие условия не подменяют друг друга.
 
 После кнопки: `handler → DialogService.confirm_action → пользовательская очередь →
-ToolExecutionService.confirm → ConfirmationService.confirm → MCP`. Подтверждение
+ConfirmationService.confirm → MCP`. DialogService получает каталог через ToolClient,
+а подтверждения — через ConfirmationService, без зависимости от ToolExecutionService. Подтверждение
 проверяет владельца, TTL и неизменяемые аргументы. Таймаут или некорректный ответ
 после dispatch не доказывает отсутствие эффекта: результат сверяется по idempotency
 key сразу и через recovery. Следующий контекст получает статус из confirmation store.
+
+Инструкция модели различает подготовку и создание: при известных тексте, времени
+и зоне, включая точный относительный интервал, модель вызывает `add_reminder`.
+ToolExecutionService сохраняет предложение через ConfirmationService и возвращает
+его текст и `confirmation_id`; вопрос и кнопки не заменяются текстом самой модели.
+Фактический MCP-вызов создания выполняется после подтверждения владельца.
 
 Повтор не запускает компактизацию и не дублирует историю. Ошибка после чтения
 закрывает старый запуск как interrupted; новый запрос получает отдельный event key.

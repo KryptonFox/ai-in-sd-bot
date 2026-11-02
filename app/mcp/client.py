@@ -20,7 +20,7 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.message import SessionMessage
 from pydantic import AnyUrl
 
-from app.config import Settings
+from app.config import MCPTransport, Settings
 from app.core.schemas.llm import ToolDefinition
 from app.core.schemas.tools import ToolFailure, WeekSchedule
 
@@ -173,7 +173,7 @@ class MCPClient:
     async def _worker(self) -> None:
         try:
             async with AsyncExitStack() as stack:
-                if self.settings.mcp_transport == "stdio":
+                if self.settings.mcp_transport == MCPTransport.STDIO:
                     read, write = await self._open_stdio(stack)
                 else:
                     read, write = await self._open_http(stack)
@@ -273,7 +273,13 @@ class MCPClient:
 
         future: asyncio.Future[_CommandResult] = asyncio.get_running_loop().create_future()
         await self._queue.put(
-            _Command(method, name, dict(arguments) if arguments is not None else None, meta, future)
+            _Command(
+                method,
+                name,
+                dict(arguments) if arguments is not None else None,
+                meta,
+                future,
+            )
         )
 
         try:

@@ -17,9 +17,9 @@ import uvicorn
 from jsonschema import Draft202012Validator, FormatChecker
 from mcp import types
 
-from app.config import Settings
+from app.config import MCPTransport, Settings
 from app.core.clock import FrozenClock
-from app.core.schemas.agent import EventContext
+from app.core.schemas.agent import AgentDecision, EventContext
 from app.core.schemas.tools import ScheduleResult, ToolFailure, WeekSchedule
 from app.db.connection import create_pool
 from app.mcp.client import MCPClient
@@ -33,7 +33,11 @@ SECRET = "mcp-client-unit-secret"
 
 def make_client() -> MCPClient:
     client = MCPClient(
-        Settings(bot_token="unused", postgres_password="unused", mcp_shared_secret=SECRET)
+        Settings(
+            bot_token="unused",
+            postgres_password="unused",
+            mcp_shared_secret=SECRET,
+        )
     )
     client.load_catalog(tool_catalog())
     return client
@@ -71,7 +75,10 @@ async def test_call_tool_validates_input_and_returns_schema_validated_output() -
 
     assert actual == result
     client._command.assert_awaited_once_with(
-        "call_tool", "get_schedule", {"date": "2026-10-12"}, meta=None
+        "call_tool",
+        "get_schedule",
+        {"date": "2026-10-12"},
+        meta=None,
     )
 
 
@@ -290,7 +297,7 @@ async def test_stdio_client_discovers_reads_and_confirms_reminder_with_database(
     schedule_path.write_text(json.dumps(schedule, ensure_ascii=False), encoding="utf-8")
     mcp_settings = replace(
         base_settings,
-        mcp_transport="stdio",
+        mcp_transport=MCPTransport.STDIO,
         mcp_shared_secret="stdio-integration-secret-0123456789",
         schedule_path=str(schedule_path),
         schedule_timezone="Europe/Moscow",
@@ -339,10 +346,10 @@ async def test_stdio_client_discovers_reads_and_confirms_reminder_with_database(
             position=0,
             calls_remaining=2,
         )
-        assert prepared.decision == "prepare"
+        assert prepared.decision == AgentDecision.PREPARE
         assert prepared.confirmation_id
         confirmed = await confirmations.confirm(user_id, prepared.confirmation_id)
-        assert confirmed.decision == "tool"
+        assert confirmed.decision == AgentDecision.TOOL
         assert await pool.fetchval("SELECT count(*) FROM reminders WHERE user_id=$1", user_id) == 1
 
         with pytest.raises(ToolFailure) as wrong_owner:
@@ -389,7 +396,13 @@ async def test_streamable_http_client_reads_and_rejects_bad_auth(tmp_path) -> No
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
     server = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="critical", access_log=False)
+        uvicorn.Config(
+            app,
+            host="127.0.0.1",
+            port=port,
+            log_level="critical",
+            access_log=False,
+        )
     )
     server_task = asyncio.create_task(server.serve())
     client = None
@@ -407,7 +420,7 @@ async def test_streamable_http_client_reads_and_rejects_bad_auth(tmp_path) -> No
             Settings(
                 bot_token="unused",
                 postgres_password="unused",
-                mcp_transport="streamable-http",
+                mcp_transport=MCPTransport.STREAMABLE_HTTP,
                 mcp_shared_secret=secret,
                 mcp_server_url=f"http://127.0.0.1:{port}/mcp/",
                 mcp_timeout=5,
@@ -428,7 +441,7 @@ async def test_streamable_http_client_reads_and_rejects_bad_auth(tmp_path) -> No
             Settings(
                 bot_token="unused",
                 postgres_password="unused",
-                mcp_transport="streamable-http",
+                mcp_transport=MCPTransport.STREAMABLE_HTTP,
                 mcp_shared_secret="incorrect-streamable-http-secret-0123456789",
                 mcp_server_url=f"http://127.0.0.1:{port}/mcp/",
                 mcp_timeout=5,

@@ -7,7 +7,7 @@ import pytest
 
 from app.config import Settings
 from app.core.clock import FrozenClock
-from app.core.schemas.agent import EventContext
+from app.core.schemas.agent import AgentDecision, EventContext
 from app.core.schemas.llm import LLMResponse
 from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.core.schemas.tools import ToolFailure
@@ -310,7 +310,7 @@ async def test_weather_pipeline_separates_routing_location_forecast_and_answer(
     )
     tool.call_tool.assert_awaited_once_with("get_weather", {"city": city})
     assert len(requests) == 2
-    assert result.decision == "tool" and str(float(chance)) in result.text
+    assert result.decision == AgentDecision.TOOL and str(float(chance)) in result.text
 
 
 async def test_missing_probability_preserves_current_weather_without_inventing_forecast() -> None:
@@ -367,7 +367,7 @@ async def test_unknown_location_returns_clarification_without_forecast_or_second
         result = await AgentService(llm, ToolExecutionService(tool)).run(
             [], EventContext(user_id=1, event_id="unknown", request_id="test")
         )
-    assert result.decision == "clarify" and "не найден" in result.text
+    assert result.decision == AgentDecision.CLARIFY and "не найден" in result.text
     assert len(requests) == 1
     llm.generate.assert_awaited_once()
 

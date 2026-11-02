@@ -70,7 +70,9 @@ def tool_catalog() -> list[types.Tool]:
             inputSchema=args.model_json_schema(),
             outputSchema=output_schema(result),
             annotations=types.ToolAnnotations(
-                readOnlyHint=name != "add_reminder", destructiveHint=False, idempotentHint=True
+                readOnlyHint=name != "add_reminder",
+                destructiveHint=False,
+                idempotentHint=True,
             ),
         )
         for name, (args, result, description) in TOOL_MODELS.items()
@@ -95,6 +97,7 @@ def output_schema(result: type[BaseModel]) -> dict[str, Any]:
     schema: dict[str, Any] = {"type": "object", "anyOf": [success, error]}
     if definitions:
         schema["$defs"] = definitions
+
     return schema
 
 
@@ -107,6 +110,21 @@ def error_result(code: str, message: str) -> types.CallToolResult:
     )
 
 
+def _reminder_owner(server: Server, shared_secret: str) -> tuple[int, str]:
+    metadata = server.request_context.meta
+    meta = metadata.model_dump() if metadata else {}
+    token = meta.get("app_token", "")
+    if not isinstance(token, str) or not hmac.compare_digest(token, shared_secret):
+        raise ToolFailure("unauthorized", "Нужен доверенный контекст приложения.")
+
+    user_id = meta.get("user_id")
+    confirmation = meta.get("confirmation_id")
+    if type(user_id) is not int or not isinstance(confirmation, str):
+        raise ToolFailure("unauthorized", "Нужен подтверждённый владелец.")
+
+    return user_id, confirmation
+
+
 def build_server(
     pool: asyncpg.Pool,
     settings: ServerSettings,
@@ -115,7 +133,11 @@ def build_server(
 ) -> Server:
     clock = clock or SystemClock()
     weather = WeatherService(http, clock=clock)
-    schedule = ScheduleService(settings.schedule_path, settings.schedule_timezone, clock)
+    schedule = ScheduleService(
+        settings.schedule_path,
+        settings.schedule_timezone,
+        clock,
+    )
     server = Server("itmo-student-tools")
 
     @server.list_tools()
@@ -123,39 +145,41 @@ def build_server(
         return tool_catalog()
 
     @server.call_tool(validate_input=False)
-    async def call_tool(name: str, arguments: dict[str, Any]) -> types.CallToolResult:
+    async def call_tool(
+        name: str,
+        arguments: dict[str, Any],
+    ) -> types.CallToolResult:
         try:
             if name not in TOOL_MODELS:
                 raise ToolFailure("unknown_tool", "Инструмент не разрешён.")
-            arguments = TOOL_MODELS[name][0].model_validate(arguments).model_dump(mode="json")
+
+            parsed_arguments = TOOL_MODELS[name][0].model_validate(arguments)
             result: ToolDTO
 
-            if name == "get_weather":
-                result = await weather.get_weather(arguments["city"], arguments["date"])
-            elif name == "get_schedule":
-                result = await schedule.get_schedule(arguments["date"])
-            elif name == "get_schedule_week":
-                result = (
-                    await schedule.week_containing(arguments["date"])
-                    if arguments["date"] is not None
-                    else await schedule.relative_week(arguments["week_offset"])
+            if isinstance(parsed_arguments, WeatherArguments):
+                result = await weather.get_weather(parsed_arguments.city, parsed_arguments.date)
+            elif isinstance(parsed_arguments, ScheduleArguments):
+                result = await schedule.get_schedule(parsed_arguments.date)
+            elif isinstance(parsed_arguments, ScheduleWeekArguments):
+                if parsed_arguments.date is not None:
+                    result = await schedule.week_containing(parsed_arguments.date)
+                else:
+                    result = await schedule.relative_week(parsed_arguments.week_offset)
+            elif isinstance(parsed_arguments, ReminderArguments):
+                user_id, confirmation = _reminder_owner(server, settings.mcp_shared_secret)
+                reminder = parsed_arguments.model_dump(mode="json")
+                result = await create_confirmed_reminder(
+                    pool,
+                    confirmation,
+                    user_id,
+                    reminder,
+                    clock.now(),
                 )
             else:
-                metadata = server.request_context.meta
-                meta = metadata.model_dump() if metadata else {}
-                token = meta.get("app_token", "")
-                if not isinstance(token, str) or not hmac.compare_digest(
-                    token, settings.mcp_shared_secret
-                ):
-                    raise ToolFailure("unauthorized", "Нужен доверенный контекст приложения.")
-                user_id = meta.get("user_id")
-                confirmation = meta.get("confirmation_id")
-                if type(user_id) is not int or not isinstance(confirmation, str):
-                    raise ToolFailure("unauthorized", "Нужен подтверждённый владелец.")
-                result = await create_confirmed_reminder(
-                    pool, confirmation, user_id, arguments, clock.now()
-                )
+                raise ToolFailure("unknown_tool", "Инструмент не разрешён.")
+
             payload = result.model_dump(mode="json")
+
             return types.CallToolResult(
                 structuredContent=payload,
                 content=[
@@ -177,12 +201,14 @@ def build_server(
     async def read_resource(uri: AnyUrl) -> list[ReadResourceContents]:
         if str(uri) != "schedule://current-week":
             raise ValueError("Ресурс не разрешён.")
+
         try:
             payload = (await schedule.current_week()).model_dump_json()
         except Exception:
             payload = json.dumps(
                 {"error": {"code": "schedule_unavailable", "message": "Расписание недоступно."}}
             )
+
         return [ReadResourceContents(content=payload, mime_type="application/json")]
 
     return server

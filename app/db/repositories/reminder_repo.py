@@ -6,6 +6,7 @@ from datetime import datetime
 import asyncpg
 
 from app.core.schemas.tools import ReminderArguments, ReminderResult, ToolFailure
+from app.db.records import ConfirmationState
 
 
 async def create_confirmed_reminder(
@@ -27,7 +28,10 @@ async def create_confirmed_reminder(
             saved = json.loads(saved)
         expected = ReminderArguments.model_validate(saved)
         actual = ReminderArguments.model_validate(arguments)
-        if expected != actual or pending["state"] not in {"executing", "succeeded"}:
+        if expected != actual or pending["state"] not in {
+            ConfirmationState.EXECUTING,
+            ConfirmationState.SUCCEEDED,
+        }:
             raise ToolFailure("unauthorized", "Подтверждение не соответствует действию.")
         if pending["confirmed_at"] is None or pending["confirmed_at"] > pending["expires_at"]:
             raise ToolFailure("expired", "Подтверждение истекло.")

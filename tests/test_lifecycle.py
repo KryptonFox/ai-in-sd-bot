@@ -42,7 +42,11 @@ async def test_telegram_failure_closes_pool_and_session(monkeypatch):
         get_me=AsyncMock(side_effect=ConnectionError("proxy offline")),
         session=Mock(close=AsyncMock()),
     )
-    monkeypatch.setattr(application, "create_pool", AsyncMock(return_value=pool))
+    monkeypatch.setattr(
+        application,
+        "create_pool",
+        AsyncMock(return_value=pool),
+    )
     monkeypatch.setattr(application, "create_bot", Mock(return_value=bot))
 
     settings = Settings(bot_token="unused", postgres_password="unused")
@@ -58,13 +62,45 @@ async def test_db_failure_closes_http_session(monkeypatch):
     from app import __main__ as application
 
     bot = Mock(session=Mock(close=AsyncMock()))
-    monkeypatch.setattr(application, "create_pool", AsyncMock(side_effect=ConnectionError))
+    monkeypatch.setattr(
+        application,
+        "create_pool",
+        AsyncMock(side_effect=ConnectionError),
+    )
     monkeypatch.setattr(application, "create_bot", Mock(return_value=bot))
 
     with pytest.raises(ConnectionError):
         await application.run(Settings(bot_token="unused", postgres_password="unused"))
 
     bot.session.close.assert_awaited_once()
+
+
+@pytest.mark.parametrize("failed_resource", ["mcp", "health", "llm", "bot", "database"])
+async def test_shutdown_closes_remaining_resources_when_one_close_fails(failed_resource):
+    from app.__main__ import _shutdown
+
+    closed: list[str] = []
+
+    def close_action(name: str):
+        async def close() -> None:
+            closed.append(name)
+            if name == failed_resource:
+                raise RuntimeError("close_failed")
+
+        return AsyncMock(side_effect=close)
+
+    pool = Mock(close=close_action("database"))
+    bot = Mock(session=Mock(close=close_action("bot")))
+    llm = Mock(aclose=close_action("llm"))
+    runner = Mock(cleanup=close_action("health"))
+    mcp = Mock(aclose=close_action("mcp"))
+    state = HealthState(pool=pool, initialized=True)
+
+    with pytest.raises(RuntimeError, match="close_failed"):
+        await _shutdown(state, bot, llm, mcp, runner, None)
+
+    assert closed == ["mcp", "health", "llm", "bot", "database"]
+    assert not state.initialized
 
 
 async def test_http_proxy_receives_connect_and_failure_has_no_direct_fallback(unused_tcp_port):
@@ -114,7 +150,9 @@ async def test_application_closes_llm_at_every_lifecycle_boundary(monkeypatch, f
     monkeypatch.setattr(application, "MCPClient", Mock(return_value=mcp))
     llm = Mock(aclose=AsyncMock())
     monkeypatch.setattr(
-        application, "PostgresTurnStore", Mock(return_value=Mock(recover=AsyncMock()))
+        application,
+        "PostgresTurnStore",
+        Mock(return_value=Mock(recover=AsyncMock())),
     )
     pool = Mock(close=AsyncMock())
     bot = Mock(
@@ -129,10 +167,18 @@ async def test_application_closes_llm_at_every_lifecycle_boundary(monkeypatch, f
     start_health_server = AsyncMock(return_value=runner)
     monkeypatch.setattr(application, "create_pool", create_pool)
     monkeypatch.setattr(application, "create_bot", Mock(return_value=bot))
-    monkeypatch.setattr(application, "Dispatcher", Mock(return_value=dispatcher))
+    monkeypatch.setattr(
+        application,
+        "Dispatcher",
+        Mock(return_value=dispatcher),
+    )
     monkeypatch.setattr(application, "setup_bot_commands", AsyncMock())
     setup_bot_description = AsyncMock()
-    monkeypatch.setattr(application, "setup_bot_description", setup_bot_description)
+    monkeypatch.setattr(
+        application,
+        "setup_bot_description",
+        setup_bot_description,
+    )
     monkeypatch.setattr(application, "start_health_server", start_health_server)
     if failure == "db":
         create_pool.side_effect = RuntimeError
@@ -142,17 +188,20 @@ async def test_application_closes_llm_at_every_lifecycle_boundary(monkeypatch, f
         start_health_server.side_effect = RuntimeError
     elif failure == "polling":
         dispatcher.start_polling.side_effect = RuntimeError
+
     if failure == "none":
         await application.run(Settings(bot_token="unused", postgres_password="unused"))
     else:
         with pytest.raises(RuntimeError):
             await application.run(Settings(bot_token="unused", postgres_password="unused"))
+
     llm.aclose.assert_awaited_once()
     if failure not in {"db", "telegram"}:
         mcp.aclose.assert_awaited_once()
         setup_bot_description.assert_awaited_once_with(bot)
     else:
         setup_bot_description.assert_not_awaited()
+
     bot.session.close.assert_awaited_once()
     if failure != "db":
         pool.close.assert_awaited_once()

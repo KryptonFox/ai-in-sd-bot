@@ -1,0 +1,801 @@
+{
+  "label": "simplified-current-combined",
+  "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "temperature": 0.0,
+  "clock": "2026-10-12T09:00:00+03:00",
+  "timezone": "Europe/Moscow",
+  "revision": "0edd90c6b6658162565db2eacf8198e658a1c54e",
+  "dirty": true,
+  "app_python_sha256": "b8343230f08ba6f21e071c144ae1964804cf4247ca4bef8ee0d44260f5721247",
+  "dataset": "lab2-routing.json",
+  "dataset_sha256": "0a9c9f06f85e094ae42aaa3b684ea368b8f051055f5476ed676203e2a1afdc98",
+  "evaluator_sha256": "c7b1d7eef232e26aac96d2124189eab36a5f181b0b58e5a8548eafe7e68c99b5",
+  "created_at": "2026-11-02T05:55:12.264394+00:00",
+  "max_tool_calls": 2,
+  "max_llm_steps": 4,
+  "measurement_status": "incomplete",
+  "counts": {
+    "planned": 12,
+    "attempted": 12,
+    "decisions_received": 11,
+    "not_run": 0
+  },
+  "summary": {
+    "routing_correct": 10,
+    "routing_total": 12,
+    "routing_accuracy": 0.8333333333333334,
+    "arguments_correct": 7,
+    "arguments_total": 9,
+    "arguments_accuracy": 0.7777777777777778
+  },
+  "cases": [
+    {
+      "id": "weather_1",
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Санкт-Петербург"
+      },
+      "predicted_action": "get_weather",
+      "arguments": {
+        "city": "Санкт-Петербург"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Выбран инструмент.",
+      "effective_arguments": {
+        "city": "санкт-петербург",
+        "date": "2026-10-12"
+      }
+    },
+    {
+      "id": "weather_2",
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Казань"
+      },
+      "predicted_action": "get_weather",
+      "arguments": {
+        "city": "Казань",
+        "date": "2026-10-12"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Выбран инструмент.",
+      "effective_arguments": {
+        "city": "казань",
+        "date": "2026-10-12"
+      }
+    },
+    {
+      "id": "weather_3",
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Тбилиси, Грузия"
+      },
+      "predicted_action": "get_weather",
+      "arguments": {
+        "city": "Тбилиси, Грузия"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Выбран инструмент.",
+      "effective_arguments": {
+        "city": "тбилиси, грузия",
+        "date": "2026-10-12"
+      }
+    },
+    {
+      "id": "schedule_1",
+      "expected_action": "get_schedule",
+      "expected_arguments": {
+        "date": "2026-10-12"
+      },
+      "predicted_action": "get_schedule",
+      "arguments": {
+        "date": "2026-10-12"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Выбран инструмент.",
+      "effective_arguments": {
+        "date": "2026-10-12"
+      }
+    },
+    {
+      "id": "schedule_2",
+      "expected_action": "get_schedule",
+      "expected_arguments": {
+        "date": "2026-10-13"
+      },
+      "predicted_action": "get_schedule",
+      "arguments": {
+        "date": "2026-10-13"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Выбран инструмент.",
+      "effective_arguments": {
+        "date": "2026-10-13"
+      }
+    },
+    {
+      "id": "schedule_3",
+      "expected_action": "get_schedule",
+      "expected_arguments": {
+        "date": "2026-10-18"
+      },
+      "predicted_action": "error",
+      "arguments": {},
+      "route_correct": false,
+      "arguments_applicable": true,
+      "arguments_correct": false,
+      "success": false,
+      "error_class": "LLMServiceError"
+    },
+    {
+      "id": "reminder_1",
+      "expected_action": "add_reminder",
+      "expected_arguments": {
+        "text": "отправить отчёт",
+        "remind_at": "2026-10-13T18:30:00+03:00"
+      },
+      "predicted_action": "add_reminder",
+      "arguments": {
+        "text": "Отправить отчёт",
+        "remind_at": "2026-10-13T18:30:00+03:00"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Подготовка напоминания.",
+      "effective_arguments": {
+        "text": "отправить отчёт",
+        "remind_at": "2026-10-13T15:30:00+00:00"
+      }
+    },
+    {
+      "id": "reminder_2",
+      "expected_action": "add_reminder",
+      "expected_arguments": {
+        "text": "проверить расписание",
+        "remind_at": "2026-10-15T09:00:00+03:00"
+      },
+      "predicted_action": "add_reminder",
+      "arguments": {
+        "text": "проверить расписание",
+        "remind_at": "2026-10-15T09:00:00+03:00"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Подготовка напоминания.",
+      "effective_arguments": {
+        "text": "проверить расписание",
+        "remind_at": "2026-10-15T06:00:00+00:00"
+      }
+    },
+    {
+      "id": "reminder_3",
+      "expected_action": "add_reminder",
+      "expected_arguments": {
+        "text": "сделать перерыв",
+        "remind_at": "2026-10-12T11:00:00+03:00"
+      },
+      "predicted_action": "respond",
+      "arguments": {},
+      "route_correct": false,
+      "arguments_applicable": true,
+      "arguments_correct": false,
+      "success": false,
+      "public_answer": "Хорошо, напомню через 2 часа — в **11:00** (2026-10-12T11:00:00+03:00). Текст напоминания: «Сделать перерыв».\n\nПодтвердишь — создам напоминание?",
+      "effective_arguments": {}
+    },
+    {
+      "id": "respond_1",
+      "expected_action": "respond",
+      "expected_arguments": {},
+      "predicted_action": "respond",
+      "arguments": {},
+      "route_correct": true,
+      "arguments_applicable": false,
+      "arguments_correct": null,
+      "success": true,
+      "public_answer": "**Суть:** Список (`list`) — изменяемый, кортеж (`tuple`) — неизменяемый.\n\n**Объяснение:**\n- **Список** (`[1, 2, 3]`) позволяет добавлять, удалять и менять элементы после создания. Подходит для коллекций, которые меняются в процессе работы.\n- **Кортеж** (`(1, 2, 3)`) фиксирован после создания — элементы нельзя изменить, добавить или удалить. Используется для неизменяемых последовательностей (например, координаты, записи БД, ключи словаря).\n\n**Ключевой вывод:** Если данные не должны меняться — используй кортеж (быстрее, безопаснее, хешируемый). Если нужны изменения — список.",
+      "effective_arguments": {}
+    },
+    {
+      "id": "respond_2",
+      "expected_action": "respond",
+      "expected_arguments": {},
+      "predicted_action": "respond",
+      "arguments": {},
+      "route_correct": true,
+      "arguments_applicable": false,
+      "arguments_correct": null,
+      "success": true,
+      "public_answer": "**Laboratory work completed.** или **Lab work finished.**",
+      "effective_arguments": {}
+    },
+    {
+      "id": "clarify_1",
+      "expected_action": "clarify",
+      "expected_arguments": {},
+      "predicted_action": "clarify",
+      "arguments": {},
+      "route_correct": true,
+      "arguments_applicable": false,
+      "arguments_correct": null,
+      "success": true,
+      "public_answer": "Хорошо, напомню про лабораторную. Уточни, пожалуйста:\n1. Во сколько именно (например, 19:00 или 20:00)?\n2. Какой текст напоминания (просто «Лабораторная» или с деталями)?\n3. Часовой пояс — Europe/Moscow (Мск) или другой?",
+      "effective_arguments": {}
+    }
+  ],
+  "model_requests": 13,
+  "aggregation_policy": "Three sequential parts; retain the latest attempted result per case. One retry followed a provider HTTP 503; successful cases were not repeated.",
+  "source_runs": [
+    {
+      "original_filename": "lab2-routing-simplified-current-20261102T053839544376Z.json",
+      "report": {
+        "label": "simplified-current",
+        "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "temperature": 0.0,
+        "clock": "2026-10-12T09:00:00+03:00",
+        "timezone": "Europe/Moscow",
+        "revision": "0edd90c6b6658162565db2eacf8198e658a1c54e",
+        "dirty": true,
+        "app_python_sha256": "b8343230f08ba6f21e071c144ae1964804cf4247ca4bef8ee0d44260f5721247",
+        "dataset": "lab2-routing.json",
+        "dataset_sha256": "0a9c9f06f85e094ae42aaa3b684ea368b8f051055f5476ed676203e2a1afdc98",
+        "evaluator_sha256": "b952ceb1abe9f756180ba03d31c48363a66e56da107ada1c34dfb3930aadc72d",
+        "created_at": "2026-11-02T05:38:39.544376+00:00",
+        "max_tool_calls": 2,
+        "max_llm_steps": 4,
+        "measurement_status": "incomplete",
+        "counts": {
+          "planned": 12,
+          "attempted": 3,
+          "decisions_received": 2,
+          "not_run": 9
+        },
+        "summary": {
+          "routing_correct": 2,
+          "routing_total": 12,
+          "routing_accuracy": 0.16666666666666666,
+          "arguments_correct": 2,
+          "arguments_total": 9,
+          "arguments_accuracy": 0.2222222222222222
+        },
+        "cases": [
+          {
+            "id": "weather_1",
+            "expected_action": "get_weather",
+            "expected_arguments": {
+              "city": "Санкт-Петербург"
+            },
+            "predicted_action": "get_weather",
+            "arguments": {
+              "city": "Санкт-Петербург"
+            },
+            "route_correct": true,
+            "arguments_applicable": true,
+            "arguments_correct": true,
+            "success": true,
+            "public_answer": "Выбран инструмент.",
+            "effective_arguments": {
+              "city": "санкт-петербург",
+              "date": "2026-10-12"
+            }
+          },
+          {
+            "id": "weather_2",
+            "expected_action": "get_weather",
+            "expected_arguments": {
+              "city": "Казань"
+            },
+            "predicted_action": "get_weather",
+            "arguments": {
+              "city": "Казань",
+              "date": "2026-10-12"
+            },
+            "route_correct": true,
+            "arguments_applicable": true,
+            "arguments_correct": true,
+            "success": true,
+            "public_answer": "Выбран инструмент.",
+            "effective_arguments": {
+              "city": "казань",
+              "date": "2026-10-12"
+            }
+          },
+          {
+            "id": "weather_3",
+            "expected_action": "get_weather",
+            "expected_arguments": {
+              "city": "Тбилиси, Грузия"
+            },
+            "predicted_action": "error",
+            "arguments": {},
+            "route_correct": false,
+            "arguments_applicable": true,
+            "arguments_correct": false,
+            "success": false,
+            "error_class": "LLMServiceError"
+          },
+          {
+            "id": "schedule_1",
+            "expected_action": "get_schedule",
+            "expected_arguments": {
+              "date": "2026-10-12"
+            },
+            "predicted_action": "error",
+            "arguments": {},
+            "route_correct": false,
+            "arguments_applicable": true,
+            "arguments_correct": false,
+            "success": false,
+            "error_class": "NotRunAfterFailure"
+          },
+          {
+            "id": "schedule_2",
+            "expected_action": "get_schedule",
+            "expected_arguments": {
+              "date": "2026-10-13"
+            },
+            "predicted_action": "error",
+            "arguments": {},
+            "route_correct": false,
+            "arguments_applicable": true,
+            "arguments_correct": false,
+            "success": false,
+            "error_class": "NotRunAfterFailure"
+          },
+          {
+            "id": "schedule_3",
+            "expected_action": "get_schedule",
+            "expected_arguments": {
+              "date": "2026-10-18"
+            },
+            "predicted_action": "error",
+            "arguments": {},
+            "route_correct": false,
+            "arguments_applicable": true,
+            "arguments_correct": false,
+            "success": false,
+            "error_class": "NotRunAfterFailure"
+          },
+          {
+            "id": "reminder_1",
+            "expected_action": "add_reminder",
+            "expected_arguments": {
+              "text": "отправить отчёт",
+              "remind_at": "2026-10-13T18:30:00+03:00"
+            },
+            "predicted_action": "error",
+            "arguments": {},
+            "route_correct": false,
+            "arguments_applicable": true,
+            "arguments_correct": false,
+            "success": false,
+            "error_class": "NotRunAfterFailure"
+          },
+          {
+            "id": "reminder_2",
+            "expected_action": "add_reminder",
+            "expected_arguments": {
+              "text": "проверить расписание",
+              "remind_at": "2026-10-15T09:00:00+03:00"
+            },
+            "predicted_action": "error",
+            "arguments": {},
+            "route_correct": false,
+            "arguments_applicable": true,
+            "arguments_correct": false,
+            "success": false,
+            "error_class": "NotRunAfterFailure"
+          },
+          {
+            "id": "reminder_3",
+            "expected_action": "add_reminder",
+            "expected_arguments": {
+              "text": "сделать перерыв",
+              "remind_at": "2026-10-12T11:00:00+03:00"
+            },
+            "predicted_action": "error",
+            "arguments": {},
+            "route_correct": false,
+            "arguments_applicable": true,
+            "arguments_correct": false,
+            "success": false,
+            "error_class": "NotRunAfterFailure"
+          },
+          {
+            "id": "respond_1",
+            "expected_action": "respond",
+            "expected_arguments": {},
+            "predicted_action": "error",
+            "arguments": {},
+            "route_correct": false,
+            "arguments_applicable": false,
+            "arguments_correct": null,
+            "success": false,
+            "error_class": "NotRunAfterFailure"
+          },
+          {
+            "id": "respond_2",
+            "expected_action": "respond",
+            "expected_arguments": {},
+            "predicted_action": "error",
+            "arguments": {},
+            "route_correct": false,
+            "arguments_applicable": false,
+            "arguments_correct": null,
+            "success": false,
+            "error_class": "NotRunAfterFailure"
+          },
+          {
+            "id": "clarify_1",
+            "expected_action": "clarify",
+            "expected_arguments": {},
+            "predicted_action": "error",
+            "arguments": {},
+            "route_correct": false,
+            "arguments_applicable": false,
+            "arguments_correct": null,
+            "success": false,
+            "error_class": "NotRunAfterFailure"
+          }
+        ]
+      }
+    },
+    {
+      "original_filename": "lab2-routing-simplified-remaining-after-503-20261102T054415441535Z.json",
+      "report": {
+        "label": "simplified-remaining-after-503",
+        "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "temperature": 0.0,
+        "clock": "2026-10-12T09:00:00+03:00",
+        "timezone": "Europe/Moscow",
+        "revision": "0edd90c6b6658162565db2eacf8198e658a1c54e",
+        "dirty": true,
+        "app_python_sha256": "b8343230f08ba6f21e071c144ae1964804cf4247ca4bef8ee0d44260f5721247",
+        "dataset": "lab2-routing.json",
+        "dataset_sha256": "0a9c9f06f85e094ae42aaa3b684ea368b8f051055f5476ed676203e2a1afdc98",
+        "evaluator_sha256": "b952ceb1abe9f756180ba03d31c48363a66e56da107ada1c34dfb3930aadc72d",
+        "created_at": "2026-11-02T05:44:15.441535+00:00",
+        "max_tool_calls": 2,
+        "max_llm_steps": 4,
+        "measurement_status": "incomplete",
+        "counts": {
+          "planned": 10,
+          "attempted": 4,
+          "decisions_received": 3,
+          "not_run": 6
+        },
+        "summary": {
+          "routing_correct": 3,
+          "routing_total": 10,
+          "routing_accuracy": 0.3,
+          "arguments_correct": 3,
+          "arguments_total": 7,
+          "arguments_accuracy": 0.42857142857142855
+        },
+        "cases": [
+          {
+            "id": "weather_3",
+            "expected_action": "get_weather",
+            "expected_arguments": {
+              "city": "Тбилиси, Грузия"
+            },
+            "predicted_action": "get_weather",
+            "arguments": {
+              "city": "Тбилиси, Грузия"
+            },
+            "route_correct": true,
+            "arguments_applicable": true,
+            "arguments_correct": true,
+            "success": true,
+            "public_answer": "Выбран инструмент.",
+            "effective_arguments": {
+              "city": "тбилиси, грузия",
+              "date": "2026-10-12"
+            }
+          },
+          {
+            "id": "schedule_1",
+            "expected_action": "get_schedule",
+            "expected_arguments": {
+              "date": "2026-10-12"
+            },
+            "predicted_action": "get_schedule",
+            "arguments": {
+              "date": "2026-10-12"
+            },
+            "route_correct": true,
+            "arguments_applicable": true,
+            "arguments_correct": true,
+            "success": true,
+            "public_answer": "Выбран инструмент.",
+            "effective_arguments": {
+              "date": "2026-10-12"
+            }
+          },
+          {
+            "id": "schedule_2",
+            "expected_action": "get_schedule",
+            "expected_arguments": {
+              "date": "2026-10-13"
+            },
+            "predicted_action": "get_schedule",
+            "arguments": {
+              "date": "2026-10-13"
+            },
+            "route_correct": true,
+            "arguments_applicable": true,
+            "arguments_correct": true,
+            "success": true,
+            "public_answer": "Выбран инструмент.",
+            "effective_arguments": {
+              "date": "2026-10-13"
+            }
+          },
+          {
+            "id": "schedule_3",
+            "expected_action": "get_schedule",
+            "expected_arguments": {
+              "date": "2026-10-18"
+            },
+            "predicted_action": "error",
+            "arguments": {},
+            "route_correct": false,
+            "arguments_applicable": true,
+            "arguments_correct": false,
+            "success": false,
+            "error_class": "LLMServiceError"
+          },
+          {
+            "id": "reminder_1",
+            "expected_action": "add_reminder",
+            "expected_arguments": {
+              "text": "отправить отчёт",
+              "remind_at": "2026-10-13T18:30:00+03:00"
+            },
+            "predicted_action": "error",
+            "arguments": {},
+            "route_correct": false,
+            "arguments_applicable": true,
+            "arguments_correct": false,
+            "success": false,
+            "error_class": "NotRunAfterFailure"
+          },
+          {
+            "id": "reminder_2",
+            "expected_action": "add_reminder",
+            "expected_arguments": {
+              "text": "проверить расписание",
+              "remind_at": "2026-10-15T09:00:00+03:00"
+            },
+            "predicted_action": "error",
+            "arguments": {},
+            "route_correct": false,
+            "arguments_applicable": true,
+            "arguments_correct": false,
+            "success": false,
+            "error_class": "NotRunAfterFailure"
+          },
+          {
+            "id": "reminder_3",
+            "expected_action": "add_reminder",
+            "expected_arguments": {
+              "text": "сделать перерыв",
+              "remind_at": "2026-10-12T11:00:00+03:00"
+            },
+            "predicted_action": "error",
+            "arguments": {},
+            "route_correct": false,
+            "arguments_applicable": true,
+            "arguments_correct": false,
+            "success": false,
+            "error_class": "NotRunAfterFailure"
+          },
+          {
+            "id": "respond_1",
+            "expected_action": "respond",
+            "expected_arguments": {},
+            "predicted_action": "error",
+            "arguments": {},
+            "route_correct": false,
+            "arguments_applicable": false,
+            "arguments_correct": null,
+            "success": false,
+            "error_class": "NotRunAfterFailure"
+          },
+          {
+            "id": "respond_2",
+            "expected_action": "respond",
+            "expected_arguments": {},
+            "predicted_action": "error",
+            "arguments": {},
+            "route_correct": false,
+            "arguments_applicable": false,
+            "arguments_correct": null,
+            "success": false,
+            "error_class": "NotRunAfterFailure"
+          },
+          {
+            "id": "clarify_1",
+            "expected_action": "clarify",
+            "expected_arguments": {},
+            "predicted_action": "error",
+            "arguments": {},
+            "route_correct": false,
+            "arguments_applicable": false,
+            "arguments_correct": null,
+            "success": false,
+            "error_class": "NotRunAfterFailure"
+          }
+        ]
+      }
+    },
+    {
+      "original_filename": "lab2-routing-simplified-unattempted-20261102T055512264394Z.json",
+      "report": {
+        "label": "simplified-unattempted",
+        "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "temperature": 0.0,
+        "clock": "2026-10-12T09:00:00+03:00",
+        "timezone": "Europe/Moscow",
+        "revision": "0edd90c6b6658162565db2eacf8198e658a1c54e",
+        "dirty": true,
+        "app_python_sha256": "b8343230f08ba6f21e071c144ae1964804cf4247ca4bef8ee0d44260f5721247",
+        "dataset": "lab2-routing.json",
+        "dataset_sha256": "0a9c9f06f85e094ae42aaa3b684ea368b8f051055f5476ed676203e2a1afdc98",
+        "evaluator_sha256": "c7b1d7eef232e26aac96d2124189eab36a5f181b0b58e5a8548eafe7e68c99b5",
+        "created_at": "2026-11-02T05:55:12.264394+00:00",
+        "max_tool_calls": 2,
+        "max_llm_steps": 4,
+        "measurement_status": "completed",
+        "counts": {
+          "planned": 6,
+          "attempted": 6,
+          "decisions_received": 6,
+          "not_run": 0
+        },
+        "summary": {
+          "routing_correct": 5,
+          "routing_total": 6,
+          "routing_accuracy": 0.8333333333333334,
+          "arguments_correct": 2,
+          "arguments_total": 3,
+          "arguments_accuracy": 0.6666666666666666
+        },
+        "cases": [
+          {
+            "id": "reminder_1",
+            "expected_action": "add_reminder",
+            "expected_arguments": {
+              "text": "отправить отчёт",
+              "remind_at": "2026-10-13T18:30:00+03:00"
+            },
+            "predicted_action": "add_reminder",
+            "arguments": {
+              "text": "Отправить отчёт",
+              "remind_at": "2026-10-13T18:30:00+03:00"
+            },
+            "route_correct": true,
+            "arguments_applicable": true,
+            "arguments_correct": true,
+            "success": true,
+            "public_answer": "Подготовка напоминания.",
+            "effective_arguments": {
+              "text": "отправить отчёт",
+              "remind_at": "2026-10-13T15:30:00+00:00"
+            }
+          },
+          {
+            "id": "reminder_2",
+            "expected_action": "add_reminder",
+            "expected_arguments": {
+              "text": "проверить расписание",
+              "remind_at": "2026-10-15T09:00:00+03:00"
+            },
+            "predicted_action": "add_reminder",
+            "arguments": {
+              "text": "проверить расписание",
+              "remind_at": "2026-10-15T09:00:00+03:00"
+            },
+            "route_correct": true,
+            "arguments_applicable": true,
+            "arguments_correct": true,
+            "success": true,
+            "public_answer": "Подготовка напоминания.",
+            "effective_arguments": {
+              "text": "проверить расписание",
+              "remind_at": "2026-10-15T06:00:00+00:00"
+            }
+          },
+          {
+            "id": "reminder_3",
+            "expected_action": "add_reminder",
+            "expected_arguments": {
+              "text": "сделать перерыв",
+              "remind_at": "2026-10-12T11:00:00+03:00"
+            },
+            "predicted_action": "respond",
+            "arguments": {},
+            "route_correct": false,
+            "arguments_applicable": true,
+            "arguments_correct": false,
+            "success": false,
+            "public_answer": "Хорошо, напомню через 2 часа — в **11:00** (2026-10-12T11:00:00+03:00). Текст напоминания: «Сделать перерыв».\n\nПодтвердишь — создам напоминание?",
+            "effective_arguments": {}
+          },
+          {
+            "id": "respond_1",
+            "expected_action": "respond",
+            "expected_arguments": {},
+            "predicted_action": "respond",
+            "arguments": {},
+            "route_correct": true,
+            "arguments_applicable": false,
+            "arguments_correct": null,
+            "success": true,
+            "public_answer": "**Суть:** Список (`list`) — изменяемый, кортеж (`tuple`) — неизменяемый.\n\n**Объяснение:**\n- **Список** (`[1, 2, 3]`) позволяет добавлять, удалять и менять элементы после создания. Подходит для коллекций, которые меняются в процессе работы.\n- **Кортеж** (`(1, 2, 3)`) фиксирован после создания — элементы нельзя изменить, добавить или удалить. Используется для неизменяемых последовательностей (например, координаты, записи БД, ключи словаря).\n\n**Ключевой вывод:** Если данные не должны меняться — используй кортеж (быстрее, безопаснее, хешируемый). Если нужны изменения — список.",
+            "effective_arguments": {}
+          },
+          {
+            "id": "respond_2",
+            "expected_action": "respond",
+            "expected_arguments": {},
+            "predicted_action": "respond",
+            "arguments": {},
+            "route_correct": true,
+            "arguments_applicable": false,
+            "arguments_correct": null,
+            "success": true,
+            "public_answer": "**Laboratory work completed.** или **Lab work finished.**",
+            "effective_arguments": {}
+          },
+          {
+            "id": "clarify_1",
+            "expected_action": "clarify",
+            "expected_arguments": {},
+            "predicted_action": "clarify",
+            "arguments": {},
+            "route_correct": true,
+            "arguments_applicable": false,
+            "arguments_correct": null,
+            "success": true,
+            "public_answer": "Хорошо, напомню про лабораторную. Уточни, пожалуйста:\n1. Во сколько именно (например, 19:00 или 20:00)?\n2. Какой текст напоминания (просто «Лабораторная» или с деталями)?\n3. Часовой пояс — Europe/Moscow (Мск) или другой?",
+            "effective_arguments": {}
+          }
+        ]
+      }
+    }
+  ],
+  "provider_failures": [
+    {
+      "source_run": 0,
+      "case_id": "weather_3",
+      "error_code": "llm_unavailable",
+      "status_code": 503
+    },
+    {
+      "source_run": 1,
+      "case_id": "schedule_3",
+      "error_code": "llm_unavailable",
+      "status_code": 503
+    }
+  ]
+}

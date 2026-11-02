@@ -12,7 +12,7 @@ from aiogram.types import CallbackQuery, Chat, Message, User
 from app.config import Settings
 from app.core.exceptions import InvalidTemperatureError, LLMTimeoutError
 from app.core.schemas.agent import AgentResult
-from app.core.schemas.llm import LLMRequest, LLMResponse
+from app.core.schemas.llm import FinishReason, LLMRequest, LLMResponse
 from app.core.schemas.message import MessageRole
 from app.handlers.commands import handle_role_callback, handle_start
 from app.handlers.dialog import handle_retry_callback, handle_user_text
@@ -616,7 +616,9 @@ async def test_legacy_system_history_stays_untrusted(in_memory_pool, base_settin
 
 async def test_incomplete_compaction_keeps_original_history(in_memory_pool, base_settings):
     llm = MagicMock(
-        generate=AsyncMock(return_value=LLMResponse(content="cut off", finish_reason="length"))
+        generate=AsyncMock(
+            return_value=LLMResponse(content="cut off", finish_reason=FinishReason.LENGTH)
+        )
     )
     service = make_dialog(in_memory_pool, base_settings, llm, registry)
     for index in range(10):

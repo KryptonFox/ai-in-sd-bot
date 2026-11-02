@@ -7,7 +7,7 @@ import pytest
 
 from app.config import Settings
 from app.core.clock import FrozenClock
-from app.core.schemas.agent import AgentResult, EventContext
+from app.core.schemas.agent import AgentDecision, AgentResult, EventContext
 from app.core.schemas.llm import LLMRequest, LLMResponse
 from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.mcp.client import MCPClient
@@ -23,10 +23,18 @@ def settings() -> Settings:
 
 
 def context() -> EventContext:
-    return EventContext(user_id=77, event_id="telegram-update-1", request_id="request-1")
+    return EventContext(
+        user_id=77,
+        event_id="telegram-update-1",
+        request_id="request-1",
+    )
 
 
-def tool_call(name: str, arguments: dict, identifier: str = "call-1") -> ToolCall:
+def tool_call(
+    name: str,
+    arguments: dict,
+    identifier: str = "call-1",
+) -> ToolCall:
     return ToolCall(id=identifier, name=name, arguments=arguments)
 
 
@@ -66,11 +74,15 @@ def make_agent(
     service = AgentService(
         llm,
         ToolExecutionService(
-            mcp, confirmations, clock=FrozenClock(EVALUATION_TIME), max_calls=max_tool_calls
+            mcp,
+            confirmations,
+            clock=FrozenClock(EVALUATION_TIME),
+            max_calls=max_tool_calls,
         ),
         clock=FrozenClock(EVALUATION_TIME),
         max_llm_steps=max_llm_steps,
     )
+
     return service, llm, mcp
 
 
@@ -87,7 +99,7 @@ async def test_plain_response_returns_text_without_mcp_call() -> None:
 
     result = await service.run(system_message(), context())
 
-    assert result.decision == "respond"
+    assert result.decision == AgentDecision.RESPOND
     assert result.text == "Обычный ответ"
     llm.generate.assert_awaited_once()
     mcp.call_tool.assert_not_awaited()
@@ -95,7 +107,9 @@ async def test_plain_response_returns_text_without_mcp_call() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("action", ["respond", "clarify"])
-async def test_virtual_finish_tool_returns_structured_decision(action: str) -> None:
+async def test_virtual_finish_tool_returns_structured_decision(
+    action: str,
+) -> None:
     response = LLMResponse(
         content="",
         tool_calls=[tool_call("finish_response", {"action": action, "text": "Ответ"})],
@@ -107,6 +121,59 @@ async def test_virtual_finish_tool_returns_structured_decision(action: str) -> N
     assert result.decision == action
     assert result.text == "Ответ"
     mcp.call_tool.assert_not_awaited()
+
+
+@pytest.mark.parametrize("finish_first", [True, False])
+async def test_mixed_final_answer_and_read_are_rejected_before_any_tool_call(
+    finish_first: bool,
+) -> None:
+    finish = tool_call(
+        "finish_response",
+        {"action": "respond", "text": "Ответ"},
+        "finish",
+    )
+    read = tool_call("get_weather", {"city": "Казань"}, "weather")
+    calls = [finish, read] if finish_first else [read, finish]
+    service, _, mcp = make_agent([LLMResponse(content="", tool_calls=calls)])
+
+    result = await service.run(system_message(), context())
+
+    assert result.reason == "mixed_decision" and result.decision == AgentDecision.ERROR
+    mcp.call_tool.assert_not_awaited()
+
+
+async def test_confirmation_position_stays_stable_after_a_read_step() -> None:
+    confirmations = MagicMock(
+        prepare=AsyncMock(
+            return_value=AgentResult(
+                text="Подтвердите",
+                decision=AgentDecision.PREPARE,
+                confirmation_id="saved",
+            )
+        )
+    )
+    reminder = tool_call(
+        "add_reminder", {"text": "Учиться", "remind_at": "2026-10-12T11:00:00+03:00"}
+    )
+    service, _, mcp = make_agent(
+        [
+            LLMResponse(content="", tool_calls=[tool_call("get_weather", {"city": "Казань"})]),
+            LLMResponse(content="", tool_calls=[reminder]),
+        ],
+        confirmations=confirmations,
+    )
+
+    result = await service.run(
+        system_message(),
+        context(),
+        timezone="Europe/Moscow",
+    )
+
+    assert result.confirmation_id == "saved"
+    assert confirmations.prepare.await_args is not None
+    assert confirmations.prepare.await_args.kwargs["position"] == 100
+    assert confirmations.prepare.await_args.kwargs["calls_remaining"] == 1
+    mcp.call_tool.assert_awaited_once_with("get_weather", {"city": "Казань"})
 
 
 @pytest.mark.asyncio
@@ -158,7 +225,7 @@ async def test_unknown_tool_is_rejected_without_mcp_call() -> None:
 
     result = await service.run(system_message(), context())
 
-    assert result.decision == "error"
+    assert result.decision == AgentDecision.ERROR
     mcp.call_tool.assert_not_awaited()
 
 
@@ -175,7 +242,7 @@ async def test_tool_arguments_with_unknown_fields_are_rejected() -> None:
 
     result = await service.run(system_message(), context())
 
-    assert result.decision == "clarify"
+    assert result.decision == AgentDecision.CLARIFY
     mcp.call_tool.assert_not_awaited()
 
 
@@ -196,7 +263,7 @@ async def test_three_tool_calls_in_one_batch_stop_at_two_call_budget() -> None:
 
     result = await service.run(system_message(), context())
 
-    assert result.decision == "error"
+    assert result.decision == AgentDecision.ERROR
     assert mcp.call_tool.await_count == 2
     llm.generate.assert_awaited_once()
 
@@ -213,7 +280,7 @@ async def test_llm_step_limit_is_independent_of_tool_call_limit() -> None:
 
     result = await service.run(system_message(), context())
 
-    assert result.decision == "error"
+    assert result.decision == AgentDecision.ERROR
     assert llm.generate.await_count == 1
     assert mcp.call_tool.await_count == 1
 
@@ -234,9 +301,14 @@ async def test_reminder_dry_run_normalizes_without_calling_mcp_or_confirmation()
         ]
     )
 
-    result = await service.run(system_message(), context(), timezone="Europe/Moscow", dry_run=True)
+    result = await service.run(
+        system_message(),
+        context(),
+        timezone="Europe/Moscow",
+        dry_run=True,
+    )
 
-    assert result.decision == "prepare"
+    assert result.decision == AgentDecision.PREPARE
     assert result.arguments["text"] == "повторить материал"
     assert result.arguments["remind_at"] == "2026-10-12T11:00:00+03:00"
     mcp.call_tool.assert_not_awaited()
@@ -260,7 +332,7 @@ async def test_reminder_without_timezone_returns_clarification_without_mcp() -> 
 
     result = await service.run(system_message(), context())
 
-    assert result.decision == "clarify"
+    assert result.decision == AgentDecision.CLARIFY
     assert "часовой пояс" in result.text
     mcp.call_tool.assert_not_awaited()
 
@@ -290,7 +362,7 @@ async def test_ambiguous_weather_result_clarifies_without_second_tool_call() -> 
 
     result = await service.run(system_message(), context())
 
-    assert result.decision == "clarify"
+    assert result.decision == AgentDecision.CLARIFY
     assert mcp.call_tool.await_count == 1
     llm.generate.assert_awaited_once()
 
@@ -300,7 +372,7 @@ async def test_mcp_unavailable_still_allows_plain_response_and_blocks_tool() -> 
     service, _, mcp = make_agent([LLMResponse(content="Обычный ответ")])
     mcp.available = False
     plain_result = await service.run(system_message(), context())
-    assert plain_result.decision == "respond"
+    assert plain_result.decision == AgentDecision.RESPOND
     assert plain_result.text == "Обычный ответ"
 
     service, _, mcp = make_agent(
@@ -308,7 +380,7 @@ async def test_mcp_unavailable_still_allows_plain_response_and_blocks_tool() -> 
     )
     mcp.available = False
     denied = await service.run(system_message(), context())
-    assert denied.decision == "error"
+    assert denied.decision == AgentDecision.ERROR
     assert mcp.call_tool.await_count == 0
 
 
@@ -318,14 +390,22 @@ async def test_confirmation_prepare_receives_remaining_budget_after_read() -> No
     confirmations.existing = AsyncMock(return_value=None)
     confirmations.prepare = AsyncMock(
         return_value=AgentResult(
-            text="Подтвердите напоминание", decision="prepare", confirmation_id="saved-id"
+            text="Подтвердите напоминание",
+            decision=AgentDecision.PREPARE,
+            confirmation_id="saved-id",
         )
     )
     service, _, mcp = make_agent(
         [
             LLMResponse(
                 content="",
-                tool_calls=[tool_call("get_schedule", {"date": "2026-10-12"}, "read-1")],
+                tool_calls=[
+                    tool_call(
+                        "get_schedule",
+                        {"date": "2026-10-12"},
+                        "read-1",
+                    )
+                ],
             ),
             LLMResponse(
                 content="",
@@ -341,9 +421,13 @@ async def test_confirmation_prepare_receives_remaining_budget_after_read() -> No
         confirmations=confirmations,
     )
 
-    result = await service.run(system_message(), context(), timezone="Europe/Moscow")
+    result = await service.run(
+        system_message(),
+        context(),
+        timezone="Europe/Moscow",
+    )
 
-    assert result.decision == "prepare"
+    assert result.decision == AgentDecision.PREPARE
     mcp.call_tool.assert_awaited_once_with("get_schedule", {"date": "2026-10-12"})
     confirmations.prepare.assert_awaited_once()
     assert confirmations.prepare.await_args is not None
@@ -366,7 +450,7 @@ async def test_mixed_finish_decision_and_tool_calls_are_rejected() -> None:
 
     result = await service.run(system_message(), context())
 
-    assert result.decision == "error"
+    assert result.decision == AgentDecision.ERROR
     mcp.call_tool.assert_not_awaited()
 
 
@@ -421,9 +505,14 @@ async def test_dry_run_does_not_prepare_confirmation_or_call_mutation() -> None:
         confirmations=confirmations,
     )
 
-    result = await service.run(system_message(), context(), timezone="Europe/Moscow", dry_run=True)
+    result = await service.run(
+        system_message(),
+        context(),
+        timezone="Europe/Moscow",
+        dry_run=True,
+    )
 
-    assert result.decision == "prepare"
+    assert result.decision == AgentDecision.PREPARE
     confirmations.prepare.assert_not_awaited()
     mcp.call_tool.assert_not_awaited()
 
@@ -441,12 +530,22 @@ async def test_concurrent_agent_runs_keep_tool_context_and_arguments_separate() 
             return LLMResponse(content=payload["data"]["date"])
 
         query = next(msg.content for msg in request.messages if msg.role == MessageRole.USER)
+
         return LLMResponse(
             content="",
-            tool_calls=[tool_call("get_schedule", {"date": query}, identifier=query)],
+            tool_calls=[
+                tool_call(
+                    "get_schedule",
+                    {"date": query},
+                    identifier=query,
+                )
+            ],
         )
 
-    async def read_schedule(name: str, arguments: dict[str, object]) -> dict[str, object]:
+    async def read_schedule(
+        name: str,
+        arguments: dict[str, object],
+    ) -> dict[str, object]:
         nonlocal calls_started
         assert name == "get_schedule"
         calls_started += 1
@@ -454,6 +553,7 @@ async def test_concurrent_agent_runs_keep_tool_context_and_arguments_separate() 
             both_calls_started.set()
 
         await both_calls_started.wait()
+
         return {"date": arguments["date"], "lessons": []}
 
     llm.generate = AsyncMock(side_effect=generate)
@@ -465,7 +565,9 @@ async def test_concurrent_agent_runs_keep_tool_context_and_arguments_separate() 
             ChatMessage(role=MessageRole.USER, content=date),
         ]
         request_context = EventContext(
-            user_id=user_id, event_id=f"event:{user_id}", request_id=f"request:{user_id}"
+            user_id=user_id,
+            event_id=f"event:{user_id}",
+            request_id=f"request:{user_id}",
         )
         return await service.run(messages, request_context)
 
@@ -478,6 +580,6 @@ async def test_concurrent_agent_runs_keep_tool_context_and_arguments_separate() 
     assert second.text == "2026-10-13"
     assert first.arguments == {"date": "2026-10-12"}
     assert second.arguments == {"date": "2026-10-13"}
-    assert first.decision == second.decision == "tool"
+    assert first.decision == second.decision == AgentDecision.TOOL
     assert mcp.call_tool.await_count == 2
     assert llm.generate.await_count == 4

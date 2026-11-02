@@ -77,8 +77,13 @@ services:
       MCP_SHARED_SECRET: ${MCP_SHARED_SECRET:-}
       MCP_HOST: 0.0.0.0
       MCP_PORT: "8000"
-      SCHEDULE_PATH: ${SCHEDULE_PATH:-app/data/schedule.json}
+      SCHEDULE_PATH: app/data/schedule.json
       SCHEDULE_TIMEZONE: ${SCHEDULE_TIMEZONE:-Europe/Moscow}
+    volumes:
+      - type: bind
+        source: ${SCHEDULE_PATH:-./app/data/schedule.json}
+        target: /app/app/data/schedule.json
+        read_only: true
     depends_on:
       db:
         condition: service_healthy

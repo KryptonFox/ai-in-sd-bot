@@ -16,7 +16,7 @@ from app.core.exceptions import (
     LLMServiceError,
     LLMTimeoutError,
 )
-from app.core.schemas.llm import LLMRequest, ToolCall, ToolDefinition
+from app.core.schemas.llm import FinishReason, LLMRequest, ToolCall, ToolDefinition
 from app.core.schemas.message import ChatMessage, MessageRole
 from app.llm.client import OpenAIClient
 from app.llm.diagnostics import api_status_error_details
@@ -89,7 +89,7 @@ async def test_sdk_payload_usage_and_reuse(adapter):
     assert payload["model"] == "configured-model"
     assert payload["temperature"] == 0.3 and payload["max_tokens"] == 123
     assert json.loads(seen[1].content)["model"] == "override"
-    assert result.content == "  public\n" and result.finish_reason == "length"
+    assert result.content == "  public\n" and result.finish_reason == FinishReason.LENGTH
     assert (result.prompt_tokens, result.completion_tokens, result.total_tokens) == (11, 7, 18)
     await client.aclose()
     assert not sdk.is_closed()
@@ -175,6 +175,81 @@ async def test_provider_quota_code_and_model_override_are_logged(adapter, caplog
     assert "model='override-model'" in caplog.text
     assert "provider_code=insufficient_quota" in caplog.text
     assert "PRIVATE DETAIL" not in caplog.text
+
+
+async def test_rate_limit_logs_metric_headers_and_retry_without_private_body(adapter, caplog):
+    calls = []
+
+    def handler(req):
+        calls.append(req)
+        return httpx2.Response(
+            429,
+            headers={
+                "x-ratelimit-limit-tokens": "8000",
+                "x-ratelimit-remaining-tokens": "1200",
+                "x-ratelimit-limit-requests": "1000",
+                "x-ratelimit-remaining-requests": "990",
+                "x-ratelimit-reset-tokens": "7.66s",
+                "x-ratelimit-reset-requests": "2m59.56s",
+                "retry-after": "8.5",
+            },
+            json={
+                "error": {
+                    "code": "rate_limit_exceeded",
+                    "message": "Rate limit reached on tokens per minute (TPM). "
+                    "organization=PRIVATE_ORG secret-key PRIVATE PROMPT",
+                }
+            },
+        )
+
+    client, _ = adapter(handler)
+    with caplog.at_level("INFO", logger="app.llm"), pytest.raises(LLMServiceError) as caught:
+        await client.generate(request())
+
+    details = caught.value.diagnostic_details or ""
+    for expected in (
+        "rate_limit_metric=TPM",
+        "token_limit=8000",
+        "tokens_remaining=1200",
+        "request_limit=1000",
+        "requests_remaining=990",
+        "tokens_reset_after=7.66s",
+        "requests_reset_after=2m59.56s",
+        "retry_after_seconds=8.5",
+    ):
+        assert expected in details
+        assert expected in caplog.text
+
+    assert len(calls) == 1
+    for private in ("PRIVATE_ORG", "secret-key", "PRIVATE PROMPT"):
+        assert private not in caplog.text + details
+
+
+@pytest.mark.parametrize(
+    "value", ["secret-key PRIVATE PROMPT", "NaN", "Infinity", "-1", "10;secret-key"]
+)
+async def test_rate_limit_ignores_untrusted_header_values(adapter, caplog, value):
+    client, _ = adapter(
+        lambda _: httpx2.Response(
+            429,
+            headers={
+                "x-ratelimit-limit-tokens": value,
+                "x-ratelimit-reset-tokens": value,
+                "retry-after": value,
+            },
+            json={"error": {"code": "rate_limit_exceeded", "message": "PRIVATE DETAIL"}},
+        )
+    )
+
+    with caplog.at_level("INFO", logger="app.llm"), pytest.raises(LLMServiceError) as caught:
+        await client.generate(request())
+
+    details = caught.value.diagnostic_details or ""
+    assert "token_limit=" not in details
+    assert "tokens_reset_after=" not in details
+    assert "retry_after_seconds=" not in details
+    for private in ("PRIVATE DETAIL", "PRIVATE PROMPT", "secret-key"):
+        assert private not in caplog.text + details
 
 
 async def test_api_400_logs_specific_safe_parameter_diagnosis(adapter, caplog):
@@ -423,7 +498,11 @@ async def test_tools_roundtrip(adapter):
     await client.generate(
         LLMRequest(
             messages=[
-                ChatMessage(role=MessageRole.ASSISTANT, content="", tool_calls=response.tool_calls),
+                ChatMessage(
+                    role=MessageRole.ASSISTANT,
+                    content="",
+                    tool_calls=response.tool_calls,
+                ),
                 ChatMessage(role=MessageRole.TOOL, content='{"temp": 7}', tool_call_id="call-1"),
             ]
         )
@@ -469,7 +548,11 @@ async def test_stream_provider_failure_keeps_api_diagnosis_in_exception(adapter,
         '"message":"PRIVATE PROVIDER ERROR secret-key PRIVATE PROMPT"}}\n\n'
     )
     client, _ = adapter(
-        lambda _: httpx2.Response(200, headers={"content-type": "text/event-stream"}, content=body),
+        lambda _: httpx2.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=body,
+        ),
         settings=replace(SETTINGS, llm_streaming=True),
     )
     with pytest.raises(LLMServiceError) as raised:
@@ -569,7 +652,7 @@ async def test_stream_assembles_answer_and_usage_without_exposing_reasoning(
 
     client, _ = adapter(handler, settings=replace(SETTINGS, llm_streaming=True))
     result = await client.generate(request())
-    assert result.content == "Публичный ответ" and result.finish_reason == "stop"
+    assert result.content == "Публичный ответ" and result.finish_reason == FinishReason.STOP
     assert result.total_tokens == 15
     assert "PRIVATE REASONING" not in result.model_dump_json() + caplog.text
 
@@ -599,7 +682,7 @@ async def test_stream_infers_assistant_when_role_is_omitted(adapter):
         settings=replace(SETTINGS, llm_streaming=True),
     )
     result = await client.generate(request())
-    assert result.content == "Ответ" and result.finish_reason == "stop"
+    assert result.content == "Ответ" and result.finish_reason == FinishReason.STOP
 
 
 @pytest.mark.parametrize("role", ["user", "system", "tool", "assistantuser", "PRIVATE PROMPT"])
@@ -678,7 +761,7 @@ async def test_stream_preserves_truncated_text_and_rejects_incomplete_tool_argum
         settings=settings,
     )
     result = await client.generate(request())
-    assert result.content == "Начало" and result.finish_reason == "length"
+    assert result.content == "Начало" and result.finish_reason == FinishReason.LENGTH
     broken, _ = adapter(
         lambda _: stream_response(
             [
@@ -712,7 +795,9 @@ async def test_stream_disconnection_never_returns_partial_answer(adapter, caplog
 
     client, _ = adapter(
         lambda _: httpx2.Response(
-            200, headers={"content-type": "text/event-stream"}, stream=BrokenStream()
+            200,
+            headers={"content-type": "text/event-stream"},
+            stream=BrokenStream(),
         ),
         settings=replace(SETTINGS, llm_streaming=True),
     )
@@ -737,7 +822,9 @@ async def test_stream_deadline_and_cancellation_close_transport(adapter):
 
     client, _ = adapter(
         lambda _: httpx2.Response(
-            200, headers={"content-type": "text/event-stream"}, stream=SlowStream()
+            200,
+            headers={"content-type": "text/event-stream"},
+            stream=SlowStream(),
         ),
         settings=replace(SETTINGS, llm_streaming=True, llm_timeout=0.03),
     )
@@ -763,7 +850,9 @@ async def test_stream_error_event_and_missing_finish_are_failures(adapter):
     ):
         client, _ = adapter(
             lambda _, body=body: httpx2.Response(
-                200, headers={"content-type": "text/event-stream"}, content=body
+                200,
+                headers={"content-type": "text/event-stream"},
+                content=body,
             ),
             settings=settings,
         )

@@ -21,28 +21,46 @@ class BotMode(BaseModel):
     system_prompt: str
     few_shot_examples: list[FewShotExample] = Field(default_factory=list)
 
-    def build_initial_messages(self, user_text: str | None = None) -> list[ChatMessage]:
+    def build_initial_messages(
+        self,
+        user_text: str | None = None,
+    ) -> list[ChatMessage]:
         messages: list[ChatMessage] = [
             ChatMessage(role=MessageRole.SYSTEM, content=self.system_prompt)
         ]
 
-        examples = self.few_shot_examples
-        if user_text is not None:
-            query = user_text.casefold()
-            examples = sorted(
-                (ex for ex in examples if not ex.keywords or any(k in query for k in ex.keywords)),
-                key=lambda ex: sum(k in query for k in ex.keywords),
-                reverse=True,
-            )
-        budget = 1800
-        for example in examples[:1]:
-            size = len(example.user_input) + len(example.assistant_output)
-            if size > budget:
-                continue
-            budget -= size
-            messages.append(ChatMessage(role=MessageRole.USER, content=example.user_input))
-            messages.append(
-                ChatMessage(role=MessageRole.ASSISTANT, content=example.assistant_output)
-            )
+        example = self._select_example(user_text)
+        if example is None:
+            return messages
+
+        example_size = len(example.user_input) + len(example.assistant_output)
+        example_budget = 1800
+        if example_size > example_budget:
+            return messages
+
+        messages.append(ChatMessage(role=MessageRole.USER, content=example.user_input))
+        messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=example.assistant_output))
 
         return messages
+
+    def _select_example(self, user_text: str | None) -> FewShotExample | None:
+        if not self.few_shot_examples:
+            return None
+
+        if user_text is None:
+            return self.few_shot_examples[0]
+
+        query = user_text.casefold()
+        selected: FewShotExample | None = None
+        best_score = 0
+
+        for example in self.few_shot_examples:
+            score = sum(keyword in query for keyword in example.keywords)
+            if example.keywords and score == 0:
+                continue
+
+            if selected is None or score > best_score:
+                selected = example
+                best_score = score
+
+        return selected

@@ -2,8 +2,10 @@ import math
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aiogram.utils.token import TokenValidationError, validate_token
 from dotenv import dotenv_values
@@ -11,6 +13,29 @@ from dotenv import dotenv_values
 
 class ConfigError(ValueError):
     pass
+
+
+class MCPTransport(StrEnum):
+    STDIO = "stdio"
+    STREAMABLE_HTTP = "streamable-http"
+
+
+class ContextProvider(StrEnum):
+    AUTO = "auto"
+    NONE = "none"
+    OLLAMA = "ollama"
+    MODELS = "models"
+
+
+def _minimum_integer(key: str, raw_value: str, minimum: int) -> int:
+    try:
+        number = int(raw_value)
+        if number < minimum:
+            raise ValueError
+
+        return number
+    except ValueError:
+        raise ConfigError(f"{key}: значение должно быть целым числом >= {minimum}.") from None
 
 
 @dataclass(frozen=True)
@@ -33,14 +58,14 @@ class Settings:
     agent_timeout: float = 240.0
     summary_max_chars: int = 2000
     tool_result_max_chars: int = 12000
-    llm_context_provider: str = "auto"
+    llm_context_provider: ContextProvider = ContextProvider.AUTO
     history_max_messages: int = 10
     history_max_chars: int = 8000
     default_context_length: int = 32768
     compaction_threshold_messages: int = 10
     compaction_keep_recent: int = 3
     user_queue_max_size: int = 3
-    mcp_transport: str = "stdio"
+    mcp_transport: MCPTransport = MCPTransport.STDIO
     mcp_server_url: str = "http://127.0.0.1:8000/mcp/"
     mcp_shared_secret: str = field(default="", repr=False)
     mcp_timeout: float = 10.0
@@ -67,11 +92,13 @@ class Settings:
                 result = int(value(key, default))
                 if not 1 <= result <= 65535:
                     raise ValueError
+
                 return result
             except ValueError:
                 raise ConfigError(f"{key}: нужен номер порта от 1 до 65535.") from None
 
         token = value("BOT_TOKEN")
+
         try:
             validate_token(token)
         except TokenValidationError:
@@ -117,83 +144,69 @@ class Settings:
                 "LLM_TIMEOUT: значение должно быть положительным числом секунд."
             ) from None
 
+        max_messages = _minimum_integer(
+            "HISTORY_MAX_MESSAGES",
+            value("HISTORY_MAX_MESSAGES", "10"),
+            1,
+        )
+        max_chars = _minimum_integer(
+            "HISTORY_MAX_CHARS",
+            value("HISTORY_MAX_CHARS", "8000"),
+            100,
+        )
+        context_length = _minimum_integer(
+            "DEFAULT_CONTEXT_LENGTH",
+            value("DEFAULT_CONTEXT_LENGTH", "32768"),
+            512,
+        )
+        compaction_threshold = _minimum_integer(
+            "COMPACTION_THRESHOLD_MESSAGES",
+            value("COMPACTION_THRESHOLD_MESSAGES", "10"),
+            2,
+        )
+        recent_messages = _minimum_integer(
+            "COMPACTION_KEEP_RECENT",
+            value("COMPACTION_KEEP_RECENT", "3"),
+            1,
+        )
+        queue_size = _minimum_integer(
+            "USER_QUEUE_MAX_SIZE",
+            value("USER_QUEUE_MAX_SIZE", "3"),
+            1,
+        )
+
         try:
-            max_messages = int(value("HISTORY_MAX_MESSAGES", "10"))
-            if max_messages < 1:
-                raise ValueError
+            context_provider = ContextProvider(value("LLM_CONTEXT_PROVIDER", "auto"))
         except ValueError:
             raise ConfigError(
-                "HISTORY_MAX_MESSAGES: значение должно быть целым числом >= 1."
+                "LLM_CONTEXT_PROVIDER: используйте auto, none, ollama или models."
             ) from None
 
         try:
-            max_chars = int(value("HISTORY_MAX_CHARS", "8000"))
-            if max_chars < 100:
-                raise ValueError
+            transport = MCPTransport(value("MCP_TRANSPORT", "stdio"))
         except ValueError:
-            raise ConfigError(
-                "HISTORY_MAX_CHARS: значение должно быть целым числом >= 100."
-            ) from None
+            raise ConfigError("MCP_TRANSPORT: используйте stdio или streamable-http.") from None
 
-        try:
-            def_ctx = int(value("DEFAULT_CONTEXT_LENGTH", "32768"))
-            if def_ctx < 512:
-                raise ValueError
-        except ValueError:
-            raise ConfigError(
-                "DEFAULT_CONTEXT_LENGTH: значение должно быть целым числом >= 512."
-            ) from None
-
-        try:
-            compact_thresh = int(value("COMPACTION_THRESHOLD_MESSAGES", "10"))
-            if compact_thresh < 2:
-                raise ValueError
-        except ValueError:
-            raise ConfigError(
-                "COMPACTION_THRESHOLD_MESSAGES: значение должно быть целым числом >= 2."
-            ) from None
-
-        try:
-            compact_keep = int(value("COMPACTION_KEEP_RECENT", "3"))
-            if compact_keep < 1:
-                raise ValueError
-        except ValueError:
-            raise ConfigError(
-                "COMPACTION_KEEP_RECENT: значение должно быть целым числом >= 1."
-            ) from None
-
-        try:
-            queue_max = int(value("USER_QUEUE_MAX_SIZE", "3"))
-            if queue_max < 1:
-                raise ValueError
-        except ValueError:
-            raise ConfigError(
-                "USER_QUEUE_MAX_SIZE: значение должно быть целым числом >= 1."
-            ) from None
-
-        context_provider = value("LLM_CONTEXT_PROVIDER", "auto")
-        if context_provider not in {"auto", "none", "ollama", "models"}:
-            raise ConfigError("LLM_CONTEXT_PROVIDER: используйте auto, none, ollama или models.")
-
-        transport = value("MCP_TRANSPORT", "stdio")
-        if transport not in {"stdio", "streamable-http"}:
-            raise ConfigError("MCP_TRANSPORT: используйте stdio или streamable-http.")
-
-        def bounded(key: str, default: int, low: int, high: int) -> int:
+        def bounded(
+            key: str,
+            default: int,
+            low: int,
+            high: int,
+        ) -> int:
             try:
                 number = int(value(key, str(default)))
                 if not low <= number <= high:
                     raise ValueError
+
                 return number
             except ValueError:
                 raise ConfigError(f"{key}: допустимый диапазон {low}..{high}.") from None
-
-        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
         try:
             ZoneInfo(value("SCHEDULE_TIMEZONE", "Europe/Moscow"))
         except (ValueError, ZoneInfoNotFoundError):
             raise ConfigError("SCHEDULE_TIMEZONE: нужна зона IANA.") from None
+
         return cls(
             bot_token=token,
             postgres_password=password,
@@ -212,14 +225,19 @@ class Settings:
             llm_max_tokens=bounded("LLM_MAX_TOKENS", 16384, 64, 131072),
             agent_timeout=bounded("AGENT_TIMEOUT", 240, 1, 1800),
             summary_max_chars=bounded("SUMMARY_MAX_CHARS", 2000, 100, 8000),
-            tool_result_max_chars=bounded("TOOL_RESULT_MAX_CHARS", 12000, 100, 64000),
+            tool_result_max_chars=bounded(
+                "TOOL_RESULT_MAX_CHARS",
+                12000,
+                100,
+                64000,
+            ),
             llm_context_provider=context_provider,
             history_max_messages=max_messages,
             history_max_chars=max_chars,
-            default_context_length=def_ctx,
-            compaction_threshold_messages=compact_thresh,
-            compaction_keep_recent=compact_keep,
-            user_queue_max_size=queue_max,
+            default_context_length=context_length,
+            compaction_threshold_messages=compaction_threshold,
+            compaction_keep_recent=recent_messages,
+            user_queue_max_size=queue_size,
             mcp_transport=transport,
             mcp_server_url=value("MCP_SERVER_URL", "http://127.0.0.1:8000/mcp/"),
             mcp_shared_secret=value("MCP_SHARED_SECRET"),

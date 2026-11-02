@@ -12,10 +12,16 @@ from app.core.schemas.tools import Lesson, ScheduleResult, ToolFailure, WeekSche
 
 
 class ScheduleService:
-    def __init__(self, path: Path, timezone: str, clock: Clock) -> None:
+    def __init__(
+        self,
+        path: Path,
+        timezone: str,
+        clock: Clock,
+    ) -> None:
         self._path = path
         self._timezone = timezone
         self._clock = clock
+
         try:
             self._zone = ZoneInfo(timezone)
         except (ValueError, ZoneInfoNotFoundError) as exc:
@@ -24,15 +30,27 @@ class ScheduleService:
     async def get_schedule(self, date: str | None = None) -> ScheduleResult:
         if date is None:
             date = self._clock.now().astimezone(self._zone).date().isoformat()
+
         parsed = self._parse_date(date)
         data = self._read_data()
-        raw_lessons = data.get(date, [])
+
+        return self._day_result(parsed, data)
+
+    @staticmethod
+    def _day_result(
+        day: date,
+        data: dict[str, list[dict[str, str]]],
+    ) -> ScheduleResult:
+        date_key = day.isoformat()
+        raw_lessons = data.get(date_key, [])
+
         try:
             lessons = [Lesson.model_validate(lesson) for lesson in raw_lessons]
         except (ValidationError, TypeError) as exc:
             raise ToolFailure(
                 "schedule_unavailable", "В расписании обнаружены некорректные данные."
             ) from exc
+
         weekdays = (
             "понедельник",
             "вторник",
@@ -42,12 +60,13 @@ class ScheduleService:
             "суббота",
             "воскресенье",
         )
+
         return ScheduleResult(
-            date=date,
+            date=date_key,
             lessons=lessons,
-            data_available=date in data,
-            is_free_day=not lessons if date in data else None,
-            weekday=weekdays[parsed.weekday()],
+            data_available=date_key in data,
+            is_free_day=not lessons if date_key in data else None,
+            weekday=weekdays[day.weekday()],
         )
 
     async def current_week(self) -> WeekSchedule:
@@ -60,10 +79,13 @@ class ScheduleService:
     async def week_containing(self, value: str) -> WeekSchedule:
         day = self._parse_date(value)
         monday = day - timedelta(days=day.weekday())
+        data = self._read_data()
         days: list[ScheduleResult] = []
+
         for offset in range(7):
             current = monday + timedelta(days=offset)
-            days.append(await self.get_schedule(current.isoformat()))
+            days.append(self._day_result(current, data))
+
         return WeekSchedule(
             timezone=self._timezone,
             start_date=monday.isoformat(),
@@ -80,10 +102,12 @@ class ScheduleService:
             raise ToolFailure(
                 "invalid_date", "Дата должна быть реальной датой в формате YYYY-MM-DD."
             ) from exc
+
         if parsed.isoformat() != value:
             raise ToolFailure(
                 "invalid_date", "Дата должна быть реальной датой в формате YYYY-MM-DD."
             )
+
         return parsed
 
     def _read_data(self) -> dict[str, list[dict[str, str]]]:
@@ -91,6 +115,8 @@ class ScheduleService:
             data = json.loads(self._path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise ToolFailure("schedule_unavailable", "Расписание сейчас недоступно.") from exc
+
         if not isinstance(data, dict):
             raise ToolFailure("schedule_unavailable", "Файл расписания имеет неверный формат.")
+
         return data

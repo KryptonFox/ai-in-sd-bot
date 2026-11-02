@@ -5,7 +5,7 @@ from mcp import types
 from app.config import Settings
 from app.core.budget import ContextBudget
 from app.core.formatters import _split_messages
-from app.core.schemas.agent import EventContext
+from app.core.schemas.agent import AgentDecision, EventContext
 from app.core.schemas.llm import LLMResponse
 from app.core.schemas.message import ToolCall
 from app.mcp.client import MCPClient
@@ -18,7 +18,9 @@ from app.services.tool_execution import ToolExecutionService
 async def test_output_budget_preserves_large_configured_limit() -> None:
     llm = Mock(get_context_length=AsyncMock(return_value=40960))
     builder = ContextBuilder(
-        Mock(), Settings(bot_token="unused", postgres_password="unused", llm_max_tokens=16384), llm
+        Mock(),
+        Settings(bot_token="unused", postgres_password="unused", llm_max_tokens=16384),
+        llm,
     )
     budget = await builder.budget()
     assert budget.output_tokens == 16384
@@ -43,7 +45,7 @@ async def test_large_structured_answer_is_preserved_and_split_for_telegram() -> 
     result = await AgentService(llm).run(
         [], EventContext(user_id=1, event_id="long", request_id="long")
     )
-    assert result.decision == "respond" and result.text == text
+    assert result.decision == AgentDecision.RESPOND and result.text == text
     chunks = _split_messages(result.text, [])
     assert len(chunks) > 1
     assert "".join(chunk for chunk, _ in chunks) == text
@@ -75,7 +77,9 @@ async def test_tool_results_shrink_output_reserve_without_discarding_answer() ->
                     content="",
                     tool_calls=[
                         ToolCall(
-                            id="schedule", name="get_schedule", arguments={"date": "2026-10-27"}
+                            id="schedule",
+                            name="get_schedule",
+                            arguments={"date": "2026-10-27"},
                         )
                     ],
                 ),
@@ -88,6 +92,6 @@ async def test_tool_results_shrink_output_reserve_without_discarding_answer() ->
         EventContext(user_id=1, event_id="budget", request_id="budget"),
         budget=ContextBudget(24000, 16384),
     )
-    assert result.decision == "tool"
+    assert result.decision == AgentDecision.TOOL
     first, second = [call.args[0].max_tokens for call in llm.generate.await_args_list]
     assert 64 <= second < first <= 16384

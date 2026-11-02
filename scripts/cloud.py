@@ -40,6 +40,7 @@ def install_yc() -> str:
 
     with tempfile.TemporaryDirectory(prefix="itmo-yc-") as directory:
         installer = Path(directory) / f"install.{extension}"
+
         with urlopen(
             f"https://storage.yandexcloud.net/yandexcloud-yc/install.{extension}", timeout=60
         ) as response:
@@ -50,7 +51,12 @@ def install_yc() -> str:
             if os.name == "nt"
             else ["bash"]
         )
-        run_command([*command, str(installer)], label="Установка yc", interactive=True, timeout=600)
+        run_command(
+            [*command, str(installer)],
+            label="Установка yc",
+            interactive=True,
+            timeout=600,
+        )
 
     if not usual.exists():
         raise CommandError("yc не найден после установки. Добавьте его каталог в PATH и повторите.")
@@ -62,7 +68,12 @@ def authenticate(yc_path: str) -> str:
     try:
         run_command([yc_path, "iam", "create-token"], label="Проверка авторизации yc")
     except CommandError:
-        run_command([yc_path, "init"], label="Вход в Yandex Cloud", interactive=True, timeout=1800)
+        run_command(
+            [yc_path, "init"],
+            label="Вход в Yandex Cloud",
+            interactive=True,
+            timeout=1800,
+        )
 
     folder = run_command(
         [yc_path, "config", "get", "folder-id"], label="Чтение каталога yc"
@@ -97,7 +108,11 @@ def source_archive(root: Path) -> Path:
     with tarfile.open(archive_path, "w:gz") as archive:
         for path in sorted(candidates):
             if path.is_file() and "__pycache__" not in path.parts and not path.is_symlink():
-                archive.add(path, arcname=path.relative_to(root).as_posix(), recursive=False)
+                archive.add(
+                    path,
+                    arcname=path.relative_to(root).as_posix(),
+                    recursive=False,
+                )
 
     return archive_path
 
@@ -150,7 +165,15 @@ class Cloud:
 
     def save(self) -> None:
         temporary = self.state_path.with_suffix(".tmp")
-        private_write(temporary, json.dumps(self.state, ensure_ascii=False, indent=2) + "\n")
+        private_write(
+            temporary,
+            json.dumps(
+                self.state,
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+        )
         temporary.replace(self.state_path)
 
     def verify(self, resource: dict) -> None:
@@ -166,11 +189,17 @@ class Cloud:
             return None
 
         resources = self.yc([*kind, "list"])
-        matches = [
-            r
-            for r in resources
-            if (r["id"] == record["id"] if record.get("id") else r["name"] == record["name"])
-        ]
+        matches = []
+        resource_id = record.get("id")
+
+        for resource in resources:
+            if resource_id:
+                matches_record = resource["id"] == resource_id
+            else:
+                matches_record = resource["name"] == record["name"]
+
+            if matches_record:
+                matches.append(resource)
 
         if len(matches) > 1:
             raise CommandError("Найдено несколько одноимённых ресурсов; проверьте консоль облака.")
@@ -180,11 +209,17 @@ class Cloud:
                 self.verify(matches[0])
             elif matches[0].get("folder_id") != self.state["folder_id"]:
                 raise CommandError("Внешний ресурс относится к другому каталогу Yandex Cloud.")
+
             return matches[0]
 
         return None
 
-    def ensure(self, key: str, kind: list[str], flags: list[str]) -> dict:
+    def ensure(
+        self,
+        key: str,
+        kind: list[str],
+        flags: list[str],
+    ) -> dict:
         name = f"itmo-{self.state['owner']}-{key}"
         self.state["resources"].setdefault(key, {"name": name})
         self.save()
@@ -212,6 +247,7 @@ class Cloud:
 
         self.state["resources"][key]["id"] = resource["id"]
         self.save()
+
         return resource
 
     def ensure_network(self) -> dict:
@@ -244,6 +280,7 @@ class Cloud:
             }
             self.save()
             print("Используем существующую сеть default.", flush=True)
+
             return resource
 
         return self.ensure("network", KINDS["network"], [])
@@ -259,6 +296,7 @@ class Cloud:
             record = self.state["resources"].get(key, {})
             if resource and record.get("managed", True):
                 self.yc([*KINDS[key], "delete", "--id", resource["id"]])
+
             self.state["resources"].pop(key, None)
             self.save()
 
@@ -292,7 +330,10 @@ class Cloud:
 
         return key
 
-    def provision(self, args: argparse.Namespace) -> dict:
+    def _provision_config(
+        self,
+        args: argparse.Namespace,
+    ) -> tuple[CloudConfig, str]:
         defaults: CloudConfig = {
             "zone": "ru-central1-a",
             "platform": "standard-v2",
@@ -302,16 +343,23 @@ class Cloud:
             "disk_size": 20,
         }
         config: CloudConfig = {**defaults, **self.state.get("config", {})}
-        config.update(
-            zone=args.zone if args.zone is not None else config["zone"],
-            platform=args.platform if args.platform is not None else config["platform"],
-            cores=args.cores if args.cores is not None else config["cores"],
-            core_fraction=(
-                args.core_fraction if args.core_fraction is not None else config["core_fraction"]
-            ),
-            memory=args.memory if args.memory is not None else config["memory"],
-            disk_size=args.disk_size if args.disk_size is not None else config["disk_size"],
-        )
+        if args.zone is not None:
+            config["zone"] = args.zone
+
+        if args.platform is not None:
+            config["platform"] = args.platform
+
+        if args.cores is not None:
+            config["cores"] = args.cores
+
+        if args.core_fraction is not None:
+            config["core_fraction"] = args.core_fraction
+
+        if args.memory is not None:
+            config["memory"] = args.memory
+
+        if args.disk_size is not None:
+            config["disk_size"] = args.disk_size
 
         if "config" in self.state and config != self.state["config"]:
             raise CommandError(
@@ -337,6 +385,10 @@ class Cloud:
         self.state.update(config=config, ssh_cidr=cidr)
         self.save()
 
+        return config, cidr
+
+    def provision(self, args: argparse.Namespace) -> dict:
+        config, cidr = self._provision_config(args)
         key = self.key()
         network = self.ensure_network()
 
@@ -358,6 +410,33 @@ class Cloud:
             ],
         )
 
+        cloud_init = self._write_cloud_init(key)
+
+        return self.ensure(
+            "vm",
+            KINDS["vm"],
+            [
+                "--zone",
+                config["zone"],
+                "--platform",
+                config["platform"],
+                "--cores",
+                str(config["cores"]),
+                "--core-fraction",
+                str(config["core_fraction"]),
+                "--memory",
+                str(config["memory"]),
+                "--create-boot-disk",
+                f"image-folder-id=standard-images,image-family=ubuntu-2404-lts,"
+                f"type=network-hdd,size={config['disk_size']},auto-delete=true",
+                "--network-interface",
+                f"subnet-id={subnet['id']},nat-ip-version=ipv4,security-group-ids={security['id']}",
+                "--metadata-from-file",
+                f"user-data={cloud_init}",
+            ],
+        )
+
+    def _write_cloud_init(self, key: Path) -> Path:
         cloud_init = self.directory / "cloud-init.yaml"
         initialization = {
             "groups": ["docker"],
@@ -394,29 +473,8 @@ class Cloud:
         }
 
         private_write(cloud_init, "#cloud-config\n" + json.dumps(initialization, indent=2) + "\n")
-        return self.ensure(
-            "vm",
-            KINDS["vm"],
-            [
-                "--zone",
-                config["zone"],
-                "--platform",
-                config["platform"],
-                "--cores",
-                str(config["cores"]),
-                "--core-fraction",
-                str(config["core_fraction"]),
-                "--memory",
-                str(config["memory"]),
-                "--create-boot-disk",
-                f"image-folder-id=standard-images,image-family=ubuntu-2404-lts,"
-                f"type=network-hdd,size={config['disk_size']},auto-delete=true",
-                "--network-interface",
-                f"subnet-id={subnet['id']},nat-ip-version=ipv4,security-group-ids={security['id']}",
-                "--metadata-from-file",
-                f"user-data={cloud_init}",
-            ],
-        )
+
+        return cloud_init
 
     def instance(self) -> dict:
         instance = self.lookup("vm", KINDS["vm"])
@@ -500,6 +558,7 @@ class Cloud:
         )
 
         archive = source_archive(self.root)
+
         try:
             payload = base64.b64encode(archive.read_bytes()).decode("ascii")
             self.ssh(
@@ -517,7 +576,9 @@ class Cloud:
         payload = base64.b64encode(content.encode("utf-8")).decode("ascii")
 
         self.ssh(
-            instance, "umask 077; base64 -d > /home/student/course-env.pending", input_text=payload
+            instance,
+            "umask 077; base64 -d > /home/student/course-env.pending",
+            input_text=payload,
         )
         print("Собираем приложение и проверяем его готовность…", flush=True)
 
@@ -556,6 +617,7 @@ class Cloud:
 
         full = self.yc(["vpc", "security-group", "get", "--id", group["id"]])
         flags = []
+
         for rule in full.get("rules", []):
             if rule.get("direction") == "INGRESS":
                 flags.extend(["--delete-rule-id", rule["id"]])
@@ -575,6 +637,43 @@ class Cloud:
         self.state["ssh_cidr"] = cidr
         self.save()
         print("Доступ по SSH обновлён.")
+
+    def set_instance_state(self, action: str) -> None:
+        instance = self.instance()
+        desired = "RUNNING" if action == "start" else "STOPPED"
+        if instance.get("status") != desired:
+            self.yc(["compute", "instance", action, "--id", instance["id"]])
+
+        if action == "start":
+            instance = self.instance()
+            self.wait_ssh(instance)
+            print(
+                self.ssh(
+                    instance,
+                    f"{COMPOSE} up -d --wait --wait-timeout 180",
+                    timeout=240,
+                )
+            )
+
+        print(
+            "ВМ запущена."
+            if action == "start"
+            else "ВМ остановлена. Диск продолжает тарифицироваться."
+        )
+
+    def show_status(self, action: str) -> None:
+        instance = self.instance()
+        print(f"ВМ: {instance['id']}; состояние: {instance.get('status', 'UNKNOWN')}")
+        interfaces = instance.get("network_interfaces", [])
+        if interfaces:
+            address = interfaces[0].get("primary_v4_address", {}).get("one_to_one_nat", {})
+            if address.get("address"):
+                print(f"Публичный IPv4: {address['address']}")
+
+        if instance.get("status") == "RUNNING":
+            command = "ps --all" if action == "status" else "logs --tail 100 bot mcp-server db"
+            output = self.ssh(instance, f"{COMPOSE} {command}")
+            print(output)
 
 
 def cloud_main(root: Path, args: argparse.Namespace) -> int:
@@ -615,6 +714,7 @@ def cloud_main(root: Path, args: argparse.Namespace) -> int:
                     "Будут удалены ВМ, диск с БД, подсеть и группа безопасности "
                     "проекта. Общая сеть default останется."
                 )
+
             confirmed = input(f"Для подтверждения введите {name}: ").strip() == name
             deployment.destroy(confirmed=confirmed)
         elif args.action == "access":
@@ -625,39 +725,12 @@ def cloud_main(root: Path, args: argparse.Namespace) -> int:
             instance = deployment.provision(args)
             if instance.get("status") == "STOPPED":
                 yc(["compute", "instance", "start", "--id", instance["id"]])
+
             deployment.deploy(deployment.instance(), settings)
         elif args.action in {"start", "stop"}:
-            instance = deployment.instance()
-            desired = "RUNNING" if args.action == "start" else "STOPPED"
-            if instance.get("status") != desired:
-                yc(["compute", "instance", args.action, "--id", instance["id"]])
-            if args.action == "start":
-                instance = deployment.instance()
-                deployment.wait_ssh(instance)
-                print(
-                    deployment.ssh(
-                        instance, f"{COMPOSE} up -d --wait --wait-timeout 180", timeout=240
-                    )
-                )
-            print(
-                "ВМ запущена."
-                if args.action == "start"
-                else "ВМ остановлена. Диск продолжает тарифицироваться."
-            )
+            deployment.set_instance_state(args.action)
         else:
-            instance = deployment.instance()
-            print(f"ВМ: {instance['id']}; состояние: {instance.get('status', 'UNKNOWN')}")
-            interfaces = instance.get("network_interfaces", [])
-            if interfaces:
-                address = interfaces[0].get("primary_v4_address", {}).get("one_to_one_nat", {})
-                if address.get("address"):
-                    print(f"Публичный IPv4: {address['address']}")
-            if instance.get("status") == "RUNNING":
-                command = (
-                    "ps --all" if args.action == "status" else "logs --tail 100 bot mcp-server db"
-                )
-                output = deployment.ssh(instance, f"{COMPOSE} {command}")
-                print(output)
+            deployment.show_status(args.action)
     except BaseException:
         print(
             "Операция не завершена. Состояние сохранено в .deploy/state.json; "

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from app.config import ConfigError
+from app.config import ConfigError, MCPTransport
 from app.mcp_server.config import ServerSettings
 from scripts.common import compose_quote
 from scripts.local import compose_command
@@ -80,6 +80,11 @@ def test_local_and_cloud_compose_ports_credentials_and_healthchecks(tmp_path):
     assert "mcp_internal" in cloud["mcp-server"]["networks"]
     assert "mcp_internal" in cloud["bot"]["networks"]
     assert cloud["mcp-server"]["healthcheck"]["test"][-1] == "app.mcp_server.healthcheck"
+    schedule_mount = cloud["mcp-server"]["volumes"][0]
+    assert schedule_mount["type"] == "bind"
+    assert schedule_mount["target"] == "/app/app/data/schedule.json"
+    assert schedule_mount["read_only"] is True
+    assert cloud["mcp-server"]["environment"]["SCHEDULE_PATH"] == "app/data/schedule.json"
     assert "app.healthcheck" in cloud["bot"]["healthcheck"]["test"]
     assert cloud["bot"]["healthcheck"]["timeout"] == "20s"
     assert cloud["bot"]["depends_on"]["db"]["condition"] == "service_healthy"
@@ -93,7 +98,7 @@ def test_server_settings_loads_without_bot_token(tmp_path):
 
     assert settings.postgres_password == "database"
     assert settings.mcp_shared_secret == "s" * 32
-    assert settings.mcp_transport == "stdio"
+    assert settings.mcp_transport == MCPTransport.STDIO
     assert settings.mcp_port == 8000
     assert settings.schedule_path == Path("app/data/schedule.json")
     assert "database" not in repr(settings)

@@ -11,12 +11,13 @@ from app.core.budget import ContextBudget
 from app.core.clock import FrozenClock
 from app.core.exceptions import InterruptedRunError, LLMTimeoutError
 from app.core.queue import UserQueueManager
-from app.core.schemas.agent import AgentResult, EventContext, InProgress
-from app.core.schemas.llm import LLMResponse, ToolDefinition
+from app.core.schemas.agent import AgentDecision, AgentResult, EventContext, InProgress
+from app.core.schemas.llm import FinishReason, LLMResponse, ToolDefinition
 from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.mcp.client import MCPClient
 from app.mcp_server.server import tool_catalog
 from app.services.agent_service import AgentService
+from app.services.confirmation_service import ConfirmationService
 from app.services.dialog_service import DialogService
 from app.services.tool_execution import ToolExecutionService
 from tests.fake_turns import MemoryHistory, MemoryTurn, MemoryTurnStore
@@ -39,6 +40,78 @@ async def test_replay_precedes_compaction_and_writes_one_turn() -> None:
     assert first == second
     assert len(pool.messages) == 2
     llm.generate.assert_awaited_once()
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_dialog_confirms_directly_under_user_queue(cancel: bool) -> None:
+    confirmations = MagicMock(spec=ConfirmationService)
+    expected = AgentResult(text="confirmed")
+    queue = UserQueueManager()
+
+    async def confirm(user_id: int, identifier: str, *, cancel: bool) -> AgentResult:
+        assert await queue.is_user_busy(user_id)
+        return expected
+
+    confirmations.confirm = AsyncMock(side_effect=confirm)
+    service = DialogService(
+        cast(asyncpg.Pool, InMemoryPool()),
+        SETTINGS,
+        MagicMock(),
+        queue_manager=queue,
+        confirmations=confirmations,
+    )
+
+    assert await service.confirm_action(1, "confirmation", cancel=cancel) == expected
+    confirmations.confirm.assert_awaited_once_with(1, "confirmation", cancel=cancel)
+    assert not await queue.is_user_busy(1)
+
+
+async def test_replayed_confirmation_uses_current_state_without_llm_or_history_write() -> None:
+    pool = InMemoryPool()
+    store = MemoryTurnStore(cast(MemoryHistory, pool))
+    proposal = AgentResult(
+        text="pending",
+        decision=AgentDecision.PREPARE,
+        confirmation_id="confirmation",
+    )
+    store.turns[1, "same"] = MemoryTurn(result=proposal)
+    llm = MagicMock(generate=AsyncMock())
+    current = AgentResult(text="already cancelled")
+    confirmations = MagicMock(spec=ConfirmationService)
+    confirmations.existing = AsyncMock(return_value=current)
+    service = DialogService(
+        cast(asyncpg.Pool, pool),
+        SETTINGS,
+        llm,
+        confirmations=confirmations,
+        store=store,
+    )
+
+    assert await service.process_user_message(1, "question", event_id="same") == current
+    assert confirmations.existing.await_args is not None
+    context = confirmations.existing.await_args.args[0]
+    assert (context.user_id, context.event_id) == (1, "same")
+    assert not pool.messages
+    llm.generate.assert_not_awaited()
+
+
+async def test_dialog_tools_status_reflects_discovered_catalog_and_availability() -> None:
+    mcp = MCPClient(SETTINGS)
+    mcp.load_catalog(tool_catalog())
+    service = DialogService(
+        cast(asyncpg.Pool, InMemoryPool()),
+        SETTINGS,
+        MagicMock(),
+        tool_client=mcp,
+    )
+
+    tools = await service.tools_status()
+
+    assert {tool.name for tool in tools} == set(mcp.tools)
+    assert {tool.name for tool in tools if tool.requires_confirmation} == {"add_reminder"}
+
+    mcp.load_catalog([])
+    assert await service.tools_status() == []
 
 
 async def test_direct_calls_without_event_context_have_distinct_keys() -> None:
@@ -119,7 +192,11 @@ async def test_reset_waits_for_compaction_and_does_not_resurrect_summary() -> No
         await release.wait()
         return LLMResponse(content="summary")
 
-    service = make_dialog(pool, SETTINGS, MagicMock(generate=AsyncMock(side_effect=summarize)))
+    service = make_dialog(
+        pool,
+        SETTINGS,
+        MagicMock(generate=AsyncMock(side_effect=summarize)),
+    )
     compact = asyncio.create_task(service.compact_history(1))
     await entered.wait()
     reset = asyncio.create_task(service.reset_history(1))
@@ -168,7 +245,10 @@ async def test_cancelled_waiter_releases_registration() -> None:
 )
 async def test_dry_run_does_not_touch_store_on_any_outcome(response) -> None:
     store = MagicMock(
-        reserve=AsyncMock(), complete=AsyncMock(), interrupt=AsyncMock(), claim=AsyncMock()
+        reserve=AsyncMock(),
+        complete=AsyncMock(),
+        interrupt=AsyncMock(),
+        claim=AsyncMock(),
     )
     llm = MagicMock(
         generate=AsyncMock(side_effect=response)
@@ -179,11 +259,15 @@ async def test_dry_run_does_not_touch_store_on_any_outcome(response) -> None:
     if isinstance(response, Exception):
         with pytest.raises(LLMTimeoutError):
             await agent.run(
-                [], EventContext(user_id=1, event_id="real", request_id="request"), dry_run=True
+                [],
+                EventContext(user_id=1, event_id="real", request_id="request"),
+                dry_run=True,
             )
     else:
         await agent.run(
-            [], EventContext(user_id=1, event_id="real", request_id="request"), dry_run=True
+            [],
+            EventContext(user_id=1, event_id="real", request_id="request"),
+            dry_run=True,
         )
     for method in (store.claim, store.reserve, store.complete, store.interrupt):
         method.assert_not_awaited()
@@ -198,7 +282,7 @@ async def test_truncated_tool_call_never_dispatches() -> None:
         generate=AsyncMock(
             return_value=LLMResponse(
                 content="partial",
-                finish_reason="length",
+                finish_reason=FinishReason.LENGTH,
                 tool_calls=[
                     ToolCall(id="weather", name="get_weather", arguments={"city": "Казань"})
                 ],
@@ -236,7 +320,12 @@ async def test_partial_read_then_timeout_requires_new_turn_without_repeating_rpc
     tools = ToolExecutionService(mcp, store=store, clock=clock)
     agent = AgentService(llm, tools, clock=clock)
     service = DialogService(
-        cast(asyncpg.Pool, pool), SETTINGS, llm, agent=agent, tools=tools, store=store
+        cast(asyncpg.Pool, pool),
+        SETTINGS,
+        llm,
+        agent=agent,
+        tool_client=mcp,
+        store=store,
     )
     with pytest.raises(InterruptedRunError):
         await service.process_user_message(1, "weather", event_id="partial")
@@ -280,7 +369,11 @@ async def test_component_timeout_is_not_reported_as_llm_deadline(
 ) -> None:
     pool = InMemoryPool()
     store = MemoryTurnStore(cast(MemoryHistory, pool))
-    monkeypatch.setattr(store, "complete", AsyncMock(side_effect=TimeoutError("storage timeout")))
+    monkeypatch.setattr(
+        store,
+        "complete",
+        AsyncMock(side_effect=TimeoutError("storage timeout")),
+    )
     llm = MagicMock(generate=AsyncMock(return_value=LLMResponse(content="answer")))
     service = DialogService(cast(asyncpg.Pool, pool), SETTINGS, llm, store=store)
     with pytest.raises(TimeoutError):

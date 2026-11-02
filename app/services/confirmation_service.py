@@ -7,11 +7,11 @@ import asyncpg
 from app.core.clock import Clock, SystemClock
 from app.core.context import get_request_id
 from app.core.ports import ToolExecutor
-from app.core.schemas.agent import AgentResult, EventContext
+from app.core.schemas.agent import AgentDecision, AgentResult, EventContext
 from app.core.schemas.message import ChatMessage, MessageRole
 from app.core.schemas.tools import ReminderResult, ToolFailure
 from app.core.timezones import normalize_reminder
-from app.db.records import ConfirmationRecord
+from app.db.records import ConfirmationRecord, ConfirmationState
 from app.db.repositories import confirmation_repo as repo
 from app.db.repositories.audit_repo import record_decision
 from app.db.repositories.reminder_repo import find_result
@@ -34,7 +34,11 @@ class ConfirmationService:
         self.ttl = ttl
 
     async def existing(self, context: EventContext) -> AgentResult | None:
-        row = await repo.find_event(self.pool, context.user_id, context.event_id)
+        row = await repo.find_event(
+            self.pool,
+            context.user_id,
+            context.event_id,
+        )
         return confirmation_result(row, self.clock.now()) if row else None
 
     async def prepare(
@@ -60,20 +64,34 @@ class ConfirmationService:
             calls_remaining=calls_remaining,
             request_id=context.request_id,
         )
+
         return confirmation_result(row, self.clock.now())
 
-    async def confirm(self, user_id: int, identifier: str, *, cancel: bool = False) -> AgentResult:
+    async def confirm(
+        self,
+        user_id: int,
+        identifier: str,
+        *,
+        cancel: bool = False,
+    ) -> AgentResult:
         try:
-            row = await repo.claim(self.pool, identifier, user_id, self.clock.now(), cancel=cancel)
+            row = await repo.claim(
+                self.pool,
+                identifier,
+                user_id,
+                self.clock.now(),
+                cancel=cancel,
+            )
         except ValueError:
             row = None
+
         if row is None:
             await record_decision(
                 self.pool,
                 user_id=user_id,
                 event_id="confirmation:denied",
                 request_id=get_request_id() or "local",
-                decision="error",
+                decision=AgentDecision.ERROR,
                 validation="unauthorized",
                 execution="denied",
                 reason="confirmation_owner_required",
@@ -81,11 +99,13 @@ class ConfirmationService:
             )
             return AgentResult(
                 text="Подтверждение не найдено или принадлежит другому пользователю.",
-                decision="error",
+                decision=AgentDecision.ERROR,
             )
+
         if not row.get("claimed"):
             await self._audit(row, row["state"], reason="confirmation_state")
             return confirmation_result(row, self.clock.now())
+
         return await self._execute(row)
 
     async def _audit(
@@ -102,7 +122,9 @@ class ConfirmationService:
                 user_id=row["user_id"],
                 event_id=row["event_id"],
                 request_id=row["request_id"],
-                decision="error" if execution in {"failed", "expired"} else "tool",
+                decision=AgentDecision.ERROR
+                if execution in {ConfirmationState.FAILED, ConfirmationState.EXPIRED}
+                else AgentDecision.TOOL,
                 tool_name="add_reminder",
                 arguments=row["arguments"],
                 execution=execution,
@@ -115,9 +137,13 @@ class ConfirmationService:
 
     async def _execute(self, row: ConfirmationRecord) -> AgentResult:
         now = self.clock.now()
+
         try:
             payload = await self.mcp.call_tool(
-                "add_reminder", row["arguments"], user_id=row["user_id"], confirmation_id=row["id"]
+                "add_reminder",
+                row["arguments"],
+                user_id=row["user_id"],
+                confirmation_id=row["id"],
             )
             payload = ReminderResult.model_validate(payload).model_dump(mode="json")
             await repo.complete(self.pool, row["id"], payload, self.clock.now())
@@ -132,54 +158,79 @@ class ConfirmationService:
                 "confirmation_required",
             }
             if transient:
-                committed = await find_result(self.pool, row["idempotency_key"])
-                if committed is not None:
-                    await repo.complete(self.pool, row["id"], committed, self.clock.now())
-                    await self._audit(row, "succeeded", reason="recovered_committed_result")
-                    return reminder_success(committed)
-            if not transient:
-                await repo.mark_failed(self.pool, row["id"], error.code, self.clock.now())
-            result = AgentResult(
-                text=(
+                recovered = await self._recover_committed(row)
+                if recovered is not None:
+                    return recovered
+
+                text = (
                     "Результат операции пока не подтверждён. Повторное создание не выполняется; "
                     "состояние будет сверено автоматически."
-                    if transient
-                    else "Инструмент отклонил создание напоминания. Отправьте новый запрос."
-                ),
-                decision="error",
-            )
+                )
+            else:
+                await repo.mark_failed(
+                    self.pool,
+                    row["id"],
+                    error.code,
+                    self.clock.now(),
+                )
+                text = "Инструмент отклонил создание напоминания. Отправьте новый запрос."
+
+            result = AgentResult(text=text, decision=AgentDecision.ERROR)
             status = error.code
         except Exception:
             result = AgentResult(
-                text="Состояние операции будет сверено; создание не подтверждено.", decision="error"
+                text="Состояние операции будет сверено; создание не подтверждено.",
+                decision=AgentDecision.ERROR,
             )
             status = "unknown_outcome"
+
         await self._audit(
             row,
             status,
             reason="confirmed_operation",
             duration_ms=(self.clock.now() - now).total_seconds() * 1000,
         )
+
         return result
+
+    async def _recover_committed(
+        self,
+        row: ConfirmationRecord,
+    ) -> AgentResult | None:
+        committed = await find_result(self.pool, row["idempotency_key"])
+        if committed is None:
+            return None
+
+        await repo.complete(self.pool, row["id"], committed, self.clock.now())
+        await self._audit(row, "succeeded", reason="recovered_committed_result")
+
+        return reminder_success(committed)
 
     async def recover(self) -> None:
         for row in await repo.recoverable(self.pool, self.clock.now()):
-            result = await find_result(self.pool, row["idempotency_key"])
+            result = await self._recover_committed(row)
             if result is not None:
-                await repo.complete(self.pool, row["id"], result, self.clock.now())
-                await self._audit(row, "succeeded", reason="recovered_committed_result")
                 continue
-            claimed = await repo.recover_claim(self.pool, row["id"], self.clock.now())
+
+            claimed = await repo.recover_claim(
+                self.pool,
+                row["id"],
+                self.clock.now(),
+            )
             if claimed:
                 await self._execute(claimed)
             elif row["calls_remaining"] <= 0:
-                resolved = await repo.finalize_exhausted(self.pool, row["id"], self.clock.now())
+                resolved = await repo.finalize_exhausted(
+                    self.pool,
+                    row["id"],
+                    self.clock.now(),
+                )
                 if resolved:
                     await self._audit(
                         resolved,
                         resolved["state"],
                         reason="recovered_committed_result"
-                        if resolved["state"] == "succeeded"
+                        if resolved["state"] == ConfirmationState.SUCCEEDED
                         else "call_budget",
                     )
 
@@ -187,9 +238,11 @@ class ConfirmationService:
         row = await repo.latest(self.pool, user_id)
         if row is None:
             return None
+
         state = row["state"]
-        if state == "pending" and row["expires_at"] <= self.clock.now():
-            state = "expired"
+        if state == ConfirmationState.PENDING and row["expires_at"] <= self.clock.now():
+            state = ConfirmationState.EXPIRED
+
         payload = {
             "source": "confirmation_store",
             "state": state,
@@ -197,6 +250,7 @@ class ConfirmationService:
             "result": row["result"],
             "timezone": row["timezone"],
         }
+
         return ChatMessage(
             role=MessageRole.USER,
             content="Проверенное состояние действия из хранилища. "

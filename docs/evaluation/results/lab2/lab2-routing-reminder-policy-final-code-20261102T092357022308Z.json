@@ -1,0 +1,875 @@
+{
+  "label": "reminder-policy-final-code",
+  "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "temperature": 0.0,
+  "clock": "2026-10-12T09:00:00+03:00",
+  "timezone": "Europe/Moscow",
+  "revision": "0edd90c6b6658162565db2eacf8198e658a1c54e",
+  "dirty": true,
+  "app_python_sha256": "8ba7ed11726819524c88be6e00e5d8f9db74951abcf7da19214ea409eda05802",
+  "dataset": "lab2-routing.json",
+  "dataset_sha256": "0a9c9f06f85e094ae42aaa3b684ea368b8f051055f5476ed676203e2a1afdc98",
+  "evaluator_sha256": "c7b1d7eef232e26aac96d2124189eab36a5f181b0b58e5a8548eafe7e68c99b5",
+  "created_at": "2026-11-02T09:23:57.022308+00:00",
+  "max_tool_calls": 2,
+  "max_llm_steps": 4,
+  "measurement_status": "completed",
+  "counts": {
+    "planned": 12,
+    "attempted": 12,
+    "decisions_received": 12,
+    "not_run": 0
+  },
+  "summary": {
+    "routing_correct": 11,
+    "routing_total": 12,
+    "routing_accuracy": 0.9166666666666666,
+    "arguments_correct": 9,
+    "arguments_total": 9,
+    "arguments_accuracy": 1.0
+  },
+  "cases": [
+    {
+      "id": "weather_1",
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Санкт-Петербург"
+      },
+      "predicted_action": "get_weather",
+      "arguments": {
+        "city": "Санкт-Петербург"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Выбран инструмент.",
+      "effective_arguments": {
+        "city": "санкт-петербург",
+        "date": "2026-10-12"
+      }
+    },
+    {
+      "id": "weather_2",
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Казань"
+      },
+      "predicted_action": "get_weather",
+      "arguments": {
+        "date": "2026-10-12",
+        "city": "Казань"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Выбран инструмент.",
+      "effective_arguments": {
+        "date": "2026-10-12",
+        "city": "казань"
+      }
+    },
+    {
+      "id": "weather_3",
+      "expected_action": "get_weather",
+      "expected_arguments": {
+        "city": "Тбилиси, Грузия"
+      },
+      "predicted_action": "get_weather",
+      "arguments": {
+        "city": "Тбилиси, Грузия"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Выбран инструмент.",
+      "effective_arguments": {
+        "city": "тбилиси, грузия",
+        "date": "2026-10-12"
+      }
+    },
+    {
+      "id": "schedule_1",
+      "expected_action": "get_schedule",
+      "expected_arguments": {
+        "date": "2026-10-12"
+      },
+      "predicted_action": "get_schedule",
+      "arguments": {
+        "date": "2026-10-12"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Выбран инструмент.",
+      "effective_arguments": {
+        "date": "2026-10-12"
+      }
+    },
+    {
+      "id": "schedule_2",
+      "expected_action": "get_schedule",
+      "expected_arguments": {
+        "date": "2026-10-13"
+      },
+      "predicted_action": "get_schedule",
+      "arguments": {
+        "date": "2026-10-13"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Выбран инструмент.",
+      "effective_arguments": {
+        "date": "2026-10-13"
+      }
+    },
+    {
+      "id": "schedule_3",
+      "expected_action": "get_schedule",
+      "expected_arguments": {
+        "date": "2026-10-18"
+      },
+      "predicted_action": "get_schedule",
+      "arguments": {
+        "date": "2026-10-18"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Выбран инструмент.",
+      "effective_arguments": {
+        "date": "2026-10-18"
+      }
+    },
+    {
+      "id": "reminder_1",
+      "expected_action": "add_reminder",
+      "expected_arguments": {
+        "text": "отправить отчёт",
+        "remind_at": "2026-10-13T18:30:00+03:00"
+      },
+      "predicted_action": "add_reminder",
+      "arguments": {
+        "text": "Отправить отчёт",
+        "remind_at": "2026-10-13T18:30:00+03:00"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Подготовка напоминания.",
+      "effective_arguments": {
+        "text": "отправить отчёт",
+        "remind_at": "2026-10-13T15:30:00+00:00"
+      }
+    },
+    {
+      "id": "reminder_2",
+      "expected_action": "add_reminder",
+      "expected_arguments": {
+        "text": "проверить расписание",
+        "remind_at": "2026-10-15T09:00:00+03:00"
+      },
+      "predicted_action": "add_reminder",
+      "arguments": {
+        "text": "проверить расписание",
+        "remind_at": "2026-10-15T09:00:00+03:00"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Подготовка напоминания.",
+      "effective_arguments": {
+        "text": "проверить расписание",
+        "remind_at": "2026-10-15T06:00:00+00:00"
+      }
+    },
+    {
+      "id": "reminder_3",
+      "expected_action": "add_reminder",
+      "expected_arguments": {
+        "text": "сделать перерыв",
+        "remind_at": "2026-10-12T11:00:00+03:00"
+      },
+      "predicted_action": "add_reminder",
+      "arguments": {
+        "text": "сделать перерыв",
+        "remind_at": "2026-10-12T11:00:00+03:00"
+      },
+      "route_correct": true,
+      "arguments_applicable": true,
+      "arguments_correct": true,
+      "success": true,
+      "public_answer": "Подготовка напоминания.",
+      "effective_arguments": {
+        "text": "сделать перерыв",
+        "remind_at": "2026-10-12T08:00:00+00:00"
+      }
+    },
+    {
+      "id": "respond_1",
+      "expected_action": "respond",
+      "expected_arguments": {},
+      "predicted_action": "respond",
+      "arguments": {},
+      "route_correct": true,
+      "arguments_applicable": false,
+      "arguments_correct": null,
+      "success": true,
+      "public_answer": "**Суть:** Список (`list`) — изменяемый, кортеж (`tuple`) — неизменяемый.\n\n**Объяснение:**\n- **Список** (`[1, 2, 3]`) позволяет добавлять, удалять и менять элементы после создания. Методы: `append()`, `pop()`, `sort()` и др.\n- **Кортеж** (`(1, 2, 3)`) фиксирован после создания — элементы нельзя изменить, добавить или удалить. Нет методов модификации.\n- Из-за неизменяемости кортежи **хешируемы** и могут быть ключами словаря или элементами множества; списки — нет.\n- Кортежи чуть легче по памяти и быстрее при итерации.\n- Синтаксис: пустой кортеж — `()`, из одного элемента — `(x,)` (запятая обязательна).\n\n**Ключевой вывод:** Используй списки для коллекций, которые меняются в процессе работы, и кортежи — для фиксированных наборов данных, ключей словарей или возврата нескольких значений из функции.",
+      "effective_arguments": {}
+    },
+    {
+      "id": "respond_2",
+      "expected_action": "respond",
+      "expected_arguments": {},
+      "predicted_action": "respond",
+      "arguments": {},
+      "route_correct": true,
+      "arguments_applicable": false,
+      "arguments_correct": null,
+      "success": true,
+      "public_answer": "**The laboratory work is completed.**  \nили более формально: **The laboratory work has been completed.**",
+      "effective_arguments": {}
+    },
+    {
+      "id": "clarify_1",
+      "expected_action": "clarify",
+      "expected_arguments": {},
+      "predicted_action": "respond",
+      "arguments": {},
+      "route_correct": false,
+      "arguments_applicable": false,
+      "arguments_correct": null,
+      "success": false,
+      "public_answer": "Уточни, пожалуйста:\n1. Во сколько именно (например, 18:00, 19:00, 20:00) — по Москве?\n2. Какой текст напоминания (просто «Лабораторная» или с деталями)?",
+      "effective_arguments": {}
+    }
+  ],
+  "baseline_model_requests": 12,
+  "model_requests_this_task": 25,
+  "earlier_policy_validation": {
+    "original_filename": "lab2-routing-reminder-policy-final-20261102T091531651084Z.json",
+    "report": {
+      "label": "reminder-policy-final",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "temperature": 0.0,
+      "clock": "2026-10-12T09:00:00+03:00",
+      "timezone": "Europe/Moscow",
+      "revision": "0edd90c6b6658162565db2eacf8198e658a1c54e",
+      "dirty": true,
+      "app_python_sha256": "d92ce4e6aaa31e2d7f9f14137f5f33605cb5374315056ea5a2e3bf10cedb8aff",
+      "dataset": "lab2-routing.json",
+      "dataset_sha256": "0a9c9f06f85e094ae42aaa3b684ea368b8f051055f5476ed676203e2a1afdc98",
+      "evaluator_sha256": "c7b1d7eef232e26aac96d2124189eab36a5f181b0b58e5a8548eafe7e68c99b5",
+      "created_at": "2026-11-02T09:15:31.651084+00:00",
+      "max_tool_calls": 2,
+      "max_llm_steps": 4,
+      "measurement_status": "completed",
+      "counts": {
+        "planned": 12,
+        "attempted": 12,
+        "decisions_received": 12,
+        "not_run": 0
+      },
+      "summary": {
+        "routing_correct": 11,
+        "routing_total": 12,
+        "routing_accuracy": 0.9166666666666666,
+        "arguments_correct": 9,
+        "arguments_total": 9,
+        "arguments_accuracy": 1.0
+      },
+      "cases": [
+        {
+          "id": "weather_1",
+          "expected_action": "get_weather",
+          "expected_arguments": {
+            "city": "Санкт-Петербург"
+          },
+          "predicted_action": "get_weather",
+          "arguments": {
+            "city": "Санкт-Петербург"
+          },
+          "route_correct": true,
+          "arguments_applicable": true,
+          "arguments_correct": true,
+          "success": true,
+          "public_answer": "Выбран инструмент.",
+          "effective_arguments": {
+            "city": "санкт-петербург",
+            "date": "2026-10-12"
+          }
+        },
+        {
+          "id": "weather_2",
+          "expected_action": "get_weather",
+          "expected_arguments": {
+            "city": "Казань"
+          },
+          "predicted_action": "get_weather",
+          "arguments": {
+            "date": "2026-10-12",
+            "city": "Казань"
+          },
+          "route_correct": true,
+          "arguments_applicable": true,
+          "arguments_correct": true,
+          "success": true,
+          "public_answer": "Выбран инструмент.",
+          "effective_arguments": {
+            "date": "2026-10-12",
+            "city": "казань"
+          }
+        },
+        {
+          "id": "weather_3",
+          "expected_action": "get_weather",
+          "expected_arguments": {
+            "city": "Тбилиси, Грузия"
+          },
+          "predicted_action": "get_weather",
+          "arguments": {
+            "city": "Тбилиси, Грузия"
+          },
+          "route_correct": true,
+          "arguments_applicable": true,
+          "arguments_correct": true,
+          "success": true,
+          "public_answer": "Выбран инструмент.",
+          "effective_arguments": {
+            "city": "тбилиси, грузия",
+            "date": "2026-10-12"
+          }
+        },
+        {
+          "id": "schedule_1",
+          "expected_action": "get_schedule",
+          "expected_arguments": {
+            "date": "2026-10-12"
+          },
+          "predicted_action": "get_schedule",
+          "arguments": {
+            "date": "2026-10-12"
+          },
+          "route_correct": true,
+          "arguments_applicable": true,
+          "arguments_correct": true,
+          "success": true,
+          "public_answer": "Выбран инструмент.",
+          "effective_arguments": {
+            "date": "2026-10-12"
+          }
+        },
+        {
+          "id": "schedule_2",
+          "expected_action": "get_schedule",
+          "expected_arguments": {
+            "date": "2026-10-13"
+          },
+          "predicted_action": "get_schedule",
+          "arguments": {
+            "date": "2026-10-13"
+          },
+          "route_correct": true,
+          "arguments_applicable": true,
+          "arguments_correct": true,
+          "success": true,
+          "public_answer": "Выбран инструмент.",
+          "effective_arguments": {
+            "date": "2026-10-13"
+          }
+        },
+        {
+          "id": "schedule_3",
+          "expected_action": "get_schedule",
+          "expected_arguments": {
+            "date": "2026-10-18"
+          },
+          "predicted_action": "get_schedule",
+          "arguments": {
+            "date": "2026-10-18"
+          },
+          "route_correct": true,
+          "arguments_applicable": true,
+          "arguments_correct": true,
+          "success": true,
+          "public_answer": "Выбран инструмент.",
+          "effective_arguments": {
+            "date": "2026-10-18"
+          }
+        },
+        {
+          "id": "reminder_1",
+          "expected_action": "add_reminder",
+          "expected_arguments": {
+            "text": "отправить отчёт",
+            "remind_at": "2026-10-13T18:30:00+03:00"
+          },
+          "predicted_action": "add_reminder",
+          "arguments": {
+            "text": "Отправить отчёт",
+            "remind_at": "2026-10-13T18:30:00+03:00"
+          },
+          "route_correct": true,
+          "arguments_applicable": true,
+          "arguments_correct": true,
+          "success": true,
+          "public_answer": "Подготовка напоминания.",
+          "effective_arguments": {
+            "text": "отправить отчёт",
+            "remind_at": "2026-10-13T15:30:00+00:00"
+          }
+        },
+        {
+          "id": "reminder_2",
+          "expected_action": "add_reminder",
+          "expected_arguments": {
+            "text": "проверить расписание",
+            "remind_at": "2026-10-15T09:00:00+03:00"
+          },
+          "predicted_action": "add_reminder",
+          "arguments": {
+            "text": "проверить расписание",
+            "remind_at": "2026-10-15T09:00:00+03:00"
+          },
+          "route_correct": true,
+          "arguments_applicable": true,
+          "arguments_correct": true,
+          "success": true,
+          "public_answer": "Подготовка напоминания.",
+          "effective_arguments": {
+            "text": "проверить расписание",
+            "remind_at": "2026-10-15T06:00:00+00:00"
+          }
+        },
+        {
+          "id": "reminder_3",
+          "expected_action": "add_reminder",
+          "expected_arguments": {
+            "text": "сделать перерыв",
+            "remind_at": "2026-10-12T11:00:00+03:00"
+          },
+          "predicted_action": "add_reminder",
+          "arguments": {
+            "text": "сделать перерыв",
+            "remind_at": "2026-10-12T11:00:00+03:00"
+          },
+          "route_correct": true,
+          "arguments_applicable": true,
+          "arguments_correct": true,
+          "success": true,
+          "public_answer": "Подготовка напоминания.",
+          "effective_arguments": {
+            "text": "сделать перерыв",
+            "remind_at": "2026-10-12T08:00:00+00:00"
+          }
+        },
+        {
+          "id": "respond_1",
+          "expected_action": "respond",
+          "expected_arguments": {},
+          "predicted_action": "respond",
+          "arguments": {},
+          "route_correct": true,
+          "arguments_applicable": false,
+          "arguments_correct": null,
+          "success": true,
+          "public_answer": "**Суть:** Списки изменяемы, кортежи — нет. Это главное отличие, от которого следуют остальные.\n\n**Объяснение:**\n\n| Характеристика | Список (`list`) | Кортеж (`tuple`) |\n|----------------|-----------------|------------------|\n| **Изменяемость** | Можно добавлять, удалять, менять элементы | Неизменяем после создания |\n| **Синтаксис** | `[1, 2, 3]` | `(1, 2, 3)` или `1, 2, 3` |\n| **Методы** | `append`, `pop`, `sort`, `reverse` и др. | Только `count`, `index` |\n| **Хешируемость** | Нельзя использовать как ключ словаря / элемент множества | Можно (если все элементы хешируемы) |\n| **Память / скорость** | Чуть больше накладных расходов | Чуть компактнее и быстрее при создании |\n| **Типичное применение** | Последовательности, которые меняются | Неизменяемые записи, ключи, возврат нескольких значений |\n\n**Ключевой вывод:** Используй **список**, когда коллекция должна меняться во время работы программы. Используй **кортеж**, когда данные фиксированы — это безопаснее, быстрее и позволяет класть их в `set`/`dict`.",
+          "effective_arguments": {}
+        },
+        {
+          "id": "respond_2",
+          "expected_action": "respond",
+          "expected_arguments": {},
+          "predicted_action": "respond",
+          "arguments": {},
+          "route_correct": true,
+          "arguments_applicable": false,
+          "arguments_correct": null,
+          "success": true,
+          "public_answer": "**The laboratory work is completed.**  \nили более формально: **The laboratory work has been completed.**",
+          "effective_arguments": {}
+        },
+        {
+          "id": "clarify_1",
+          "expected_action": "clarify",
+          "expected_arguments": {},
+          "predicted_action": "respond",
+          "arguments": {},
+          "route_correct": false,
+          "arguments_applicable": false,
+          "arguments_correct": null,
+          "success": false,
+          "public_answer": "Уточни, пожалуйста:\n1. Во сколько именно (например, 18:00, 19:00, 20:00) — по Москве?\n2. Какой текст напоминания (просто «Лабораторная» или с деталями)?\n3. На сегодня (2026-10-12) или на другой день?",
+          "effective_arguments": {}
+        }
+      ],
+      "baseline_model_requests": 12,
+      "model_requests": 13,
+      "changed_element": "Reminder preparation policy in app/prompts/agent.py; dataset, scoring and model settings unchanged.",
+      "aggregation_policy": "Two disjoint parts: the two previously failing cases first, then the remaining ten cases. Each baseline case was attempted exactly once.",
+      "source_runs": [
+        {
+          "original_filename": "lab2-routing-reminder-policy-targeted-20261102T091052840658Z.json",
+          "report": {
+            "label": "reminder-policy-targeted",
+            "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+            "temperature": 0.0,
+            "clock": "2026-10-12T09:00:00+03:00",
+            "timezone": "Europe/Moscow",
+            "revision": "0edd90c6b6658162565db2eacf8198e658a1c54e",
+            "dirty": true,
+            "app_python_sha256": "d92ce4e6aaa31e2d7f9f14137f5f33605cb5374315056ea5a2e3bf10cedb8aff",
+            "dataset": "lab2-routing.json",
+            "dataset_sha256": "0a9c9f06f85e094ae42aaa3b684ea368b8f051055f5476ed676203e2a1afdc98",
+            "evaluator_sha256": "c7b1d7eef232e26aac96d2124189eab36a5f181b0b58e5a8548eafe7e68c99b5",
+            "created_at": "2026-11-02T09:10:52.840658+00:00",
+            "max_tool_calls": 2,
+            "max_llm_steps": 4,
+            "measurement_status": "completed",
+            "counts": {
+              "planned": 2,
+              "attempted": 2,
+              "decisions_received": 2,
+              "not_run": 0
+            },
+            "summary": {
+              "routing_correct": 2,
+              "routing_total": 2,
+              "routing_accuracy": 1.0,
+              "arguments_correct": 2,
+              "arguments_total": 2,
+              "arguments_accuracy": 1.0
+            },
+            "cases": [
+              {
+                "id": "schedule_3",
+                "expected_action": "get_schedule",
+                "expected_arguments": {
+                  "date": "2026-10-18"
+                },
+                "predicted_action": "get_schedule",
+                "arguments": {
+                  "date": "2026-10-18"
+                },
+                "route_correct": true,
+                "arguments_applicable": true,
+                "arguments_correct": true,
+                "success": true,
+                "public_answer": "Выбран инструмент.",
+                "effective_arguments": {
+                  "date": "2026-10-18"
+                }
+              },
+              {
+                "id": "reminder_3",
+                "expected_action": "add_reminder",
+                "expected_arguments": {
+                  "text": "сделать перерыв",
+                  "remind_at": "2026-10-12T11:00:00+03:00"
+                },
+                "predicted_action": "add_reminder",
+                "arguments": {
+                  "text": "сделать перерыв",
+                  "remind_at": "2026-10-12T11:00:00+03:00"
+                },
+                "route_correct": true,
+                "arguments_applicable": true,
+                "arguments_correct": true,
+                "success": true,
+                "public_answer": "Подготовка напоминания.",
+                "effective_arguments": {
+                  "text": "сделать перерыв",
+                  "remind_at": "2026-10-12T08:00:00+00:00"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "original_filename": "lab2-routing-reminder-policy-remaining-20261102T091258576815Z.json",
+          "report": {
+            "label": "reminder-policy-remaining",
+            "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+            "temperature": 0.0,
+            "clock": "2026-10-12T09:00:00+03:00",
+            "timezone": "Europe/Moscow",
+            "revision": "0edd90c6b6658162565db2eacf8198e658a1c54e",
+            "dirty": true,
+            "app_python_sha256": "d92ce4e6aaa31e2d7f9f14137f5f33605cb5374315056ea5a2e3bf10cedb8aff",
+            "dataset": "lab2-routing.json",
+            "dataset_sha256": "0a9c9f06f85e094ae42aaa3b684ea368b8f051055f5476ed676203e2a1afdc98",
+            "evaluator_sha256": "c7b1d7eef232e26aac96d2124189eab36a5f181b0b58e5a8548eafe7e68c99b5",
+            "created_at": "2026-11-02T09:12:58.576815+00:00",
+            "max_tool_calls": 2,
+            "max_llm_steps": 4,
+            "measurement_status": "completed",
+            "counts": {
+              "planned": 10,
+              "attempted": 10,
+              "decisions_received": 10,
+              "not_run": 0
+            },
+            "summary": {
+              "routing_correct": 9,
+              "routing_total": 10,
+              "routing_accuracy": 0.9,
+              "arguments_correct": 7,
+              "arguments_total": 7,
+              "arguments_accuracy": 1.0
+            },
+            "cases": [
+              {
+                "id": "weather_1",
+                "expected_action": "get_weather",
+                "expected_arguments": {
+                  "city": "Санкт-Петербург"
+                },
+                "predicted_action": "get_weather",
+                "arguments": {
+                  "city": "Санкт-Петербург"
+                },
+                "route_correct": true,
+                "arguments_applicable": true,
+                "arguments_correct": true,
+                "success": true,
+                "public_answer": "Выбран инструмент.",
+                "effective_arguments": {
+                  "city": "санкт-петербург",
+                  "date": "2026-10-12"
+                }
+              },
+              {
+                "id": "weather_2",
+                "expected_action": "get_weather",
+                "expected_arguments": {
+                  "city": "Казань"
+                },
+                "predicted_action": "get_weather",
+                "arguments": {
+                  "date": "2026-10-12",
+                  "city": "Казань"
+                },
+                "route_correct": true,
+                "arguments_applicable": true,
+                "arguments_correct": true,
+                "success": true,
+                "public_answer": "Выбран инструмент.",
+                "effective_arguments": {
+                  "date": "2026-10-12",
+                  "city": "казань"
+                }
+              },
+              {
+                "id": "weather_3",
+                "expected_action": "get_weather",
+                "expected_arguments": {
+                  "city": "Тбилиси, Грузия"
+                },
+                "predicted_action": "get_weather",
+                "arguments": {
+                  "city": "Тбилиси, Грузия"
+                },
+                "route_correct": true,
+                "arguments_applicable": true,
+                "arguments_correct": true,
+                "success": true,
+                "public_answer": "Выбран инструмент.",
+                "effective_arguments": {
+                  "city": "тбилиси, грузия",
+                  "date": "2026-10-12"
+                }
+              },
+              {
+                "id": "schedule_1",
+                "expected_action": "get_schedule",
+                "expected_arguments": {
+                  "date": "2026-10-12"
+                },
+                "predicted_action": "get_schedule",
+                "arguments": {
+                  "date": "2026-10-12"
+                },
+                "route_correct": true,
+                "arguments_applicable": true,
+                "arguments_correct": true,
+                "success": true,
+                "public_answer": "Выбран инструмент.",
+                "effective_arguments": {
+                  "date": "2026-10-12"
+                }
+              },
+              {
+                "id": "schedule_2",
+                "expected_action": "get_schedule",
+                "expected_arguments": {
+                  "date": "2026-10-13"
+                },
+                "predicted_action": "get_schedule",
+                "arguments": {
+                  "date": "2026-10-13"
+                },
+                "route_correct": true,
+                "arguments_applicable": true,
+                "arguments_correct": true,
+                "success": true,
+                "public_answer": "Выбран инструмент.",
+                "effective_arguments": {
+                  "date": "2026-10-13"
+                }
+              },
+              {
+                "id": "reminder_1",
+                "expected_action": "add_reminder",
+                "expected_arguments": {
+                  "text": "отправить отчёт",
+                  "remind_at": "2026-10-13T18:30:00+03:00"
+                },
+                "predicted_action": "add_reminder",
+                "arguments": {
+                  "text": "Отправить отчёт",
+                  "remind_at": "2026-10-13T18:30:00+03:00"
+                },
+                "route_correct": true,
+                "arguments_applicable": true,
+                "arguments_correct": true,
+                "success": true,
+                "public_answer": "Подготовка напоминания.",
+                "effective_arguments": {
+                  "text": "отправить отчёт",
+                  "remind_at": "2026-10-13T15:30:00+00:00"
+                }
+              },
+              {
+                "id": "reminder_2",
+                "expected_action": "add_reminder",
+                "expected_arguments": {
+                  "text": "проверить расписание",
+                  "remind_at": "2026-10-15T09:00:00+03:00"
+                },
+                "predicted_action": "add_reminder",
+                "arguments": {
+                  "text": "проверить расписание",
+                  "remind_at": "2026-10-15T09:00:00+03:00"
+                },
+                "route_correct": true,
+                "arguments_applicable": true,
+                "arguments_correct": true,
+                "success": true,
+                "public_answer": "Подготовка напоминания.",
+                "effective_arguments": {
+                  "text": "проверить расписание",
+                  "remind_at": "2026-10-15T06:00:00+00:00"
+                }
+              },
+              {
+                "id": "respond_1",
+                "expected_action": "respond",
+                "expected_arguments": {},
+                "predicted_action": "respond",
+                "arguments": {},
+                "route_correct": true,
+                "arguments_applicable": false,
+                "arguments_correct": null,
+                "success": true,
+                "public_answer": "**Суть:** Списки изменяемы, кортежи — нет. Это главное отличие, от которого следуют остальные.\n\n**Объяснение:**\n\n| Характеристика | Список (`list`) | Кортеж (`tuple`) |\n|----------------|-----------------|------------------|\n| **Изменяемость** | Можно добавлять, удалять, менять элементы | Неизменяем после создания |\n| **Синтаксис** | `[1, 2, 3]` | `(1, 2, 3)` или `1, 2, 3` |\n| **Методы** | `append`, `pop`, `sort`, `reverse` и др. | Только `count`, `index` |\n| **Хешируемость** | Нельзя использовать как ключ словаря / элемент множества | Можно (если все элементы хешируемы) |\n| **Память / скорость** | Чуть больше накладных расходов | Чуть компактнее и быстрее при создании |\n| **Типичное применение** | Последовательности, которые меняются | Неизменяемые записи, ключи, возврат нескольких значений |\n\n**Ключевой вывод:** Используй **список**, когда коллекция должна меняться во время работы программы. Используй **кортеж**, когда данные фиксированы — это безопаснее, быстрее и позволяет класть их в `set`/`dict`.",
+                "effective_arguments": {}
+              },
+              {
+                "id": "respond_2",
+                "expected_action": "respond",
+                "expected_arguments": {},
+                "predicted_action": "respond",
+                "arguments": {},
+                "route_correct": true,
+                "arguments_applicable": false,
+                "arguments_correct": null,
+                "success": true,
+                "public_answer": "**The laboratory work is completed.**  \nили более формально: **The laboratory work has been completed.**",
+                "effective_arguments": {}
+              },
+              {
+                "id": "clarify_1",
+                "expected_action": "clarify",
+                "expected_arguments": {},
+                "predicted_action": "respond",
+                "arguments": {},
+                "route_correct": false,
+                "arguments_applicable": false,
+                "arguments_correct": null,
+                "success": false,
+                "public_answer": "Уточни, пожалуйста:\n1. Во сколько именно (например, 18:00, 19:00, 20:00) — по Москве?\n2. Какой текст напоминания (просто «Лабораторная» или с деталями)?\n3. На сегодня (2026-10-12) или на другой день?",
+                "effective_arguments": {}
+              }
+            ]
+          }
+        }
+      ],
+      "additional_checks": [
+        {
+          "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+          "temperature": 0.0,
+          "app_python_sha256": "d92ce4e6aaa31e2d7f9f14137f5f33605cb5374315056ea5a2e3bf10cedb8aff",
+          "probe_runner_sha256": "c7b1d7eef232e26aac96d2124189eab36a5f181b0b58e5a8548eafe7e68c99b5",
+          "evaluation_context": {
+            "now": "2031-01-31T23:45:00+05:00",
+            "timezone": "Asia/Yekaterinburg"
+          },
+          "input_cases": [
+            {
+              "id": "relative_reminder_month_boundary",
+              "query": "Поставь напоминание через полтора часа проверить почту.",
+              "expected_action": "add_reminder",
+              "expected_arguments": {
+                "text": "проверить почту",
+                "remind_at": "2031-02-01T01:15:00+05:00"
+              }
+            }
+          ],
+          "counts": {
+            "planned": 1,
+            "attempted": 1,
+            "decisions_received": 1,
+            "not_run": 0
+          },
+          "cases": [
+            {
+              "id": "relative_reminder_month_boundary",
+              "expected_action": "add_reminder",
+              "expected_arguments": {
+                "text": "проверить почту",
+                "remind_at": "2031-02-01T01:15:00+05:00"
+              },
+              "predicted_action": "add_reminder",
+              "arguments": {
+                "text": "проверить почту",
+                "remind_at": "2031-02-01T01:15:00+05:00"
+              },
+              "route_correct": true,
+              "arguments_applicable": true,
+              "arguments_correct": true,
+              "success": true,
+              "public_answer": "Подготовка напоминания.",
+              "effective_arguments": {
+                "text": "проверить почту",
+                "remind_at": "2031-01-31T20:15:00+00:00"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "changed_elements": {
+    "routing": "Reminder preparation rule in app/prompts/agent.py; model, dataset and scoring unchanged.",
+    "context_preparation": "Reduce output reserve before rejecting a base prompt that fits; verified by isolated and PostgreSQL tests."
+  }
+}

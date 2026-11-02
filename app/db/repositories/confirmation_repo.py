@@ -6,7 +6,7 @@ from typing import cast
 import asyncpg
 
 from app.core.schemas.tools import ReminderResult
-from app.db.records import ConfirmationRecord
+from app.db.records import ConfirmationRecord, ConfirmationState
 
 
 def decode_record(row: asyncpg.Record) -> ConfirmationRecord:
@@ -15,6 +15,7 @@ def decode_record(row: asyncpg.Record) -> ConfirmationRecord:
         if isinstance(result.get(key), str):
             result[key] = json.loads(result[key])
     result["id"] = str(result["id"])
+    result["state"] = ConfirmationState(result["state"])
     return cast(ConfirmationRecord, result)
 
 
@@ -107,15 +108,15 @@ async def claim(
         )
         if row is None or row["user_id"] != user_id:
             return None
-        if row["state"] == "pending":
+        if row["state"] == ConfirmationState.PENDING:
             if row["expires_at"] <= now:
-                state = "expired"
+                state = ConfirmationState.EXPIRED
             elif cancel:
-                state = "cancelled"
+                state = ConfirmationState.CANCELLED
             elif row["calls_remaining"] <= 0:
-                state = "failed"
+                state = ConfirmationState.FAILED
             else:
-                state = "confirmed"
+                state = ConfirmationState.CONFIRMED
             row = await conn.fetchrow(
                 """UPDATE pending_confirmations SET state=$2,updated_at=$3,
                    confirmed_at=CASE WHEN $2='confirmed' THEN $3 ELSE confirmed_at END
@@ -126,7 +127,7 @@ async def claim(
             )
         assert row is not None
 
-        if row["state"] == "confirmed":
+        if row["state"] == ConfirmationState.CONFIRMED:
             row = await conn.fetchrow(
                 """UPDATE pending_confirmations SET state='executing',execution_started_at=$2,
                    updated_at=$2,calls_remaining=calls_remaining-1 WHERE id=$1 RETURNING *""",
@@ -201,7 +202,7 @@ async def finalize_exhausted(
         row = await conn.fetchrow(
             "SELECT * FROM pending_confirmations WHERE id=$1 FOR UPDATE", uuid.UUID(identifier)
         )
-        if row is None or row["state"] != "executing" or row["calls_remaining"] > 0:
+        if row is None or row["state"] != ConfirmationState.EXECUTING or row["calls_remaining"] > 0:
             return None
         reminder = await conn.fetchrow(
             "SELECT * FROM reminders WHERE idempotency_key=$1", row["idempotency_key"]
@@ -219,7 +220,7 @@ async def finalize_exhausted(
             """UPDATE pending_confirmations SET state=$2,result=$3::jsonb,error_code=$4,
                updated_at=$5 WHERE id=$1 RETURNING *""",
             uuid.UUID(identifier),
-            "succeeded" if result is not None else "failed",
+            ConfirmationState.SUCCEEDED if result is not None else ConfirmationState.FAILED,
             json.dumps(result) if result is not None else None,
             None if result is not None else "call_budget",
             now,

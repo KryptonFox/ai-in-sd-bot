@@ -5,7 +5,25 @@ import asyncpg
 from app.core.schemas.message import ChatMessage, MessageRole
 
 
-async def add_dialog_message(pool: asyncpg.Pool, user_id: int, message: ChatMessage) -> None:
+def _message_from_row(row: asyncpg.Record) -> ChatMessage:
+    metadata = row["metadata"]
+    if isinstance(metadata, str):
+        metadata = json.loads(metadata)
+    else:
+        metadata = metadata or {}
+
+    return ChatMessage(
+        role=MessageRole(row["role"]),
+        content=row["content"],
+        metadata=metadata,
+    )
+
+
+async def add_dialog_message(
+    pool: asyncpg.Pool,
+    user_id: int,
+    message: ChatMessage,
+) -> None:
     async with pool.acquire() as conn:
         await conn.execute(
             """
@@ -31,7 +49,10 @@ async def add_dialog_message(pool: asyncpg.Pool, user_id: int, message: ChatMess
 
 
 async def get_dialog_history(
-    pool: asyncpg.Pool, user_id: int, max_messages: int, max_chars: int
+    pool: asyncpg.Pool,
+    user_id: int,
+    max_messages: int,
+    max_chars: int,
 ) -> list[ChatMessage]:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
@@ -58,14 +79,10 @@ async def get_dialog_history(
             break
 
         total_chars += char_count
-        raw_meta = row["metadata"]
-        metadata = json.loads(raw_meta) if isinstance(raw_meta, str) else raw_meta or {}
-
-        selected.append(
-            ChatMessage(role=MessageRole(row["role"]), content=row["content"], metadata=metadata)
-        )
+        selected.append(_message_from_row(row))
 
     selected.reverse()
+
     return selected
 
 
@@ -80,10 +97,15 @@ async def get_dialog_summary(pool: asyncpg.Pool, user_id: int) -> str | None:
         row = await conn.fetchrow(
             "SELECT summary FROM dialog_summaries WHERE user_id = $1", user_id
         )
+
     return row["summary"] if row else None
 
 
-async def set_dialog_summary(pool: asyncpg.Pool, user_id: int, summary: str) -> None:
+async def set_dialog_summary(
+    pool: asyncpg.Pool,
+    user_id: int,
+    summary: str,
+) -> None:
     async with pool.acquire() as conn:
         await _set_summary(conn, user_id, summary)
 
@@ -100,12 +122,17 @@ async def _set_summary(
 
 
 async def commit_compaction(
-    pool: asyncpg.Pool, user_id: int, message_ids: list[int], summary: str
+    pool: asyncpg.Pool,
+    user_id: int,
+    message_ids: list[int],
+    summary: str,
 ) -> None:
     async with pool.acquire() as conn, conn.transaction():
         await _set_summary(conn, user_id, summary)
         await conn.execute(
-            "DELETE FROM dialog_messages WHERE user_id=$1 AND id=ANY($2)", user_id, message_ids
+            "DELETE FROM dialog_messages WHERE user_id=$1 AND id=ANY($2)",
+            user_id,
+            message_ids,
         )
 
 
@@ -130,16 +157,20 @@ async def get_user_messages_with_ids(
         )
 
     result: list[tuple[int, ChatMessage]] = []
+
     for row in rows:
-        raw_meta = row["metadata"]
-        metadata = json.loads(raw_meta) if isinstance(raw_meta, str) else raw_meta or {}
-        msg = ChatMessage(role=MessageRole(row["role"]), content=row["content"], metadata=metadata)
-        result.append((row["id"], msg))
+        message = _message_from_row(row)
+        result.append((row["id"], message))
+
     return result
 
 
-async def delete_dialog_messages_by_ids(pool: asyncpg.Pool, message_ids: list[int]) -> None:
+async def delete_dialog_messages_by_ids(
+    pool: asyncpg.Pool,
+    message_ids: list[int],
+) -> None:
     if not message_ids:
         return
+
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM dialog_messages WHERE id = ANY($1)", message_ids)

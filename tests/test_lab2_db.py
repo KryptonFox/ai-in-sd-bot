@@ -2,19 +2,26 @@ import asyncio
 import json
 import os
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from zoneinfo import ZoneInfo
 
 import pytest
 from conftest import DatabaseFixture
 
 from app.core.clock import FrozenClock
-from app.core.schemas.agent import EventContext
+from app.core.schemas.agent import AgentDecision, EventContext
+from app.core.schemas.llm import LLMResponse
+from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.core.schemas.tools import ToolFailure
 from app.db.connection import create_pool
+from app.db.records import ConfirmationState
 from app.db.repositories import confirmation_repo, event_repo, reminder_repo
 from app.db.repositories.audit_repo import latest_decision
+from app.mcp.client import MCPClient
+from app.mcp_server.server import tool_catalog
+from app.services.agent_service import AgentService
 from app.services.confirmation_service import ConfirmationService
+from app.services.tool_execution import ToolExecutionService
 
 pytestmark = [
     pytest.mark.integration,
@@ -61,6 +68,10 @@ class TimeoutBeforeInsertMCP:
         raise ToolFailure("mcp_timeout", "response lost")
 
 
+class MockToolClient(MCPClient):
+    call_tool: AsyncMock
+
+
 def _context(user_id: int, event_id: str) -> EventContext:
     return EventContext(
         user_id=user_id,
@@ -76,6 +87,77 @@ def _arguments(now: datetime, text: str = "проверить расписани
     }
 
 
+async def test_agent_reminder_prepares_before_confirmation_and_creates_once(
+    database: DatabaseFixture,
+) -> None:
+    settings, *_ = database
+    pool = await create_pool(settings)
+    now = datetime(2031, 5, 1, 23, 45, tzinfo=ZoneInfo("Europe/Moscow"))
+    clock = FrozenClock(now)
+    context = _context(9091, "eval:relative-reminder")
+    arguments = {
+        "text": "Сделать перерыв",
+        "remind_at": (now + timedelta(hours=2)).isoformat(),
+    }
+    executor = InsertThenTimeoutMCP(pool, clock, fail_after_insert=False)
+    mcp = MockToolClient(settings)
+    mcp.load_catalog(tool_catalog())
+    mcp.call_tool = AsyncMock(side_effect=executor.call_tool)
+    confirmations = ConfirmationService(pool, mcp, clock=clock)
+    llm = MagicMock(
+        generate=AsyncMock(
+            return_value=LLMResponse(
+                content="Предложение от модели, которое не должно заменить кнопки.",
+                tool_calls=[ToolCall(id="prepare", name="add_reminder", arguments=arguments)],
+            )
+        )
+    )
+    agent = AgentService(
+        llm,
+        ToolExecutionService(mcp, confirmations, clock=clock),
+        clock=clock,
+    )
+
+    try:
+        result = await agent.run(
+            [ChatMessage(role=MessageRole.USER, content="Через два часа напомни сделать перерыв.")],
+            context,
+            timezone="Europe/Moscow",
+        )
+
+        pending = await confirmation_repo.find_event(pool, context.user_id, context.event_id)
+        assert pending is not None
+        assert pending["state"] is ConfirmationState.PENDING
+        assert pending["arguments"] == arguments
+        assert result.decision is AgentDecision.PREPARE
+        assert result.confirmation_id == pending["id"]
+        assert "2031-05-02T01:45:00+03:00" in result.text
+        assert "Предложение от модели" not in result.text
+        mcp.call_tool.assert_not_awaited()
+        assert (
+            await pool.fetchval("SELECT count(*) FROM reminders WHERE user_id=$1", context.user_id)
+            == 0
+        )
+
+        confirmed = await confirmations.confirm(context.user_id, pending["id"])
+        repeated = await confirmations.confirm(context.user_id, pending["id"])
+
+        assert confirmed.decision is AgentDecision.TOOL
+        assert repeated.decision is AgentDecision.TOOL
+        mcp.call_tool.assert_awaited_once_with(
+            "add_reminder",
+            arguments,
+            user_id=context.user_id,
+            confirmation_id=pending["id"],
+        )
+        assert (
+            await pool.fetchval("SELECT count(*) FROM reminders WHERE user_id=$1", context.user_id)
+            == 1
+        )
+    finally:
+        await pool.close()
+
+
 async def test_confirmation_prepare_claim_and_reminder_idempotency(database: DatabaseFixture):
     settings, *_ = database
     pool = await create_pool(settings)
@@ -89,11 +171,24 @@ async def test_confirmation_prepare_claim_and_reminder_idempotency(database: Dat
 
     try:
         first, second = await asyncio.gather(
-            service.prepare(context, original, "Europe/Moscow", position=0, calls_remaining=2),
-            service.prepare(context, original, "Europe/Moscow", position=0, calls_remaining=2),
+            service.prepare(
+                context,
+                original,
+                "Europe/Moscow",
+                position=0,
+                calls_remaining=2,
+            ),
+            service.prepare(
+                context,
+                original,
+                "Europe/Moscow",
+                position=0,
+                calls_remaining=2,
+            ),
         )
         row_before = await confirmation_repo.find_event(pool, context.user_id, context.event_id)
         assert row_before is not None
+        assert row_before["state"] is ConfirmationState.PENDING
         later_service = ConfirmationService(
             pool,
             mcp,
@@ -123,7 +218,7 @@ async def test_confirmation_prepare_claim_and_reminder_idempotency(database: Dat
         denied = await service.confirm(context.user_id + 1, row_after["id"])
         denied_audit = await latest_decision(pool, context.user_id + 1)
         assert denied_audit is not None
-        assert denied.decision == "error"
+        assert denied.decision == AgentDecision.ERROR
         assert denied_audit["event_id"] == "confirmation:denied"
         assert denied_audit["execution"] == "denied"
 
@@ -154,7 +249,7 @@ async def test_confirmation_prepare_claim_and_reminder_idempotency(database: Dat
         assert expired_row is not None
         expired_audit = await latest_decision(pool, expired_context.user_id)
         assert expired_audit is not None
-        assert expired_result_status.decision == "respond"
+        assert expired_result_status.decision == AgentDecision.RESPOND
         assert expired_row["state"] == "expired"
         assert expired_audit["event_id"] == expired_context.event_id
         assert expired_audit["execution"] == "expired"
@@ -182,7 +277,7 @@ async def test_confirmation_prepare_claim_and_reminder_idempotency(database: Dat
         assert cancelled_row is not None
         cancelled_audit = await latest_decision(pool, cancelled_context.user_id)
         assert cancelled_audit is not None
-        assert cancelled_result_status.decision == "respond"
+        assert cancelled_result_status.decision == AgentDecision.RESPOND
         assert cancelled_row["state"] == "cancelled"
         assert cancelled_audit["event_id"] == cancelled_context.event_id
         assert cancelled_audit["execution"] == "cancelled"
@@ -202,7 +297,9 @@ async def test_confirmation_prepare_claim_and_reminder_idempotency(database: Dat
             service.confirm(confirm_context.user_id, prepared.confirmation_id),
         )
         pending = await confirmation_repo.find_event(
-            pool, confirm_context.user_id, confirm_context.event_id
+            pool,
+            confirm_context.user_id,
+            confirm_context.event_id,
         )
         assert pending is not None
 
@@ -210,7 +307,7 @@ async def test_confirmation_prepare_claim_and_reminder_idempotency(database: Dat
         assert pending["state"] == "succeeded"
         assert pending["calls_remaining"] == 1
         assert {result.decision for result in outcomes} <= {"tool", "respond"}
-        assert any(result.decision == "tool" for result in outcomes)
+        assert any(result.decision == AgentDecision.TOOL for result in outcomes)
         assert await pool.fetchval("SELECT count(*) FROM reminders WHERE user_id=$1", 902) == 1
 
         direct_result = await reminder_repo.create_confirmed_reminder(
@@ -273,7 +370,7 @@ async def test_lost_mcp_response_recovers_from_committed_reminder(database: Data
         pending = await confirmation_repo.find_event(pool, context.user_id, context.event_id)
         assert pending is not None
 
-        assert result.decision == "tool"
+        assert result.decision == AgentDecision.TOOL
         assert pending["state"] == "succeeded"
         assert pending["calls_remaining"] == 1
         assert await pool.fetchval("SELECT count(*) FROM reminders WHERE user_id=$1", 903) == 1
@@ -309,7 +406,10 @@ async def test_event_retry_preserves_call_budget_and_caches_result(database: Dat
     try:
         first = await event_repo.begin(pool, user_id, event_id, now)
         duplicate_in_progress = await event_repo.begin(
-            pool, user_id, event_id, now + timedelta(seconds=1)
+            pool,
+            user_id,
+            event_id,
+            now + timedelta(seconds=1),
         )
 
         assert first == {"claimed": True, "calls_used": 0}
@@ -410,7 +510,7 @@ async def test_new_pending_cancels_old_but_replay_does_not_cancel_other_pending(
         assert new_after["state"] == "pending"
         assert new_after["id"] == new_result.confirmation_id
         assert new_after["expires_at"] - new_after["created_at"] == timedelta(seconds=120)
-        assert replayed.decision == "respond"
+        assert replayed.decision == AgentDecision.RESPOND
     finally:
         await pool.close()
 
@@ -437,7 +537,7 @@ async def test_recovery_exhausts_remaining_calls_without_third_rpc(database: Dat
         after_first = await confirmation_repo.find_event(pool, context.user_id, context.event_id)
         assert after_first is not None
 
-        assert first_result.decision == "error"
+        assert first_result.decision == AgentDecision.ERROR
         assert mcp.calls == 1
         assert after_first["state"] == "executing"
         assert after_first["calls_remaining"] == 1
@@ -483,7 +583,11 @@ async def test_exhausted_recovery_waits_for_inflight_commit(database: DatabaseFi
     recovery = None
     try:
         proposal = await service.prepare(
-            context, _arguments(now), "Europe/Moscow", position=0, calls_remaining=1
+            context,
+            _arguments(now),
+            "Europe/Moscow",
+            position=0,
+            calls_remaining=1,
         )
         assert proposal.confirmation_id is not None
         row = await confirmation_repo.claim(pool, proposal.confirmation_id, context.user_id, now)

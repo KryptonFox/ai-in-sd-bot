@@ -1,15 +1,16 @@
 from datetime import datetime
-from typing import Literal, NotRequired, TypedDict
+from enum import StrEnum
+from typing import NotRequired, TypedDict
 
-type ConfirmationState = Literal[
-    "pending",
-    "confirmed",
-    "executing",
-    "succeeded",
-    "cancelled",
-    "expired",
-    "failed",
-]
+
+class ConfirmationState(StrEnum):
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    EXECUTING = "executing"
+    SUCCEEDED = "succeeded"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
+    FAILED = "failed"
 
 
 class ConfirmationRecord(TypedDict):

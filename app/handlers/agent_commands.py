@@ -12,7 +12,7 @@ from aiogram.types import (
 )
 
 from app.core.formatters import send_formatted_message
-from app.core.schemas.agent import AgentResult
+from app.core.schemas.agent import AgentDecision, AgentResult
 from app.presentation.agent import decision_text, timezone_text, tools_text
 from app.services.dialog_service import DialogService
 
@@ -84,9 +84,11 @@ async def handle_confirmation_callback(
     await callback.answer()
     user_id = callback.from_user.id
     result: AgentResult = await dialog_service.confirm_action(
-        user_id, identifier, cancel=action == "cancel"
+        user_id,
+        identifier,
+        cancel=action == "cancel",
     )
-    if result.decision != "error":
+    if result.decision != AgentDecision.ERROR:
         try:
             await message.edit_reply_markup(reply_markup=None)
         except Exception:

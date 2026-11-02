@@ -1,8 +1,11 @@
 import argparse
 import asyncio
 import logging
+from contextlib import AsyncExitStack
 
-from aiogram import Dispatcher
+import asyncpg
+from aiogram import Bot, Dispatcher
+from aiohttp import web
 
 from app.config import ConfigError, Settings
 from app.db.connection import create_pool
@@ -34,26 +37,19 @@ async def run(settings: Settings) -> None:
         state.pool = await create_pool(settings)
         logger.info("PostgreSQL подключён: SELECT 1 выполнен, миграции применены.")
 
-        async with asyncio.timeout(30):
-            me = await bot.get_me()
-            webhook = await bot.get_webhook_info()
-
-        if webhook.url:
-            raise ConfigError(
-                "У бота установлен webhook. Удалите его перед запуском polling "
-                "или используйте отдельного учебного бота."
-            )
-
-        logger.info("Telegram доступен. Бот @%s запускает polling.", me.username)
-
-        await setup_bot_commands(bot)
-        await setup_bot_description(bot)
+        await _prepare_telegram(bot)
 
         mcp_client = MCPClient(settings)
         await mcp_client.start()
         state.mcp = mcp_client
-        confirmations = ConfirmationService(state.pool, mcp_client, ttl=settings.confirmation_ttl)
+
+        confirmations = ConfirmationService(
+            state.pool,
+            mcp_client,
+            ttl=settings.confirmation_ttl,
+        )
         store = PostgresTurnStore(state.pool)
+
         tools = ToolExecutionService(
             mcp_client,
             confirmations,
@@ -61,23 +57,24 @@ async def run(settings: Settings) -> None:
             max_calls=settings.agent_max_tool_calls,
             max_output_chars=settings.tool_result_max_chars,
         )
-        agent = AgentService(llm_client, tools, max_llm_steps=settings.agent_max_llm_steps)
+
+        agent = AgentService(
+            llm_client,
+            tools,
+            max_llm_steps=settings.agent_max_llm_steps,
+        )
         dialog_service = DialogService(
-            state.pool, settings, llm_client, agent=agent, tools=tools, store=store
+            state.pool,
+            settings,
+            llm_client,
+            agent=agent,
+            confirmations=confirmations,
+            tool_client=mcp_client,
+            store=store,
         )
         await dialog_service.recover()
 
-        async def recovery_loop() -> None:
-            while True:
-                try:
-                    await confirmations.recover()
-                    if not mcp_client.available:
-                        await mcp_client.start()
-                except Exception:
-                    logger.warning("agent_recovery_unavailable")
-                await asyncio.sleep(15)
-
-        recovery_task = asyncio.create_task(recovery_loop())
+        recovery_task = asyncio.create_task(_recover_services(confirmations, mcp_client))
 
         dispatcher = Dispatcher()
         dispatcher.include_router(router)
@@ -97,36 +94,83 @@ async def run(settings: Settings) -> None:
         await state.polling_task
 
     finally:
-        state.initialized = False
+        await _shutdown(
+            state,
+            bot,
+            llm_client,
+            mcp_client,
+            runner,
+            recovery_task,
+        )
 
-        if state.polling_task and not state.polling_task.done():
-            state.polling_task.cancel()
-            await asyncio.gather(state.polling_task, return_exceptions=True)
 
-        if recovery_task:
-            recovery_task.cancel()
-            await asyncio.gather(recovery_task, return_exceptions=True)
+async def _prepare_telegram(bot: Bot) -> None:
+    async with asyncio.timeout(30):
+        me = await bot.get_me()
+        webhook = await bot.get_webhook_info()
+
+    if webhook.url:
+        raise ConfigError(
+            "У бота установлен webhook. Удалите его перед запуском polling "
+            "или используйте отдельного учебного бота."
+        )
+
+    logger.info("Telegram доступен. Бот @%s запускает polling.", me.username)
+    await setup_bot_commands(bot)
+    await setup_bot_description(bot)
+
+
+async def _recover_services(
+    confirmations: ConfirmationService,
+    mcp: MCPClient,
+) -> None:
+    while True:
         try:
-            if mcp_client:
-                await mcp_client.aclose()
-        finally:
-            try:
-                if runner:
-                    await runner.cleanup()
-            finally:
-                try:
-                    if llm_client:
-                        await llm_client.aclose()
-                finally:
-                    try:
-                        await bot.session.close()
-                    finally:
-                        if state.pool:
-                            try:
-                                async with asyncio.timeout(10):
-                                    await state.pool.close()
-                            except TimeoutError:
-                                state.pool.terminate()
+            await confirmations.recover()
+            if not mcp.available:
+                await mcp.start()
+        except Exception:
+            logger.warning("agent_recovery_unavailable")
+
+        await asyncio.sleep(15)
+
+
+async def _close_database(pool: asyncpg.Pool) -> None:
+    try:
+        async with asyncio.timeout(10):
+            await pool.close()
+    except TimeoutError:
+        pool.terminate()
+
+
+async def _shutdown(
+    state: HealthState,
+    bot: Bot,
+    llm: OpenAIClient | None,
+    mcp: MCPClient | None,
+    runner: web.AppRunner | None,
+    recovery_task: asyncio.Task[None] | None,
+) -> None:
+    state.initialized = False
+
+    async with AsyncExitStack() as cleanup:
+        if state.pool is not None:
+            cleanup.push_async_callback(_close_database, state.pool)
+
+        cleanup.push_async_callback(bot.session.close)
+        if llm is not None:
+            cleanup.push_async_callback(llm.aclose)
+
+        if runner is not None:
+            cleanup.push_async_callback(runner.cleanup)
+
+        if mcp is not None:
+            cleanup.push_async_callback(mcp.aclose)
+
+        for task in (state.polling_task, recovery_task):
+            if task is not None:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
 
 def main() -> int:

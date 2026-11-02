@@ -4,6 +4,7 @@ from datetime import datetime
 
 import asyncpg
 
+from app.core.schemas.agent import TurnState
 from app.db.records import EventClaim
 
 
@@ -31,7 +32,7 @@ async def begin(pool: asyncpg.Pool, user_id: int, event_id: str, now: datetime) 
                 "claimed": False,
                 "result": json.loads(result) if isinstance(result, str) else result,
             }
-        if row["state"] == "failed" or (now - row["updated_at"]).total_seconds() > 600:
+        if row["state"] == TurnState.FAILED or (now - row["updated_at"]).total_seconds() > 600:
             await conn.execute(
                 "UPDATE agent_events SET state='processing',updated_at=$3 "
                 "WHERE user_id=$1 AND event_id=$2",

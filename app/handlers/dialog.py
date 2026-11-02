@@ -2,6 +2,8 @@ import asyncio
 import logging
 import math
 import uuid
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
 from aiogram import F, Router
 from aiogram.enums import ChatAction
@@ -34,6 +36,7 @@ def get_retry_keyboard(user_id: int, text: str) -> InlineKeyboardMarkup:
     _retry_cache[retry_id] = (user_id, text)
     if len(_retry_cache) > 1000:
         _retry_cache.pop(next(iter(_retry_cache)))
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🔄 Повторить", callback_data=f"retry:{retry_id}")]
@@ -41,12 +44,18 @@ def get_retry_keyboard(user_id: int, text: str) -> InlineKeyboardMarkup:
     )
 
 
-def find_retry_text(retry_id: str, user_id: int, message: Message | None) -> str | None:
+def find_retry_text(
+    retry_id: str,
+    user_id: int,
+    message: Message | None,
+) -> str | None:
     cached = _retry_cache.get(retry_id)
     if cached and cached[0] == user_id:
         return cached[1]
+
     if message and message.reply_to_message and message.reply_to_message.text:
         return message.reply_to_message.text
+
     return None
 
 
@@ -63,6 +72,7 @@ async def _send_typing(message: Message) -> None:
             )
         except Exception:
             logger.debug("Не удалось отправить статус typing")
+
         await asyncio.sleep(TYPING_INTERVAL)
 
 
@@ -86,50 +96,76 @@ async def _execute_dialog(
             pass
 
     try:
-        typing_task = asyncio.create_task(_send_typing(target_message))
-        try:
+        async with _processing_status(target_message, queue_msg):
             if event_id is None:
                 result = await dialog_service.process_user_message(user_id, user_text)
             else:
                 result = await dialog_service.process_user_message(
-                    user_id, user_text, event_id=event_id
+                    user_id,
+                    user_text,
+                    event_id=event_id,
                 )
-        finally:
-            typing_task.cancel()
-            await asyncio.gather(typing_task, return_exceptions=True)
-            if queue_msg:
-                try:
-                    await queue_msg.delete()
-                except Exception:
-                    pass
-        keyboard = (
-            get_confirmation_keyboard(result.confirmation_id)
-            if isinstance(result, AgentResult) and result.confirmation_id
-            else None
-        )
-        await send_formatted_message(target_message, reply_text(result), reply_markup=keyboard)
 
-    except QueueFullError:
-        logger.warning("[%s] user_queue_full", req_id)
-        if queue_msg and hasattr(queue_msg, "delete") and callable(queue_msg.delete):
+        keyboard = None
+        if isinstance(result, AgentResult) and result.confirmation_id:
+            keyboard = get_confirmation_keyboard(result.confirmation_id)
+
+        await send_formatted_message(
+            target_message,
+            reply_text(result),
+            reply_markup=keyboard,
+        )
+    except Exception as error:
+        await _send_dialog_error(
+            target_message,
+            error,
+            req_id,
+            user_id,
+            user_text,
+        )
+
+
+@asynccontextmanager
+async def _processing_status(
+    target_message: Message, queue_msg: Message | None
+) -> AsyncGenerator[None]:
+    typing_task = asyncio.create_task(_send_typing(target_message))
+
+    try:
+        yield
+    finally:
+        typing_task.cancel()
+        await asyncio.gather(typing_task, return_exceptions=True)
+        if queue_msg is not None:
             try:
                 await queue_msg.delete()
             except Exception:
                 pass
+
+
+async def _send_dialog_error(
+    target_message: Message,
+    error: Exception,
+    req_id: str,
+    user_id: int,
+    user_text: str,
+) -> None:
+    if isinstance(error, QueueFullError):
+        logger.warning("[%s] user_queue_full", req_id)
         await send_formatted_message(
             target_message,
             "⏳ В очереди уже находится максимальное количество ваших сообщений. "
             "Пожалуйста, дождитесь ответа бота перед отправкой новых запросов.",
         )
 
-    except InterruptedRunError:
+    elif isinstance(error, InterruptedRunError):
         await send_formatted_message(
             target_message,
             "Запрос прерван после обращения к инструменту. Отправьте новый запрос. "
             "Состояние подтверждённых действий сверяется отдельно.",
         )
 
-    except LLMTimeoutError:
+    elif isinstance(error, LLMTimeoutError):
         logger.warning("[%s] llm_timeout", req_id)
         keyboard = get_retry_keyboard(user_id, user_text)
         await send_formatted_message(
@@ -139,20 +175,20 @@ async def _execute_dialog(
             as_reply=True,
         )
 
-    except LLMEmptyResponseError:
+    elif isinstance(error, LLMEmptyResponseError):
         logger.warning("[%s] llm_empty", req_id)
         await send_formatted_message(
             target_message,
             "⚠️ Языковая модель вернула пустой ответ. Попробуйте переформулировать запрос.",
         )
 
-    except LLMRefusalError:
+    elif isinstance(error, LLMRefusalError):
         await send_formatted_message(
             target_message,
             "Модель отказалась выполнять запрос. Попробуйте изменить задачу или её формулировку.",
         )
 
-    except LLMServiceError as error:
+    elif isinstance(error, LLMServiceError):
         logger.error(
             "[%s] llm_error code=%s status=%s reason=%s details=%s",
             req_id,
@@ -166,8 +202,12 @@ async def _execute_dialog(
             f"⚠️ {error.user_message}",
         )
 
-    except Exception as error:
-        logger.error("[%s] dialog_error exception=%s", req_id, type(error).__name__)
+    else:
+        logger.error(
+            "[%s] dialog_error exception=%s",
+            req_id,
+            type(error).__name__,
+        )
         await send_formatted_message(
             target_message,
             "❌ Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже.",
@@ -175,7 +215,10 @@ async def _execute_dialog(
 
 
 @router.message(F.text, F.chat.type == "private", ~F.text.startswith("/"))
-async def handle_user_text(message: Message, dialog_service: DialogService) -> None:
+async def handle_user_text(
+    message: Message,
+    dialog_service: DialogService,
+) -> None:
     if not message.text:
         return
 
@@ -190,7 +233,10 @@ async def handle_user_text(message: Message, dialog_service: DialogService) -> N
 
 
 @router.callback_query(F.data.startswith("retry:"))
-async def handle_retry_callback(callback: CallbackQuery, dialog_service: DialogService) -> None:
+async def handle_retry_callback(
+    callback: CallbackQuery,
+    dialog_service: DialogService,
+) -> None:
     if not callback.data or not callback.message:
         return
 
@@ -212,6 +258,7 @@ async def handle_retry_callback(callback: CallbackQuery, dialog_service: DialogS
             await target_msg.edit_reply_markup(reply_markup=None)
         except Exception:
             pass
+
         run_target = target_msg.reply_to_message or target_msg
     else:
         run_target = target_msg

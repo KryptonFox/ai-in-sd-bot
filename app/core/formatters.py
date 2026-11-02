@@ -8,10 +8,13 @@ from telegramify_markdown.entity import MessageEntity as ConvertedEntity
 
 logger = logging.getLogger("app.core.formatters")
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096
+UTF16_BYTES_PER_UNIT = 2
 _ALLOWED_ENTITIES = frozenset({"bold", "italic", "code", "pre", "text_link"})
 _RENDER_CONFIG = RenderConfig.isolated()
+
 for _level in range(1, 7):
     setattr(_RENDER_CONFIG.markdown_symbol, f"heading_level_{_level}", "")
+
 _RENDER_CONFIG.markdown_symbol.link = ""
 _RENDER_CONFIG.markdown_symbol.unordered_list_item = "-"
 
@@ -19,6 +22,7 @@ _RENDER_CONFIG.markdown_symbol.unordered_list_item = "-"
 def _valid_url(url: str | None) -> bool:
     if not url:
         return False
+
     try:
         parsed = urlsplit(url)
         _ = parsed.port
@@ -31,53 +35,80 @@ def _valid_url(url: str | None) -> bool:
         return False
 
 
-def _validated_entities(text: str, entities: list[ConvertedEntity]) -> list[ConvertedEntity]:
+def _validated_entities(
+    text: str,
+    entities: list[ConvertedEntity],
+) -> list[ConvertedEntity]:
     encoded = text.encode("utf-16-le")
     result = []
+
     for entity in entities:
         if entity.type not in _ALLOWED_ENTITIES:
             continue
+
         validated = MessageEntity.model_validate(entity.to_dict())
         if validated.type == "text_link" and not _valid_url(validated.url):
             continue
-        start = validated.offset * 2
-        end = (validated.offset + validated.length) * 2
+
+        start = validated.offset * UTF16_BYTES_PER_UNIT
+        end = (validated.offset + validated.length) * UTF16_BYTES_PER_UNIT
         if start < 0 or validated.length <= 0 or end > len(encoded):
             raise ValueError("Entity outside message text")
+
         encoded[:start].decode("utf-16-le")
         encoded[start:end].decode("utf-16-le")
         result.append(entity)
+
     code_ranges = [
         (entity.offset, entity.offset + entity.length)
         for entity in result
         if entity.type in {"code", "pre"}
     ]
-    return [
-        entity
-        for entity in result
-        if entity.type in {"code", "pre"}
-        or not any(
-            entity.offset < end and entity.offset + entity.length > start
-            for start, end in code_ranges
-        )
-    ]
+    visible: list[ConvertedEntity] = []
+
+    for entity in result:
+        if entity.type in {"code", "pre"}:
+            visible.append(entity)
+            continue
+
+        entity_end = entity.offset + entity.length
+        overlaps_code = False
+
+        for code_start, code_end in code_ranges:
+            if entity.offset < code_end and entity_end > code_start:
+                overlaps_code = True
+                break
+
+        if not overlaps_code:
+            visible.append(entity)
+
+    return visible
 
 
 def _split_messages(
     text: str, entities: list[ConvertedEntity]
 ) -> list[tuple[str, list[MessageEntity]]]:
     entities = _validated_entities(text, entities)
-    parts = split_entities(text, entities, max_utf16_len=TELEGRAM_MAX_MESSAGE_LENGTH)
+    parts = split_entities(
+        text,
+        entities,
+        max_utf16_len=TELEGRAM_MAX_MESSAGE_LENGTH,
+    )
     result = []
+
     for chunk, chunk_entities in parts:
-        if len(chunk.encode("utf-16-le")) // 2 > TELEGRAM_MAX_MESSAGE_LENGTH:
+        chunk_length = len(chunk.encode("utf-16-le")) // UTF16_BYTES_PER_UNIT
+        if chunk_length > TELEGRAM_MAX_MESSAGE_LENGTH:
             raise ValueError("Message exceeds Telegram limit")
+
         if not chunk.strip():
             continue
+
         validated = _validated_entities(chunk, chunk_entities)
         result.append(
             (chunk, [MessageEntity.model_validate(entity.to_dict()) for entity in validated])
         )
+
     return result
 
 
@@ -105,23 +136,38 @@ async def send_formatted_message(
 ) -> Message | None:
     if not text.strip():
         return None
+
     try:
-        visible, entities = convert(text, latex_escape=False, config=_RENDER_CONFIG)
+        visible, entities = convert(
+            text,
+            latex_escape=False,
+            config=_RENDER_CONFIG,
+        )
         chunks = _split_messages(visible, entities)
     except Exception:
         logger.warning("telegram_conversion_error: plain_text_fallback")
         chunks = _split_messages(text, [])
+
     result = None
+
     for index, (chunk, entities) in enumerate(chunks):
         send_fn = message.reply if as_reply and index == 0 else message.answer
         markup = reply_markup if index == len(chunks) - 1 else None
+
         try:
-            result = await send_fn(chunk, entities=entities, parse_mode=None, reply_markup=markup)
+            result = await send_fn(
+                chunk,
+                entities=entities,
+                parse_mode=None,
+                reply_markup=markup,
+            )
         except TelegramBadRequest as exc:
             if not entities or not _is_entity_error(exc):
                 raise
+
             logger.warning("telegram_entity_error: plain_text_fallback")
             fallback = _split_messages(chunk, [])
+
             for fallback_index, (plain, _) in enumerate(fallback):
                 plain_fn = (
                     message.reply
@@ -130,6 +176,10 @@ async def send_formatted_message(
                 )
                 plain_markup = markup if fallback_index == len(fallback) - 1 else None
                 result = await plain_fn(
-                    plain, entities=[], parse_mode=None, reply_markup=plain_markup
+                    plain,
+                    entities=[],
+                    parse_mode=None,
+                    reply_markup=plain_markup,
                 )
+
     return result

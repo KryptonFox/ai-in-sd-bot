@@ -6,7 +6,7 @@ import pytest
 from conftest import DatabaseFixture
 
 from app.core.clock import FrozenClock
-from app.core.schemas.agent import Acquired, AgentResult, EventContext, Replay
+from app.core.schemas.agent import Acquired, AgentDecision, AgentResult, EventContext, Replay
 from app.core.schemas.message import ChatMessage, MessageRole
 from app.core.schemas.tools import ToolFailure
 from app.db.connection import create_pool
@@ -109,7 +109,11 @@ class CommitThenInvalidOutput:
         self.calls += 1
         assert user_id is not None and confirmation_id is not None
         await reminder_repo.create_confirmed_reminder(
-            self.pool, confirmation_id, user_id, arguments, NOW
+            self.pool,
+            confirmation_id,
+            user_id,
+            arguments,
+            NOW,
         )
         raise ToolFailure("invalid_output", "response could not be validated")
 
@@ -131,7 +135,7 @@ async def test_committed_mutation_with_invalid_output_reconciles_without_new_rpc
         )
         assert prepared.confirmation_id is not None
         result = await service.confirm(1, prepared.confirmation_id)
-        assert result.decision == "tool"
+        assert result.decision == AgentDecision.TOOL
         assert tool.calls == 1
         row = await confirmation_repo.find_event(pool, 1, "reminder")
         assert row is not None and row["state"] == "succeeded"

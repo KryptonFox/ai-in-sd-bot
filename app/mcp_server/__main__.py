@@ -17,6 +17,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 from starlette.types import Receive, Scope, Send
 
+from app.config import MCPTransport
 from app.db.connection import create_pool
 from app.mcp_server.config import ServerSettings
 from app.mcp_server.server import build_server
@@ -57,7 +58,7 @@ async def run(settings: ServerSettings, transport: str) -> None:
     try:
         async with httpx.AsyncClient(timeout=5) as http:
             server = build_server(pool, settings, http)
-            if transport == "stdio":
+            if transport == MCPTransport.STDIO:
                 async with stdio_server() as (read, write):
                     await server.run(read, write, server.create_initialization_options())
             else:

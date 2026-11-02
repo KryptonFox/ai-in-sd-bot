@@ -1,6 +1,7 @@
 import logging
 import unicodedata
 from collections.abc import Awaitable, Callable
+from heapq import nlargest
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -14,7 +15,9 @@ DOMINANT_POPULATION_RATIO = 20
 
 
 def normalized_name(value: str) -> str:
-    return " ".join(unicodedata.normalize("NFKC", value).casefold().replace("ё", "е").split())
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    normalized = normalized.replace("ё", "е")
+    return " ".join(normalized.split())
 
 
 class GeoLocation(BaseModel):
@@ -57,7 +60,13 @@ class LocationResolver:
         city = query.strip()
         if not 1 <= len(city) <= 100:
             raise ToolFailure("invalid_city", "Укажите город длиной от 1 до 100 символов.")
+
         name, _, qualifier = city.partition(",")
+        locations = await self._search(city)
+
+        return self._select_locations(locations, name, qualifier)
+
+    async def _search(self, city: str) -> list[GeoLocation]:
         try:
             data = await self._fetch(
                 self.url, {"name": city, "count": 10, "language": "ru", "format": "json"}
@@ -67,78 +76,104 @@ class LocationResolver:
                 error.__cause__, httpx.HTTPError
             ):
                 raise
+
             logger.warning("geocoding_fallback provider=photon reason=%s", error.code)
-            data = await self._photon(city)
+            return await self._photon(city)
+
         raw = data.get("results", [])
         if not isinstance(raw, list):
             raise ToolFailure("weather_unavailable", "Геокодирование вернуло некорректные данные.")
+
         locations: list[GeoLocation] = []
+
         for item in raw:
             try:
                 locations.append(GeoLocation.model_validate(item))
             except ValidationError:
                 continue
+
         if raw and not locations:
             raise ToolFailure("weather_unavailable", "Геокодирование вернуло некорректные данные.")
-        qualified = (
-            [
-                place
-                for place in locations
-                if normalized_name(qualifier)
-                in {
+
+        return locations
+
+    @classmethod
+    def _select_locations(
+        cls,
+        locations: list[GeoLocation],
+        name: str,
+        qualifier: str,
+    ) -> list[GeoLocation]:
+        normalized_qualifier = normalized_name(qualifier)
+        if normalized_qualifier:
+            qualified: list[GeoLocation] = []
+
+            for place in locations:
+                geographic_names = {
                     normalized_name(place.country),
                     normalized_name(place.admin1 or ""),
                     normalized_name(place.country_code or ""),
                 }
-            ]
-            if qualifier.strip()
-            else []
-        )
-        if qualified:
-            locations = qualified
+                if normalized_qualifier in geographic_names:
+                    qualified.append(place)
+
+            if qualified:
+                locations = qualified
+
         unique: dict[tuple[object, ...], GeoLocation] = {}
+
         for place in locations:
-            key = (
-                (place.id,)
-                if place.id is not None
-                else (
+            if place.id is not None:
+                key = (place.id,)
+            else:
+                key = (
                     normalized_name(place.name),
                     normalized_name(place.country),
                     round(place.latitude, 5),
                     round(place.longitude, 5),
                 )
-            )
+
             unique.setdefault(key, place)
+
+        normalized_city = normalized_name(name)
         exact = [
-            place
-            for place in unique.values()
-            if normalized_name(place.name) == normalized_name(name)
+            place for place in unique.values() if normalized_name(place.name) == normalized_city
         ]
-        matches = exact or list(unique.values())
-        return self._prefer_major_city(matches) if exact else matches
+        if exact:
+            return cls._prefer_major_city(exact)
+
+        return list(unique.values())
 
     @staticmethod
     def _prefer_major_city(locations: list[GeoLocation]) -> list[GeoLocation]:
         if len(locations) < 2:
             return locations
-        ranked = sorted(locations, key=lambda place: place.population, reverse=True)
-        largest, runner_up = ranked[:2]
+
+        largest, runner_up = nlargest(
+            2,
+            locations,
+            key=lambda place: place.population,
+        )
+        dominance_threshold = DOMINANT_POPULATION_RATIO * max(runner_up.population, 1)
         if (
             largest.population >= MAJOR_CITY_POPULATION
             and runner_up.population < MAJOR_CITY_POPULATION
-            and largest.population >= DOMINANT_POPULATION_RATIO * max(runner_up.population, 1)
+            and largest.population >= dominance_threshold
         ):
             return [largest]
+
         return locations
 
-    async def _photon(self, city: str) -> dict[str, object]:
+    async def _photon(self, city: str) -> list[GeoLocation]:
         data = await self._fetch(
             "https://photon.komoot.io/api", {"q": city, "limit": 10, "layer": "city"}
         )
         raw = data.get("features")
         if not isinstance(raw, list):
             raise ToolFailure("weather_unavailable", "Геокодирование вернуло некорректные данные.")
+
         features: list[PhotonFeature] = []
+
         for item in raw:
             try:
                 feature = PhotonFeature.model_validate(item)
@@ -146,12 +181,14 @@ class LocationResolver:
                     features.append(feature)
             except ValidationError:
                 continue
+
         urban = [item for item in features if item.properties.osm_value in {"city", "town"}]
         features = urban or features
         name = normalized_name(city.partition(",")[0])
         exact = [item for item in features if normalized_name(item.properties.name) == name]
         features = exact or features
-        locations: list[dict[str, object]] = []
+        locations: list[GeoLocation] = []
+
         for feature in features:
             try:
                 place = feature.properties
@@ -164,9 +201,11 @@ class LocationResolver:
                     latitude=latitude,
                     longitude=longitude,
                 )
-                locations.append(location.model_dump())
+                locations.append(location)
             except ValidationError:
                 continue
+
         if raw and not locations:
             raise ToolFailure("weather_unavailable", "Геокодирование вернуло некорректные данные.")
-        return {"results": locations}
+
+        return locations

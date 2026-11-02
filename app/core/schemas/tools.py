@@ -1,9 +1,30 @@
 from datetime import date, datetime
-from typing import Literal
+from enum import StrEnum
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 DEFAULT_WEATHER_CITY = "Санкт-Петербург"
+
+
+def _validate_iso_date(value: str) -> str:
+    parsed = datetime.strptime(value, "%Y-%m-%d")
+    if parsed.strftime("%Y-%m-%d") != value:
+        raise ValueError("date must be a real date in YYYY-MM-DD format")
+    return value
+
+
+ISODate = Annotated[
+    str,
+    Field(pattern=r"^\d{4}-\d{2}-\d{2}$", json_schema_extra={"format": "date"}),
+    AfterValidator(_validate_iso_date),
+]
+
+
+class WeatherStatus(StrEnum):
+    OK = "ok"
+    AMBIGUOUS = "ambiguous"
+    NOT_FOUND = "not_found"
 
 
 class ToolDTO(BaseModel):
@@ -18,21 +39,12 @@ class WeatherArguments(ToolDTO):
         pattern=r"\S",
         description="Город. Если не указан — Санкт-Петербург.",
     )
-    date: str | None = Field(
+    date: ISODate | None = Field(
         default=None,
-        pattern=r"^\d{4}-\d{2}-\d{2}$",
-        json_schema_extra={"format": "date"},
         description=(
             "Дата прогноза YYYY-MM-DD. Если не задана — текущая погода и прогноз на сегодня."
         ),
     )
-
-    @field_validator("date")
-    @classmethod
-    def validate_forecast_date(cls, value: str | None) -> str | None:
-        if value is not None and datetime.strptime(value, "%Y-%m-%d").strftime("%Y-%m-%d") != value:
-            raise ValueError("date must be a real date in YYYY-MM-DD format")
-        return value
 
     @field_validator("city", mode="before")
     @classmethod
@@ -41,44 +53,25 @@ class WeatherArguments(ToolDTO):
 
 
 class ScheduleArguments(ToolDTO):
-    date: str | None = Field(
+    date: ISODate | None = Field(
         default=None,
-        pattern=r"^\d{4}-\d{2}-\d{2}$",
-        json_schema_extra={"format": "date"},
         description="Дата YYYY-MM-DD. Если не задана — сегодня в часовом поясе расписания.",
     )
 
-    @field_validator("date")
-    @classmethod
-    def validate_date(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        try:
-            parsed = datetime.strptime(value, "%Y-%m-%d")
-        except ValueError as exc:
-            raise ValueError("date must be a real date in YYYY-MM-DD format") from exc
-        if parsed.strftime("%Y-%m-%d") != value:
-            raise ValueError("date must be a real date in YYYY-MM-DD format")
-        return value
-
 
 class ScheduleWeekArguments(ToolDTO):
-    date: str | None = Field(
+    date: ISODate | None = Field(
         default=None,
-        pattern=r"^\d{4}-\d{2}-\d{2}$",
-        json_schema_extra={"format": "date"},
         description=(
             "Дата внутри конкретной недели. Для относительных недель используй week_offset."
         ),
     )
     week_offset: int = Field(
-        default=0, ge=-52, le=52, description="0 — эта неделя, 1 — следующая, 2 — через две недели."
+        default=0,
+        ge=-52,
+        le=52,
+        description="0 — эта неделя, 1 — следующая, 2 — через две недели.",
     )
-
-    @field_validator("date")
-    @classmethod
-    def validate_week_date(cls, value: str | None) -> str | None:
-        return ScheduleArguments(date=value).date if value is not None else None
 
     @model_validator(mode="after")
     def validate_selection(self) -> "ScheduleWeekArguments":
@@ -189,7 +182,7 @@ class WeatherResult(ToolDTO):
             ]
         },
     )
-    status: Literal["ok", "ambiguous", "not_found"]
+    status: WeatherStatus
     city: str | None = None
     country: str | None = None
     temperature: float | None = Field(default=None, allow_inf_nan=False)
@@ -206,7 +199,7 @@ class WeatherResult(ToolDTO):
 
     @model_validator(mode="after")
     def validate_status_fields(self) -> "WeatherResult":
-        if self.status == "ok" and any(
+        if self.status == WeatherStatus.OK and any(
             value is None
             for value in (
                 self.city,
@@ -220,7 +213,7 @@ class WeatherResult(ToolDTO):
             )
         ):
             raise ValueError("ok weather results must contain complete current conditions")
-        if self.status == "ambiguous" and len(self.candidates) < 2:
+        if self.status == WeatherStatus.AMBIGUOUS and len(self.candidates) < 2:
             raise ValueError("ambiguous weather results must contain multiple candidates")
         return self
 

@@ -12,13 +12,39 @@ from app.core.clock import FrozenClock, SystemClock
 from app.core.schemas.tools import (
     ReminderArguments,
     ScheduleArguments,
+    ScheduleWeekArguments,
     ToolFailure,
     WeatherArguments,
     WeatherResult,
+    WeatherStatus,
 )
 from app.core.timezones import normalize_reminder
 from app.mcp_server.schedule import ScheduleService
 from app.mcp_server.weather import WeatherService
+
+
+@pytest.mark.parametrize("schema", [WeatherArguments, ScheduleArguments, ScheduleWeekArguments])
+@pytest.mark.parametrize("value", ["2026-02-29", "2028-02-30", "2026-1-02", "2026-11-02T12:00:00"])
+def test_calendar_arguments_share_strict_date_validation(
+    schema: type[WeatherArguments] | type[ScheduleArguments] | type[ScheduleWeekArguments],
+    value: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        schema.model_validate({"date": value})
+
+
+@pytest.mark.parametrize("schema", [WeatherArguments, ScheduleArguments, ScheduleWeekArguments])
+def test_calendar_arguments_accept_leap_day_and_preserve_optional_date(
+    schema: type[WeatherArguments] | type[ScheduleArguments] | type[ScheduleWeekArguments],
+) -> None:
+    assert schema.model_validate({"date": "2028-02-29"}).date == "2028-02-29"
+    assert schema.model_validate({}).date is None
+
+    properties = schema.model_json_schema()["properties"]
+    date_schema = properties["date"]["anyOf"][0]
+    assert date_schema["type"] == "string"
+    assert date_schema["format"] == "date"
+    assert "$ref" not in date_schema
 
 
 def test_tool_argument_dtos_strip_and_reject_invalid_values() -> None:
@@ -52,9 +78,9 @@ def test_tool_argument_dtos_strip_and_reject_invalid_values() -> None:
 
 def test_weather_result_requires_fields_for_each_status() -> None:
     with pytest.raises(ValidationError):
-        WeatherResult(status="ok", city="Paris")
+        WeatherResult(status=WeatherStatus.OK, city="Paris")
     with pytest.raises(ValidationError):
-        WeatherResult(status="ambiguous", candidates=[])
+        WeatherResult(status=WeatherStatus.AMBIGUOUS, candidates=[])
 
 
 def test_weather_schema_enforces_status_requirements_and_candidate_count() -> None:
@@ -98,13 +124,25 @@ def test_normalize_reminder_rejects_past_missing_timezone_and_offset_mismatch() 
     now = datetime(2026, 3, 1, 12, tzinfo=UTC)
     base = {"text": "проверить"}
     with pytest.raises(ToolFailure) as past:
-        normalize_reminder({**base, "remind_at": "2026-03-01T11:00:00+01:00"}, "Europe/Berlin", now)
+        normalize_reminder(
+            {**base, "remind_at": "2026-03-01T11:00:00+01:00"},
+            "Europe/Berlin",
+            now,
+        )
     assert past.value.code == "past_time"
     with pytest.raises(ToolFailure) as no_zone:
-        normalize_reminder({**base, "remind_at": "2026-03-01T15:00:00+01:00"}, None, now)
+        normalize_reminder(
+            {**base, "remind_at": "2026-03-01T15:00:00+01:00"},
+            None,
+            now,
+        )
     assert no_zone.value.code == "timezone_required"
     with pytest.raises(ToolFailure) as mismatch:
-        normalize_reminder({**base, "remind_at": "2026-03-01T15:00:00+03:00"}, "Europe/Berlin", now)
+        normalize_reminder(
+            {**base, "remind_at": "2026-03-01T15:00:00+03:00"},
+            "Europe/Berlin",
+            now,
+        )
     assert mismatch.value.code == "timezone_mismatch"
 
 

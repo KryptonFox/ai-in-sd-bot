@@ -1,8 +1,15 @@
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.schemas.message import ChatMessage, ToolCall
+
+
+class FinishReason(StrEnum):
+    STOP = "stop"
+    LENGTH = "length"
+    TOOL_CALLS = "tool_calls"
 
 
 class ToolDefinition(BaseModel):
@@ -27,7 +34,7 @@ class LLMResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     content: str
-    finish_reason: str = "stop"
+    finish_reason: FinishReason = FinishReason.STOP
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None

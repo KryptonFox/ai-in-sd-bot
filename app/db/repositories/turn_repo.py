@@ -6,11 +6,13 @@ import asyncpg
 
 from app.core.schemas.agent import (
     Acquired,
+    AgentDecision,
     AgentResult,
     EventContext,
     InProgress,
     Replay,
     TurnClaim,
+    TurnState,
 )
 from app.core.schemas.message import ChatMessage
 from app.db.repositories import event_repo
@@ -38,7 +40,11 @@ class PostgresTurnStore:
         if used:
             await self.interrupt(context, "interrupted", now)
             return Replay(
-                AgentResult(text=INTERRUPTED_TEXT, decision="error", reason="interrupted")
+                AgentResult(
+                    text=INTERRUPTED_TEXT,
+                    decision=AgentDecision.ERROR,
+                    reason="interrupted",
+                )
             )
         return Acquired(used)
 
@@ -60,7 +66,7 @@ class PostgresTurnStore:
                 context.user_id,
                 context.event_id,
             )
-            if row is None or row["state"] != "processing":
+            if row is None or row["state"] != TurnState.PROCESSING:
                 raise RuntimeError("turn_not_processing")
             for item in (message, assistant):
                 await conn.execute(
@@ -82,7 +88,9 @@ class PostgresTurnStore:
                 decision=result.decision,
                 tool_name=result.tool_name,
                 arguments=result.arguments,
-                validation=result.reason if result.decision in {"error", "clarify"} else "ok",
+                validation=result.reason
+                if result.decision in {AgentDecision.ERROR, AgentDecision.CLARIFY}
+                else "ok",
                 execution=result.reason,
                 reason=result.reason,
                 duration_ms=duration_ms,
@@ -98,7 +106,11 @@ class PostgresTurnStore:
             )
 
     async def interrupt(self, context: EventContext, reason: str, now: datetime) -> bool:
-        result = AgentResult(text=INTERRUPTED_TEXT, decision="error", reason="interrupted")
+        result = AgentResult(
+            text=INTERRUPTED_TEXT,
+            decision=AgentDecision.ERROR,
+            reason="interrupted",
+        )
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 "UPDATE agent_events SET state=CASE WHEN calls_used>0 THEN 'interrupted' "
@@ -117,7 +129,7 @@ class PostgresTurnStore:
                     user_id=context.user_id,
                     event_id=context.event_id,
                     request_id=context.request_id,
-                    decision="error",
+                    decision=AgentDecision.ERROR,
                     validation=reason,
                     execution="interrupted",
                     reason=reason,
@@ -128,7 +140,11 @@ class PostgresTurnStore:
         return row is not None and row["calls_used"] > 0
 
     async def recover(self, now: datetime) -> None:
-        result = AgentResult(text=INTERRUPTED_TEXT, decision="error", reason="interrupted")
+        result = AgentResult(
+            text=INTERRUPTED_TEXT,
+            decision=AgentDecision.ERROR,
+            reason="interrupted",
+        )
         async with self.pool.acquire() as conn:
             await conn.execute(
                 "UPDATE agent_events SET state='interrupted',result=$1::jsonb,updated_at=$2 "

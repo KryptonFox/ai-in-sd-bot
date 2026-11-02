@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from datetime import date, timedelta
 from typing import cast
 from zoneinfo import ZoneInfo
 
@@ -15,6 +15,7 @@ from app.core.schemas.tools import (
     DailyForecast,
     ToolFailure,
     WeatherResult,
+    WeatherStatus,
 )
 from app.mcp_server.conditions import weather_condition
 from app.mcp_server.geocoding import GeoLocation, LocationResolver
@@ -24,7 +25,12 @@ class WeatherService:
     geocoding_url = "https://geocoding-api.open-meteo.com/v1/search"
     forecast_url = "https://api.open-meteo.com/v1/forecast"
 
-    def __init__(self, client: httpx.AsyncClient, *, clock: Clock | None = None) -> None:
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        clock: Clock | None = None,
+    ) -> None:
         self._client = client
         self._clock = clock or SystemClock()
         self._locations = LocationResolver(self._fetch)
@@ -33,6 +39,7 @@ class WeatherService:
         self, city: str = DEFAULT_WEATHER_CITY, forecast_date: str | None = None
     ) -> WeatherResult:
         requested = date.fromisoformat(forecast_date) if forecast_date is not None else None
+
         try:
             async with asyncio.timeout(8):
                 return await self._resolve_weather(city, requested)
@@ -41,33 +48,54 @@ class WeatherService:
                 "weather_unavailable", "Сервис погоды не ответил вовремя. Попробуйте позже."
             ) from None
 
-    async def _resolve_weather(self, city: str, requested: date | None) -> WeatherResult:
+    async def _resolve_weather(
+        self,
+        city: str,
+        requested: date | None,
+    ) -> WeatherResult:
         locations = await self._locations.resolve(city)
         if not locations:
-            return WeatherResult(status="not_found")
+            return WeatherResult(status=WeatherStatus.NOT_FOUND)
+
         if len(locations) > 1:
             return WeatherResult(
-                status="ambiguous",
+                status=WeatherStatus.AMBIGUOUS,
                 candidates=[
-                    CityCandidate(name=place.name, country=place.country, region=place.admin1)
+                    CityCandidate(
+                        name=place.name,
+                        country=place.country,
+                        region=place.admin1,
+                    )
                     for place in locations
                 ],
             )
+
         return await self._weather_for(locations[0], requested)
 
-    async def _fetch(self, url: str, params: dict[str, str | int]) -> dict[str, object]:
+    async def _fetch(
+        self,
+        url: str,
+        params: dict[str, str | int],
+    ) -> dict[str, object]:
         response = await self._get(url, params)
+
         try:
             data = response.json()
         except ValueError:
             raise ToolFailure(
                 "weather_unavailable", "Сервис погоды вернул некорректные данные."
             ) from None
+
         if not isinstance(data, dict):
             raise ToolFailure("weather_unavailable", "Сервис погоды вернул некорректные данные.")
+
         return cast(dict[str, object], data)
 
-    async def _weather_for(self, location: GeoLocation, requested: date | None) -> WeatherResult:
+    async def _weather_for(
+        self,
+        location: GeoLocation,
+        requested: date | None,
+    ) -> WeatherResult:
         params: dict[str, str | int] = {
             "latitude": str(location.latitude),
             "longitude": str(location.longitude),
@@ -83,6 +111,14 @@ class WeatherService:
             "wind_speed_unit": "kmh",
         }
         data = await self._fetch(self.forecast_url, params)
+        return self._weather_result(location, requested, data)
+
+    def _weather_result(
+        self,
+        location: GeoLocation,
+        requested: date | None,
+        data: dict[str, object],
+    ) -> WeatherResult:
         current = data.get("current")
         units = data.get("current_units")
         timezone = data.get("timezone")
@@ -95,36 +131,47 @@ class WeatherService:
             or not timezone
         ):
             raise ToolFailure("weather_unavailable", "Сервис погоды вернул неполные данные.")
+
         try:
             today = self._clock.now().astimezone(ZoneInfo(timezone)).date()
             target = requested or today
-            if not 0 <= (target - today).days < 16:
+            days_ahead = (target - today).days
+            if not 0 <= days_ahead < 16:
                 raise ToolFailure(
                     "forecast_date_unavailable",
                     "Прогноз доступен только на сегодня и следующие 15 дней.",
                 )
+
+            forecasts = self._daily_forecasts(data, today, target)
+            weather_code = int(current["weather_code"])
+
             return WeatherResult(
-                status="ok",
+                status=WeatherStatus.OK,
                 city=location.name,
                 country=location.country,
                 temperature=float(current["temperature_2m"]),
-                weather_code=int(current["weather_code"]),
-                condition=weather_condition(int(current["weather_code"])),
+                weather_code=weather_code,
+                condition=weather_condition(weather_code),
                 wind_speed=float(current["wind_speed_10m"]),
                 wind_unit=units.get("wind_speed_10m", "km/h"),
                 observed_at=str(current["time"]),
                 timezone=timezone,
-                today=self._forecast(data, today),
+                today=forecasts[today],
                 requested_date=target,
-                forecast=self._forecast(data, target),
+                forecast=forecasts[target],
             )
         except (ValueError, TypeError, KeyError, ValidationError) as exc:
             raise ToolFailure(
                 "weather_unavailable", "Сервис погоды вернул некорректные данные."
             ) from exc
 
-    async def _get(self, url: str, params: dict[str, str | int]) -> httpx.Response:
+    async def _get(
+        self,
+        url: str,
+        params: dict[str, str | int],
+    ) -> httpx.Response:
         last_error: Exception | None = None
+
         for attempt in range(2):
             try:
                 response = await self._client.get(
@@ -142,62 +189,84 @@ class WeatherService:
                     raise ToolFailure(
                         "weather_unavailable", "Сервис погоды сейчас недоступен."
                     ) from exc
+
                 last_error = exc
             except httpx.HTTPError as exc:
                 last_error = exc
+
             if attempt == 0:
                 await asyncio.sleep(0)
+
         raise ToolFailure("weather_unavailable", "Сервис погоды сейчас недоступен.") from last_error
 
-    def _forecast(self, data: dict[str, object], target: date) -> DailyForecast | None:
+    def _daily_forecasts(
+        self,
+        data: dict[str, object],
+        today: date,
+        target: date,
+    ) -> dict[date, DailyForecast | None]:
+        forecasts: dict[date, DailyForecast | None] = {today: None, target: None}
         daily = data.get("daily")
         if daily is None:
-            return None
+            return forecasts
+
         if not isinstance(daily, dict):
             raise ValueError("invalid_daily_forecast")
+
         dates = daily.get("time")
         chances = daily.get("precipitation_probability_max")
         amounts = daily.get("precipitation_sum")
         units = data.get("daily_units")
         if not isinstance(dates, list) or not dates:
             raise ValueError("invalid_daily_forecast")
-        if not all(
-            isinstance(values, list) and len(values) == len(dates) for values in (chances, amounts)
-        ):
+
+        if not isinstance(chances, list) or len(chances) != len(dates):
             raise ValueError("invalid_daily_forecast")
-        assert isinstance(chances, list) and isinstance(amounts, list)
-        parsed_dates = [date.fromisoformat(value) for value in dates]
-        timezone = data.get("timezone")
-        if not isinstance(timezone, str):
-            raise ValueError("missing_timezone")
-        today = self._clock.now().astimezone(ZoneInfo(timezone)).date()
-        if parsed_dates[0] != today or any(
-            (value - today).days != index for index, value in enumerate(parsed_dates)
-        ):
-            raise ValueError("forecast_date_mismatch")
-        if target not in parsed_dates:
-            return None
-        index = parsed_dates.index(target)
-        if chances[index] is None or amounts[index] is None:
-            return None
-        if (
-            not isinstance(units, dict)
-            or units.get("precipitation_sum") != "mm"
-            or units.get("precipitation_probability_max") != "%"
-        ):
-            raise ValueError("invalid_daily_units")
-        return DailyForecast.model_validate(
-            {
-                "date": target,
-                "precipitation_probability": chances[index],
-                "precipitation": amounts[index],
-                **self._daily_conditions(daily, units, index, len(dates)),
-            }
-        )
+
+        if not isinstance(amounts, list) or len(amounts) != len(dates):
+            raise ValueError("invalid_daily_forecast")
+
+        date_indexes: dict[date, int] = {}
+        expected_date = today
+
+        for index, value in enumerate(dates):
+            forecast_date = date.fromisoformat(value)
+            if forecast_date != expected_date:
+                raise ValueError("forecast_date_mismatch")
+
+            date_indexes[forecast_date] = index
+            expected_date += timedelta(days=1)
+
+        for forecast_date in forecasts:
+            index = date_indexes.get(forecast_date)
+            if index is None or chances[index] is None or amounts[index] is None:
+                continue
+
+            if (
+                not isinstance(units, dict)
+                or units.get("precipitation_sum") != "mm"
+                or units.get("precipitation_probability_max") != "%"
+            ):
+                raise ValueError("invalid_daily_units")
+
+            conditions = self._daily_conditions(daily, units, index, len(dates))
+            forecasts[forecast_date] = DailyForecast.model_validate(
+                {
+                    "date": forecast_date,
+                    "precipitation_probability": chances[index],
+                    "precipitation": amounts[index],
+                    **conditions,
+                }
+            )
+
+        return forecasts
 
     @staticmethod
     def _daily_conditions(
-        daily: dict[str, object], units: dict[str, object], index: int, count: int
+        daily: dict[str, object],
+        units: dict[str, object],
+        index: int,
+        count: int,
     ) -> dict[str, object]:
         fields = {
             "temperature_2m_min": ("temperature_min", "°C"),
@@ -206,14 +275,19 @@ class WeatherService:
             "wind_speed_10m_max": ("wind_speed_max", "km/h"),
         }
         result: dict[str, object] = {}
+
         for source, (field, unit) in fields.items():
             values = daily.get(source)
             if values is None:
                 continue
+
             if not isinstance(values, list) or len(values) != count or units.get(source) != unit:
                 raise ValueError("invalid_daily_conditions")
+
             result[field] = values[index]
+
         code = result.get("weather_code")
         if isinstance(code, int):
             result["condition"] = weather_condition(code)
+
         return result

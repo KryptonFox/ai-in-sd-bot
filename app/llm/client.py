@@ -27,7 +27,7 @@ from app.core.exceptions import (
     LLMServiceError,
     LLMTimeoutError,
 )
-from app.core.schemas.llm import LLMRequest, LLMResponse, ToolCall
+from app.core.schemas.llm import FinishReason, LLMRequest, LLMResponse, ToolCall
 from app.core.schemas.message import MessageRole
 from app.llm.base import BaseLLMClient
 from app.llm.context_length import (
@@ -36,7 +36,11 @@ from app.llm.context_length import (
 from app.llm.context_length import (
     ContextLengthResolver as ContextLengthResolver,
 )
-from app.llm.diagnostics import api_status_error_details, generation_error_details
+from app.llm.diagnostics import (
+    api_status_error_details,
+    generation_error_details,
+    is_repeated_assistant_role,
+)
 
 logger = logging.getLogger("app.llm")
 
@@ -60,22 +64,22 @@ def _normalize_stream_roles(payload: dict[str, Any]) -> None:
     choices = payload.get("choices")
     if not isinstance(choices, list):
         return
+
     missing = repeated = 0
+
     for choice in choices:
         message = choice.get("message") if isinstance(choice, dict) else None
         if not isinstance(message, dict):
             continue
+
         role = message.get("role")
         if role is None:
             message["role"] = "assistant"
             missing += 1
-        elif (
-            isinstance(role, str)
-            and len(role) > len("assistant")
-            and role == "assistant" * (len(role) // len("assistant"))
-        ):
+        elif isinstance(role, str) and is_repeated_assistant_role(role):
             message["role"] = "assistant"
             repeated += 1
+
     if missing or repeated:
         logger.info(
             "[%s] llm_stream_role_normalized missing=%d repeated=%d",
@@ -128,11 +132,13 @@ class OpenAIClient(BaseLLMClient):
     @staticmethod
     def _payload(request: LLMRequest) -> dict[str, Any]:
         messages: list[dict[str, Any]] = []
+
         for msg in request.messages:
             item: dict[str, Any] = {"role": msg.role.value, "content": msg.content}
             if msg.tool_calls:
                 if msg.role != MessageRole.ASSISTANT:
                     raise ValueError("tool_calls require assistant")
+
                 item["tool_calls"] = [
                     {
                         "id": call.id,
@@ -140,37 +146,51 @@ class OpenAIClient(BaseLLMClient):
                         "function": {
                             "name": call.name,
                             "arguments": json.dumps(
-                                call.arguments, ensure_ascii=False, allow_nan=False
+                                call.arguments,
+                                ensure_ascii=False,
+                                allow_nan=False,
                             ),
                         },
                     }
                     for call in msg.tool_calls
                 ]
+
             if msg.role == MessageRole.TOOL:
                 if not msg.tool_call_id:
                     raise ValueError("tool result requires tool_call_id")
+
                 item["tool_call_id"] = msg.tool_call_id
+
             messages.append(item)
+
         payload: dict[str, Any] = {
             "messages": messages,
             "temperature": request.temperature,
         }
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
+
         if request.tools:
             payload["tools"] = [
                 {"type": "function", "function": tool.model_dump(exclude_none=True)}
                 for tool in request.tools
             ]
+
         return payload
 
     @staticmethod
-    def _response(data: ChatCompletion, *, streamed: bool = False) -> LLMResponse:
+    def _response(
+        data: ChatCompletion,
+        *,
+        streamed: bool = False,
+    ) -> LLMResponse:
         try:
             payload = data.model_dump(warnings=False)
             if streamed:
                 _normalize_stream_roles(payload)
+
             validated = ChatCompletion.model_validate(payload)
+
             return OpenAIClient._parse_response(validated)
         except (ValueError, TypeError, AttributeError) as error:
             raise LLMServiceError(
@@ -185,11 +205,17 @@ class OpenAIClient(BaseLLMClient):
     def _parse_response(data: ChatCompletion) -> LLMResponse:
         if not data.choices:
             raise LLMEmptyResponseError("Модель вернула пустой ответ.")
+
         choice = data.choices[0]
         message = choice.message
         if message.refusal or choice.finish_reason == "content_filter":
             raise LLMRefusalError("Модель отказалась выполнять запрос.")
-        if choice.finish_reason not in {"stop", "length", "tool_calls"}:
+
+        if choice.finish_reason not in {
+            FinishReason.STOP,
+            FinishReason.LENGTH,
+            FinishReason.TOOL_CALLS,
+        }:
             raise LLMServiceError(
                 "API вернул неподдерживаемую причину завершения ответа.",
                 code=LLMErrorCode.INVALID_RESPONSE,
@@ -199,26 +225,40 @@ class OpenAIClient(BaseLLMClient):
                     "expected=stop|length|tool_calls|content_filter"
                 ),
             )
+
         content = message.content or ""
         calls = []
+
         for position, call in enumerate(message.tool_calls or []):
             if call.type != "function":
                 raise ValueError("unsupported_tool_call")
+
             arguments = OpenAIClient._tool_arguments(call.function.arguments, position)
-            calls.append(ToolCall(id=call.id, name=call.function.name, arguments=arguments))
-        if choice.finish_reason == "tool_calls" and not calls:
+            calls.append(
+                ToolCall(
+                    id=call.id,
+                    name=call.function.name,
+                    arguments=arguments,
+                )
+            )
+
+        if choice.finish_reason == FinishReason.TOOL_CALLS and not calls:
             raise ValueError("missing_tool_calls")
+
         if not content.strip() and not calls:
-            if choice.finish_reason == "length":
+            if choice.finish_reason == FinishReason.LENGTH:
                 raise LLMServiceError(
                     "Лимит генерации исчерпан до появления публичного ответа.",
                     code=LLMErrorCode.GENERATION_LIMIT,
                 )
+
             raise LLMEmptyResponseError("Модель вернула пустой ответ.")
+
         usage = data.usage
+
         return LLMResponse(
             content=content,
-            finish_reason=choice.finish_reason,
+            finish_reason=FinishReason(choice.finish_reason),
             prompt_tokens=usage.prompt_tokens if usage else None,
             completion_tokens=usage.completion_tokens if usage else None,
             total_tokens=usage.total_tokens if usage else None,
@@ -231,6 +271,7 @@ class OpenAIClient(BaseLLMClient):
             arguments = json.loads(value, parse_constant=_reject_json_constant)
             if not isinstance(arguments, dict):
                 raise ValueError("tool arguments must be an object")
+
             return arguments
         except (ValueError, TypeError) as error:
             raise LLMServiceError(
@@ -300,14 +341,17 @@ class OpenAIClient(BaseLLMClient):
             )
 
         stage = "request_payload"
+
         try:
             async with asyncio.timeout(self._settings.llm_timeout):
                 payload = self._payload(request)
                 if self._settings.llm_streaming:
                     stage = "stream_decode"
                     return await self._stream_response(payload, model)
+
                 stage = "response_decode"
                 data = await self._client.chat.completions.create(model=model, **payload)
+
                 return self._response(data)
         except (APITimeoutError, TimeoutError, httpx2.TimeoutException):
             raise LLMTimeoutError("Превышено время ожидания ответа языковой модели.") from None
@@ -342,13 +386,21 @@ class OpenAIClient(BaseLLMClient):
                 diagnostic_details=f"stage={stage}; {generation_error_details(error)}",
             ) from None
 
-    async def _stream_response(self, payload: dict[str, Any], model: str) -> LLMResponse:
+    async def _stream_response(
+        self,
+        payload: dict[str, Any],
+        model: str,
+    ) -> LLMResponse:
         async with self._client.chat.completions.stream(
-            model=model, stream_options={"include_usage": True}, **payload
+            model=model,
+            stream_options={"include_usage": True},
+            **payload,
         ) as stream:
             await stream.until_done()
+
             try:
                 completion = stream.current_completion_snapshot
             except AssertionError:
                 raise LLMEmptyResponseError("Модель вернула пустой поток ответа.") from None
+
             return self._response(completion, streamed=True)

@@ -51,6 +51,7 @@ def prepare_env(
         mcp_secret = values.get("MCP_SHARED_SECRET") or secrets.token_urlsafe(32)
         if len(mcp_secret) < 32:
             raise ConfigError("MCP_SHARED_SECRET: задайте секрет длиной не менее 32 символов.")
+
         if existing.get("MCP_SHARED_SECRET") != mcp_secret:
             updates["MCP_SHARED_SECRET"] = mcp_secret
 
@@ -73,11 +74,14 @@ def prepare_env(
         set_key(path, key, value, quote_mode="always", encoding="utf-8")
 
     path.chmod(0o600)
+
     return path
 
 
 def compose_command(root: Path) -> list[str]:
-    project = "itmo-local-" + hashlib.sha256(str(root.resolve()).encode("utf-8")).hexdigest()[:10]
+    root_bytes = str(root.resolve()).encode("utf-8")
+    project_digest = hashlib.sha256(root_bytes).hexdigest()[:10]
+    project = f"itmo-local-{project_digest}"
 
     return [
         "docker",
@@ -149,4 +153,5 @@ def local_main(root: Path, action: str, setup_only: bool) -> int:
         action
     ]
     print(run_command([*compose_command(root), *command], label="Управление локальной БД"))
+
     return 0

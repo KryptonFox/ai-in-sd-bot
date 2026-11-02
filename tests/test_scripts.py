@@ -296,6 +296,9 @@ def test_deploy_archive_never_contains_env_or_keys(tmp_path):
     (data / "schedule.json").write_text("[]", encoding="utf-8")
     (tmp_path / "app" / ".env").write_text("SECRET=yes", encoding="utf-8")
     (tmp_path / ".env.cloud").write_text("SECRET=yes", encoding="utf-8")
+    private_data = tmp_path / ".local"
+    private_data.mkdir()
+    (private_data / "schedule.json").write_text("PRIVATE_SCHEDULE", encoding="utf-8")
     (tmp_path / ".deploy").mkdir()
     (tmp_path / ".deploy" / "id_ed25519").write_text("PRIVATE", encoding="utf-8")
 
@@ -303,6 +306,8 @@ def test_deploy_archive_never_contains_env_or_keys(tmp_path):
 
     with tarfile.open(path) as archive:
         names = archive.getnames()
+
+    assert ".local/schedule.json" not in names
 
     assert "app/__init__.py" in names
     assert {

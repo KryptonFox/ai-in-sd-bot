@@ -1,3 +1,5 @@
+import pytest
+
 from app.core.schemas.message import MessageRole
 from app.modes.base import BotMode, FewShotExample
 from app.modes.definitions import (
@@ -79,17 +81,19 @@ def test_rctf_and_shared_rules_once():
         COMPACTION_PROMPT
     ]:
         positions = []
+
         for heading in ("Role:", "Context:", "Task:", "Format:"):
             assert prompt.splitlines().count(heading) == 1
             positions.append(prompt.index(heading))
+
         assert positions == sorted(positions)
         assert prompt.count(SAFETY_TASK) == 1
         assert prompt.count(TRUST_CONTEXT) == 1
+
     assert TELEGRAM_FORMATTING_PROMPT not in COMPACTION_PROMPT
 
 
 def test_rctf_requires_nonempty_fields():
-    import pytest
     from pydantic import ValidationError
 
     from app.prompts.builder import PromptParts
@@ -109,6 +113,73 @@ def test_relevant_examples_are_bounded_and_keep_languages():
         assert len(messages) == 3
         assert "```" + marker in messages[-1].content
         assert sum(len(m.content) for m in messages[1:]) <= 1800
+
     math = STUDY_MODE.build_initial_messages("Объясни индукцию")
     assert "```" not in math[-1].content
     assert len(STUDY_MODE.build_initial_messages("Привет")) == 1
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        (None, "Первый"),
+        ("PYTHON", "Первый"),
+        ("python список", "Больше совпадений"),
+        ("Другой вопрос", "Без ключевых слов"),
+        ("", "Без ключевых слов"),
+    ],
+)
+def test_example_selection_preserves_score_priority_and_original_tie_order(
+    query: str | None, expected: str
+) -> None:
+    mode = BotMode(
+        id="test",
+        command="test",
+        name="test",
+        description="test",
+        system_prompt="Правила",
+        few_shot_examples=[
+            FewShotExample(
+                user_input="Первый",
+                assistant_output="Ответ",
+                keywords=["python"],
+            ),
+            FewShotExample(
+                user_input="Больше совпадений",
+                assistant_output="Ответ",
+                keywords=["python", "список"],
+            ),
+            FewShotExample(user_input="Без ключевых слов", assistant_output="Ответ"),
+            FewShotExample(
+                user_input="Поздний с тем же счётом",
+                assistant_output="Ответ",
+                keywords=["python", "список"],
+            ),
+        ],
+    )
+    messages = mode.build_initial_messages(query)
+    assert messages[1].content == expected
+
+
+def test_oversized_best_example_is_not_replaced_with_a_less_relevant_one() -> None:
+    mode = BotMode(
+        id="test",
+        command="test",
+        name="test",
+        description="test",
+        system_prompt="Правила",
+        few_shot_examples=[
+            FewShotExample(
+                user_input="Маленький",
+                assistant_output="Ответ",
+                keywords=["python"],
+            ),
+            FewShotExample(
+                user_input="python список",
+                assistant_output="x" * 1800,
+                keywords=["python", "список"],
+            ),
+        ],
+    )
+    messages = mode.build_initial_messages("python список")
+    assert len(messages) == 1 and messages[0].role == MessageRole.SYSTEM

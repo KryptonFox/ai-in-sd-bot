@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import dotenv_values
 
-from app.config import ConfigError
+from app.config import ConfigError, MCPTransport
 
 
 @dataclass(frozen=True)
@@ -21,7 +21,7 @@ class ServerSettings:
     mcp_port: int = 8000
     schedule_path: Path = Path("app/data/schedule.json")
     schedule_timezone: str = "Europe/Moscow"
-    mcp_transport: str = "stdio"
+    mcp_transport: MCPTransport = MCPTransport.STDIO
 
     @classmethod
     def load(
@@ -61,9 +61,10 @@ class ServerSettings:
         except (ValueError, ZoneInfoNotFoundError):
             raise ConfigError("SCHEDULE_TIMEZONE: укажите существующую IANA-зону.") from None
 
-        transport = value("MCP_TRANSPORT", "stdio")
-        if transport not in {"stdio", "streamable-http"}:
-            raise ConfigError("MCP_TRANSPORT: используйте stdio или streamable-http.")
+        try:
+            transport = MCPTransport(value("MCP_TRANSPORT", "stdio"))
+        except ValueError:
+            raise ConfigError("MCP_TRANSPORT: используйте stdio или streamable-http.") from None
 
         return cls(
             postgres_host=value("POSTGRES_HOST", "127.0.0.1"),

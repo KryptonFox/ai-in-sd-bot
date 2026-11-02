@@ -9,7 +9,7 @@ from mcp import types
 
 from app.config import Settings
 from app.core.clock import FrozenClock
-from app.core.schemas.agent import EventContext
+from app.core.schemas.agent import AgentDecision, EventContext
 from app.core.schemas.llm import LLMResponse
 from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.core.schemas.tools import ScheduleWeekArguments, ToolFailure
@@ -66,7 +66,7 @@ async def test_discovered_week_resource_reaches_agent_and_counts_as_one_call() -
         [ChatMessage(role=MessageRole.USER, content="Когда я свободен на этой неделе?")],
         EventContext(user_id=1, event_id="week", request_id="week"),
     )
-    assert result.decision == "tool" and result.tool_name == "read_resource"
+    assert result.decision == AgentDecision.TOOL and result.tool_name == "read_resource"
     command.assert_awaited_once_with("read_resource", "schedule://current-week")
     store.reserve.assert_awaited_once()
     tool_message = llm.generate.await_args_list[1].args[0].messages[-1]
@@ -79,14 +79,18 @@ def test_resource_adapter_rejects_undiscovered_and_arbitrary_uris() -> None:
     client.load_catalog(tool_catalog())
     assert "read_resource" not in client.tools
     client.load_resources(resource_catalog())
+
     for uri in ("file:///etc/passwd", "https://example.org", "schedule://next-week"):
         with pytest.raises(ToolFailure):
             client.validate_arguments("read_resource", {"uri": uri})
+
     client.load_resources([])
     assert "read_resource" not in client.tools
 
 
-async def test_week_crosses_month_boundary_and_distinguishes_unknown_days(tmp_path: Path) -> None:
+async def test_week_crosses_month_boundary_and_distinguishes_unknown_days(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "schedule.json"
     path.write_text(json.dumps({"2026-11-01": []}), encoding="utf-8")
     service = ScheduleService(path, "Europe/Moscow", CLOCK)
@@ -101,7 +105,9 @@ async def test_week_crosses_month_boundary_and_distinguishes_unknown_days(tmp_pa
     assert all(day.lessons == [] for day in week.days)
 
 
-async def test_relative_week_uses_server_calendar_and_timezone(tmp_path: Path) -> None:
+async def test_relative_week_uses_server_calendar_and_timezone(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "schedule.json"
     path.write_text("{}", encoding="utf-8")
     clock = FrozenClock(datetime.fromisoformat("2026-11-01T23:30:00+00:00"))
@@ -111,8 +117,27 @@ async def test_relative_week_uses_server_calendar_and_timezone(tmp_path: Path) -
     client = MCPClient(Settings(bot_token="unused", postgres_password="unused"))
     client.load_catalog(tool_catalog())
     client.validate_arguments("get_schedule_week", {"week_offset": 1})
+
     with pytest.raises(ValueError):
         ScheduleWeekArguments(date="2026-11-03", week_offset=1)
+
+
+async def test_weekly_schedule_uses_one_snapshot_for_all_days(
+    tmp_path: Path,
+) -> None:
+    service = ScheduleService(
+        tmp_path / "schedule.json",
+        "Europe/Moscow",
+        CLOCK,
+    )
+    read_data = Mock(side_effect=[{"2026-10-28": []}, {}])
+    service._read_data = read_data
+
+    week = await service.week_containing("2026-10-27")
+
+    assert week.days[2].date == "2026-10-28"
+    assert week.days[2].data_available and week.days[2].is_free_day
+    read_data.assert_called_once()
 
 
 def future_weather() -> dict[str, object]:
@@ -153,11 +178,13 @@ async def test_tomorrow_uses_requested_forecast_instead_of_current_conditions() 
     def respond(request: httpx.Request) -> httpx.Response:
         if "geocoding" in request.url.host:
             return httpx.Response(200, json={"results": [location()]})
+
         assert request.url.params["forecast_days"] == "16"
         return httpx.Response(200, json=future_weather())
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
         result = await WeatherService(client, clock=CLOCK).get_weather("Казань", "2026-10-28")
+
     assert result.temperature == 4
     assert result.today is not None and result.today.precipitation_probability == 0
     assert result.forecast is not None and result.forecast.precipitation_probability == 90
@@ -167,8 +194,89 @@ async def test_tomorrow_uses_requested_forecast_instead_of_current_conditions() 
     assert result.forecast.date == result.requested_date
 
 
+@pytest.mark.parametrize(
+    "dates",
+    [
+        ["2026-10-27", "2026-10-27"],
+        ["2026-10-27", "2026-10-29"],
+        ["2026-10-28", "2026-10-27"],
+    ],
+)
+async def test_forecast_rejects_duplicate_skipped_and_reversed_days(
+    dates: list[str],
+) -> None:
+    data = future_weather()
+    daily = data["daily"]
+    assert isinstance(daily, dict)
+    daily["time"] = dates
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if "geocoding" in request.url.host:
+            return httpx.Response(200, json={"results": [location()]})
+
+        return httpx.Response(200, json=data)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(ToolFailure) as failure:
+            await WeatherService(client, clock=CLOCK).get_weather("Казань", "2026-10-28")
+
+    assert failure.value.code == "weather_unavailable"
+
+
+@pytest.mark.parametrize("missing_day", [0, 1])
+async def test_missing_rain_values_do_not_discard_another_days_forecast(
+    missing_day: int,
+) -> None:
+    data = future_weather()
+    daily = data["daily"]
+    assert isinstance(daily, dict)
+    amounts = daily["precipitation_sum"]
+    assert isinstance(amounts, list)
+    amounts[missing_day] = None
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if "geocoding" in request.url.host:
+            return httpx.Response(200, json={"results": [location()]})
+
+        return httpx.Response(200, json=data)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        result = await WeatherService(client, clock=CLOCK).get_weather("Казань", "2026-10-28")
+
+    if missing_day == 0:
+        assert result.today is None
+        assert result.forecast is not None and result.forecast.precipitation == 5
+    else:
+        assert result.forecast is None
+        assert result.today is not None and result.today.precipitation == 0
+
+
+async def test_weather_uses_one_calendar_day_when_clock_crosses_midnight() -> None:
+    clock = Mock()
+    clock.now.side_effect = [
+        datetime.fromisoformat("2026-10-27T23:59:59+03:00"),
+        datetime.fromisoformat("2026-10-28T00:00:01+03:00"),
+    ]
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if "geocoding" in request.url.host:
+            return httpx.Response(200, json={"results": [location()]})
+
+        return httpx.Response(200, json=future_weather())
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        result = await WeatherService(client, clock=clock).get_weather("Казань")
+
+    assert result.today is not None and result.forecast is not None
+    assert result.requested_date is not None
+    assert result.requested_date.isoformat() == "2026-10-27"
+    assert result.today == result.forecast
+
+
 @pytest.mark.parametrize("day", ["2026-10-26", "2026-11-12"])
-async def test_forecast_rejects_dates_outside_supported_horizon(day: str) -> None:
+async def test_forecast_rejects_dates_outside_supported_horizon(
+    day: str,
+) -> None:
     def respond(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
@@ -178,6 +286,7 @@ async def test_forecast_rejects_dates_outside_supported_horizon(day: str) -> Non
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
         with pytest.raises(ToolFailure) as raised:
             await WeatherService(client, clock=CLOCK).get_weather("Казань", day)
+
     assert raised.value.code == "forecast_date_unavailable"
 
 
@@ -190,6 +299,7 @@ async def test_missing_requested_forecast_does_not_substitute_today() -> None:
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
         result = await WeatherService(client, clock=CLOCK).get_weather("Казань", "2026-10-29")
+
     assert result.forecast is None and result.today is not None
     assert result.requested_date is not None and result.requested_date.isoformat() == "2026-10-29"
 
@@ -204,6 +314,7 @@ async def test_geocoding_network_failure_falls_back_without_choosing_airport_or_
         calls.append(request)
         if "geocoding" in request.url.host:
             raise httpx.ConnectError("private transport detail", request=request)
+
         if "photon" in request.url.host:
             assert request.url.params["q"] == query
             assert request.headers["User-Agent"] == "itmo-ai-in-sd-bot/0.1"
@@ -228,10 +339,13 @@ async def test_geocoding_network_failure_falls_back_without_choosing_airport_or_
                     ]
                 },
             )
+
         assert request.url.params["latitude"] == "55.79"
+
         return httpx.Response(200, json=future_weather())
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
         result = await WeatherService(client, clock=CLOCK).get_weather(query, "2026-10-28")
+
     assert result.status == "ok" and result.city == "Казань"
     assert len(calls) == 4
