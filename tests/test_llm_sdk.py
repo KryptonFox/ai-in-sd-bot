@@ -64,7 +64,6 @@ async def adapter():
             base_url=settings.llm_base_url,
             http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)),
             max_retries=2,
-            _strict_response_validation=True,
         )
         clients.append(sdk)
         return OpenAIClient(settings, client=sdk), sdk
@@ -88,6 +87,8 @@ async def test_sdk_payload_usage_and_reuse(adapter):
     assert str(seen[0].url) == "https://provider.test/v1/chat/completions"
     assert payload["model"] == "configured-model"
     assert payload["temperature"] == 0.3 and payload["max_tokens"] == 123
+    assert "response_format" not in payload
+    assert "tools" not in payload
     assert json.loads(seen[1].content)["model"] == "override"
     assert result.content == "  public\n" and result.finish_reason == FinishReason.LENGTH
     assert (result.prompt_tokens, result.completion_tokens, result.total_tokens) == (11, 7, 18)
