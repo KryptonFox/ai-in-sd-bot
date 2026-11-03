@@ -8,8 +8,14 @@ import pytest
 
 from app.config import Settings
 from scripts.common import CommandError, run_command
+from tests.mcp_catalog import initialize_catalog
 
 type DatabaseFixture = tuple[Settings, Callable[..., str], Callable[[], None], str]
+
+
+@pytest.fixture(scope="session", autouse=True)
+def discovered_mcp_catalog() -> None:
+    initialize_catalog()
 
 
 @pytest.fixture

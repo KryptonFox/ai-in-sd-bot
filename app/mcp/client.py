@@ -1,292 +1,82 @@
-import asyncio
 import json
 import logging
-import os
-import secrets
-import sys
-import time
-from collections.abc import Mapping, Sequence
-from contextlib import AsyncExitStack
-from dataclasses import dataclass
-from datetime import timedelta
-from typing import Literal, overload
+from collections.abc import AsyncGenerator, Mapping, Sequence
+from contextlib import asynccontextmanager
 
-import httpx
-from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
-from jsonschema import Draft202012Validator, FormatChecker
-from mcp import ClientSession, StdioServerParameters, types
-from mcp.client.stdio import stdio_client
-from mcp.client.streamable_http import streamable_http_client
-from mcp.shared.message import SessionMessage
-from pydantic import AnyUrl
+from fastmcp import Client
+from fastmcp.client.client import CallToolResult
+from fastmcp.exceptions import ResourceError
+from mcp import MCPError, types
 
-from app.config import MCPTransport, Settings
 from app.core.schemas.llm import ToolDefinition
-from app.core.schemas.tools import ToolFailure, WeekSchedule
+from app.core.schemas.mcp import ResourceContent, ResourceDefinition
+from app.core.schemas.tools import ToolFailure
+from app.mcp.catalog import ToolCatalog
 
-ALLOWED_TOOLS = frozenset({"get_weather", "get_schedule", "get_schedule_week", "add_reminder"})
 logger = logging.getLogger("app.mcp.client")
-
-type _CommandMethod = Literal["call_tool", "read_resource"]
-type _CommandResult = types.CallToolResult | types.ReadResourceResult
-type _TransportStreams = tuple[
-    MemoryObjectReceiveStream[SessionMessage | Exception],
-    MemoryObjectSendStream[SessionMessage],
-]
-
-
-@dataclass(frozen=True)
-class _Command:
-    method: _CommandMethod
-    name: str
-    arguments: dict[str, object] | None
-    meta: dict[str, object] | None
-    future: asyncio.Future[_CommandResult]
 
 
 class MCPClient:
-    def __init__(self, settings: Settings) -> None:
-        self.settings = settings
-        self.secret = settings.mcp_shared_secret or secrets.token_urlsafe(32)
+    def __init__(self, client: Client, *, secret: str = "") -> None:
+        self._client = client
+        self.secret = secret
+        self.catalog = ToolCatalog()
         self.tools: dict[str, ToolDefinition] = {}
-        self.outputs: dict[str, dict[str, object]] = {}
-        self.resources: set[str] = set()
+        self.resources: dict[str, ResourceDefinition] = {}
         self.available = False
-        self._task: asyncio.Task[None] | None = None
-        self._ready = asyncio.Event()
-        self._queue: asyncio.Queue[_Command] = asyncio.Queue()
-        self._retry_at = 0.0
 
     def load_catalog(self, catalog: Sequence[types.Tool]) -> None:
-        tools: dict[str, ToolDefinition] = {}
-        outputs: dict[str, dict[str, object]] = {}
-
-        for tool in catalog:
-            if tool.name not in ALLOWED_TOOLS or tool.outputSchema is None:
-                continue
-
-            Draft202012Validator.check_schema(tool.inputSchema)
-            Draft202012Validator.check_schema(tool.outputSchema)
-            tools[tool.name] = ToolDefinition(
-                name=tool.name,
-                description=tool.description or "",
-                parameters=tool.inputSchema,
-            )
-            outputs[tool.name] = tool.outputSchema
-
-        self.tools = tools
-        self.outputs = outputs
-        self.available = bool(tools)
+        self.tools = self.catalog.load(catalog)
+        self.available = bool(self.tools or self.resources)
 
     def load_resources(self, catalog: Sequence[types.Resource]) -> None:
-        resources = [item for item in catalog if str(item.uri) == "schedule://current-week"]
-        self.resources = {str(item.uri) for item in resources}
-        self.tools.pop("read_resource", None)
-        if not resources:
-            return
-        descriptions = "; ".join(
-            f"{item.uri}: {item.description or item.name}" for item in resources
-        )
-        self.tools["read_resource"] = ToolDefinition(
-            name="read_resource",
-            description=f"Прочитать обнаруженный MCP-ресурс. {descriptions}",
-            parameters={
-                "type": "object",
-                "properties": {"uri": {"type": "string", "enum": sorted(self.resources)}},
-                "required": ["uri"],
-                "additionalProperties": False,
-            },
-        )
+        resources = {
+            str(item.uri): ResourceDefinition(
+                uri=str(item.uri),
+                name=item.name,
+                description=item.description or "",
+                mime_type=item.mime_type or "application/json",
+            )
+            for item in catalog
+        }
+        self.resources = resources
+        self.available = bool(self.tools or resources)
+
+    def is_read_only(self, name: str) -> bool:
+        return self.catalog.is_read_only(name)
 
     def validate_arguments(self, name: str, arguments: Mapping[str, object]) -> None:
-        if name not in self.tools:
-            raise ToolFailure("unknown_tool", "Инструмент не разрешён или недоступен.")
-
-        try:
-            Draft202012Validator(
-                self.tools[name].parameters,
-                format_checker=FormatChecker(),
-            ).validate(arguments)
-        except Exception:
-            raise ToolFailure("invalid_arguments", "Уточните параметры инструмента.") from None
+        self.catalog.validate_arguments(name, arguments)
 
     async def start(self) -> bool:
-        if self._task is not None and not self._task.done():
-            return self.available
-
-        if time.monotonic() < self._retry_at:
+        try:
+            async with self._request() as client:
+                tools = await client.list_tools()
+                resources = await client.list_resources()
+                self.load_catalog(tools)
+                self.load_resources(resources)
+        except ToolFailure:
+            self.available = False
             return False
 
-        self._ready = asyncio.Event()
-        self._task = asyncio.create_task(self._worker())
-
-        try:
-            async with asyncio.timeout(self.settings.mcp_timeout):
-                await self._ready.wait()
-        except TimeoutError:
-            logger.warning("mcp_start_timeout transport=%s", self.settings.mcp_transport)
-            await self.aclose()
-
+        logger.info("mcp_connected tools=%d resources=%d", len(self.tools), len(self.resources))
         return self.available
 
-    async def _open_stdio(self, stack: AsyncExitStack) -> _TransportStreams:
-        env = {
-            key: value
-            for key, value in os.environ.items()
-            if key not in {"BOT_TOKEN", "LLM_API_KEY", "TELEGRAM_PROXY_URL"}
-        }
-        env.update(
-            {
-                "MCP_SHARED_SECRET": self.secret,
-                "POSTGRES_HOST": self.settings.postgres_host,
-                "POSTGRES_PORT": str(self.settings.postgres_port),
-                "POSTGRES_DB": self.settings.postgres_db,
-                "POSTGRES_USER": self.settings.postgres_user,
-                "POSTGRES_PASSWORD": self.settings.postgres_password,
-                "SCHEDULE_PATH": self.settings.schedule_path,
-                "SCHEDULE_TIMEZONE": self.settings.schedule_timezone,
-            }
-        )
-        parameters = StdioServerParameters(
-            command=sys.executable,
-            args=["-m", "app.mcp_server", "--transport", "stdio", "--env-file", os.devnull],
-            env=env,
-        )
-        return await stack.enter_async_context(stdio_client(parameters))
-
-    async def _open_http(self, stack: AsyncExitStack) -> _TransportStreams:
-        if not self.settings.mcp_shared_secret:
-            raise ValueError("MCP secret is required")
-
-        http = await stack.enter_async_context(
-            httpx.AsyncClient(
-                headers={"Authorization": f"Bearer {self.secret}"},
-                timeout=self.settings.mcp_timeout,
-                follow_redirects=True,
-            )
-        )
-        read, write, _ = await stack.enter_async_context(
-            streamable_http_client(self.settings.mcp_server_url, http_client=http)
-        )
-        return read, write
-
-    async def _worker(self) -> None:
+    @asynccontextmanager
+    async def _request(self) -> AsyncGenerator[Client, None]:
         try:
-            async with AsyncExitStack() as stack:
-                if self.settings.mcp_transport == MCPTransport.STDIO:
-                    read, write = await self._open_stdio(stack)
-                else:
-                    read, write = await self._open_http(stack)
-
-                session = await stack.enter_async_context(
-                    ClientSession(
-                        read,
-                        write,
-                        read_timeout_seconds=timedelta(seconds=self.settings.mcp_timeout),
-                    )
-                )
-                await self._discover(session)
-                await self._process_commands(session)
+            async with self._client:
+                yield self._client
+        except (ToolFailure, ResourceError):
+            raise
         except Exception as error:
-            logger.warning(
-                "mcp_connection_failed transport=%s code=%s",
-                self.settings.mcp_transport,
-                type(error).__name__,
-            )
-        finally:
+            logger.warning("mcp_request_failed code=%s", type(error).__name__)
+            if isinstance(error, TimeoutError) or (
+                isinstance(error, MCPError) and error.code == types.REQUEST_TIMEOUT
+            ):
+                raise ToolFailure("mcp_timeout", "Превышено время ожидания MCP-сервера.") from None
             self.available = False
-            self._retry_at = time.monotonic() + 5
-            self._ready.set()
-            self._fail_pending_commands()
-
-    async def _discover(self, session: ClientSession) -> None:
-        await session.initialize()
-        self.load_catalog((await session.list_tools()).tools)
-        self.load_resources((await session.list_resources()).resources)
-        self._ready.set()
-        logger.info(
-            "mcp_connected transport=%s tools=%d",
-            self.settings.mcp_transport,
-            len(self.tools),
-        )
-
-    async def _process_commands(self, session: ClientSession) -> None:
-        while True:
-            command = await self._queue.get()
-            if command.future.cancelled():
-                continue
-
-            try:
-                result = await self._execute_command(session, command)
-                if not command.future.done():
-                    command.future.set_result(result)
-            except Exception as error:
-                logger.warning("mcp_command_failed code=%s", type(error).__name__)
-                if not command.future.done():
-                    command.future.set_exception(
-                        ToolFailure("mcp_unavailable", "MCP-сервер недоступен.")
-                    )
-                return
-
-    @staticmethod
-    async def _execute_command(session: ClientSession, command: _Command) -> _CommandResult:
-        if command.method == "call_tool":
-            return await session.call_tool(command.name, command.arguments, meta=command.meta)
-
-        return await session.read_resource(AnyUrl(command.name))
-
-    def _fail_pending_commands(self) -> None:
-        while not self._queue.empty():
-            command = self._queue.get_nowait()
-            if not command.future.done():
-                command.future.set_exception(
-                    ToolFailure("mcp_unavailable", "MCP-сервер недоступен.")
-                )
-
-    @overload
-    async def _command(
-        self,
-        method: Literal["call_tool"],
-        name: str,
-        arguments: Mapping[str, object],
-        *,
-        meta: dict[str, object] | None = None,
-    ) -> types.CallToolResult: ...
-
-    @overload
-    async def _command(
-        self,
-        method: Literal["read_resource"],
-        name: str,
-    ) -> types.ReadResourceResult: ...
-
-    async def _command(
-        self,
-        method: _CommandMethod,
-        name: str,
-        arguments: Mapping[str, object] | None = None,
-        *,
-        meta: dict[str, object] | None = None,
-    ) -> _CommandResult:
-        if not self.available and not await self.start():
-            raise ToolFailure("mcp_unavailable", "MCP-сервер сейчас недоступен.")
-
-        future: asyncio.Future[_CommandResult] = asyncio.get_running_loop().create_future()
-        await self._queue.put(
-            _Command(
-                method,
-                name,
-                dict(arguments) if arguments is not None else None,
-                meta,
-                future,
-            )
-        )
-
-        try:
-            async with asyncio.timeout(self.settings.mcp_timeout):
-                return await future
-        except TimeoutError:
-            raise ToolFailure("mcp_timeout", "Превышено время ожидания MCP-сервера.") from None
+            raise ToolFailure("mcp_unavailable", "MCP-сервер недоступен.") from None
 
     async def call_tool(
         self,
@@ -296,77 +86,78 @@ class MCPClient:
         user_id: int | None = None,
         confirmation_id: str | None = None,
     ) -> dict[str, object]:
-        self.validate_arguments(name, arguments)
-        if name == "read_resource":
-            return await self.read_week()
+        self.catalog.validate_arguments(name, arguments)
         meta: dict[str, object] | None = None
-
-        if name == "add_reminder":
+        if not self.catalog.is_read_only(name):
             if user_id is None or confirmation_id is None:
                 raise ToolFailure("confirmation_required", "Нужно подтверждение владельца.")
-
             meta = {
                 "app_token": self.secret,
                 "user_id": user_id,
                 "confirmation_id": confirmation_id,
             }
 
-        result = await self._command("call_tool", name, arguments, meta=meta)
-        if result.isError:
-            raise self._tool_error(result)
+        async with self._request() as client:
+            result = await client.call_tool(
+                name,
+                dict(arguments),
+                meta=meta,
+                raise_on_error=False,
+            )
 
-        return self._validated_output(name, result.structuredContent)
+        if result.is_error:
+            raise self._tool_error(result)
+        return self.catalog.validate_output(name, result.structured_content)
 
     @staticmethod
-    def _tool_error(result: types.CallToolResult) -> ToolFailure:
-        error = (result.structuredContent or {}).get("error")
+    def _tool_error(result: CallToolResult) -> ToolFailure:
+        payload = result.structured_content
+        if payload is None:
+            for content in result.content:
+                if isinstance(content, types.TextContent):
+                    try:
+                        decoded = json.loads(content.text)
+                    except (TypeError, ValueError):
+                        continue
+                    if isinstance(decoded, dict):
+                        payload = decoded
+                        break
+        error = payload.get("error") if payload is not None else None
         code = error.get("code") if isinstance(error, dict) else None
         safe_code = (
             code if isinstance(code, str) and code.replace("_", "").isalnum() else "tool_failed"
         )
-        message = {
-            "forecast_date_unavailable": "Прогноз доступен на сегодня и следующие 15 дней.",
-            "weather_unavailable": "Сервис погоды сейчас недоступен. Попробуйте позже.",
-            "schedule_unavailable": "Не удалось прочитать расписание. Попробуйте позже.",
-        }.get(safe_code, "Инструмент не смог выполнить запрос.")
-        return ToolFailure(safe_code, message)
+        return ToolFailure(safe_code)
 
-    def _validated_output(self, name: str, payload: object) -> dict[str, object]:
+    async def read_resource(self, uri: str) -> ResourceContent:
+        if uri not in self.resources:
+            raise ToolFailure("resource_unavailable", "Ресурс недоступен.")
         try:
-            if not isinstance(payload, dict) or "error" in payload:
-                raise ValueError("missing_success_payload")
-
-            json.dumps(payload, allow_nan=False)
-            Draft202012Validator(
-                self.outputs[name],
-                format_checker=FormatChecker(),
-            ).validate(payload)
-        except Exception:
-            raise ToolFailure(
-                "invalid_output", "Инструмент вернул некорректный результат."
-            ) from None
-
-        return payload
-
-    async def read_week(self) -> dict[str, object]:
-        if "schedule://current-week" not in self.resources:
-            raise ToolFailure("resource_unavailable", "Ресурс недели недоступен.")
-
-        result = await self._command("read_resource", "schedule://current-week")
+            async with self._request() as client:
+                contents = await client.read_resource(uri)
+        except ResourceError:
+            raise ToolFailure("resource_unavailable", "Ресурс сейчас недоступен.") from None
 
         try:
-            content = result.contents[0]
+            if len(contents) != 1:
+                raise ValueError("expected_single_resource_content")
+            content = contents[0]
             if not isinstance(content, types.TextResourceContents):
                 raise ValueError("expected_text_resource")
-
-            return WeekSchedule.model_validate_json(content.text).model_dump(mode="json")
+            if str(content.uri) != uri:
+                raise ValueError("unexpected_resource_uri")
+            return ResourceContent(
+                uri=uri,
+                text=content.text,
+                mime_type=content.mime_type or self.resources[uri].mime_type,
+            )
         except Exception:
             raise ToolFailure("invalid_output", "Ресурс вернул некорректный результат.") from None
 
     async def aclose(self) -> None:
-        if self._task is not None:
-            self._task.cancel()
-            await asyncio.gather(self._task, return_exceptions=True)
-            self._task = None
-
         self.available = False
+        try:
+            await self._client.close()
+        except Exception as error:
+            await self._client.transport.close()
+            logger.warning("mcp_close_failed code=%s", type(error).__name__)

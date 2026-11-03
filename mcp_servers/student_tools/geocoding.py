@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from app.core.schemas.tools import ToolFailure
 
 type FetchJSON = Callable[[str, dict[str, str | int]], Awaitable[dict[str, object]]]
-logger = logging.getLogger("app.mcp_server.geocoding")
+logger = logging.getLogger("mcp_servers.student_tools.geocoding")
 MAJOR_CITY_POPULATION = 100_000
 DOMINANT_POPULATION_RATIO = 20
 

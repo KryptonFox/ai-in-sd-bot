@@ -4,6 +4,7 @@ from typing import Protocol
 
 from app.core.schemas.agent import AgentResult, EventContext, TurnClaim
 from app.core.schemas.llm import ToolDefinition
+from app.core.schemas.mcp import ResourceContent, ResourceDefinition
 from app.core.schemas.message import ChatMessage
 
 
@@ -25,7 +26,14 @@ class ToolClient(ToolExecutor, Protocol):
     @property
     def tools(self) -> Mapping[str, ToolDefinition]: ...
 
+    @property
+    def resources(self) -> Mapping[str, ResourceDefinition]: ...
+
+    def is_read_only(self, name: str) -> bool: ...
+
     def validate_arguments(self, name: str, arguments: Mapping[str, object]) -> None: ...
+
+    async def read_resource(self, uri: str) -> ResourceContent: ...
 
 
 class TurnStore(Protocol):

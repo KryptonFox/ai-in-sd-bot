@@ -103,11 +103,18 @@ def source_archive(root: Path) -> Path:
     ]
     candidates.extend((root / "app").rglob("*.py"))
     candidates.extend((root / "app" / "db" / "migrations" / "sql").glob("*.sql"))
-    candidates.extend((root / "app" / "data").glob("*.json"))
+    candidates.extend((root / "mcp_servers").rglob("*.py"))
+    candidates.extend((root / "mcp_servers").glob("*/data/*.json"))
 
     with tarfile.open(archive_path, "w:gz") as archive:
         for path in sorted(candidates):
-            if path.is_file() and "__pycache__" not in path.parts and not path.is_symlink():
+            if (
+                path.is_file()
+                and "__pycache__" not in path.parts
+                and ".local" not in path.parts
+                and not path.name.startswith(".env")
+                and not path.is_symlink()
+            ):
                 archive.add(
                     path,
                     arcname=path.relative_to(root).as_posix(),
@@ -572,6 +579,8 @@ class Cloud:
 
         values = {key.upper(): str(value) for key, value in asdict(settings).items()}
         values.update(POSTGRES_HOST="db", POSTGRES_PORT="5432")
+        if ".local" in Path(values["SCHEDULE_PATH"]).parts:
+            values["SCHEDULE_PATH"] = "mcp_servers/student_tools/data/schedule.json"
         content = "".join(f"{key}={compose_quote(value)}\n" for key, value in values.items())
         payload = base64.b64encode(content.encode("utf-8")).decode("ascii")
 
@@ -590,13 +599,15 @@ class Cloud:
             "if printf '%s\\n' \"$services\" | grep -qx bot; then "
             f"{COMPOSE} stop bot; fi; "
             "if printf '%s\\n' \"$services\" | grep -qx mcp-server; then "
-            f"{COMPOSE} stop mcp-server; fi; fi; "
-            f"rm -rf {REMOTE}/app; "
+            f"{COMPOSE} stop mcp-server; fi; "
+            "if printf '%s\\n' \"$services\" | grep -qx student-tools-mcp; then "
+            f"{COMPOSE} stop student-tools-mcp; fi; fi; "
+            f"rm -rf {REMOTE}/app {REMOTE}/mcp_servers; "
             f"tar -xzf /home/student/course-source.tar.gz -C {REMOTE}; "
             f"mv /home/student/course-env.pending {REMOTE}/.env.cloud; "
             f"chmod 600 {REMOTE}/.env.cloud; "
             "rm /home/student/course-source.tar.gz; "
-            f"{COMPOSE} up -d --build --wait --wait-timeout 180"
+            f"{COMPOSE} up -d --build --remove-orphans --wait --wait-timeout 180"
         )
         self.ssh(instance, command, timeout=1200, stream_output=True)
 
@@ -671,7 +682,9 @@ class Cloud:
                 print(f"Публичный IPv4: {address['address']}")
 
         if instance.get("status") == "RUNNING":
-            command = "ps --all" if action == "status" else "logs --tail 100 bot mcp-server db"
+            command = (
+                "ps --all" if action == "status" else "logs --tail 100 bot student-tools-mcp db"
+            )
             output = self.ssh(instance, f"{COMPOSE} {command}")
             print(output)
 

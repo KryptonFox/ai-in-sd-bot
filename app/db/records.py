@@ -48,7 +48,7 @@ class DecisionAudit(TypedDict):
     request_id: str
     decision: str
     tool_name: str | None
-    arguments: dict[str, str]
+    arguments: dict[str, object]
     validation: str
     execution: str
     duration_ms: float

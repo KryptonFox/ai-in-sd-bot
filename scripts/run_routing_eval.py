@@ -12,9 +12,17 @@ from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, cast
 from app.core.clock import FrozenClock
 from app.core.context import set_request_id
 from app.core.exceptions import LLMError
+from app.core.ports import ToolClient
 from app.core.schemas.agent import AgentDecision, AgentResult, EventContext
-from app.core.schemas.message import ChatMessage, MessageRole
+from app.core.schemas.execution import RunState, StepAction
+from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.core.schemas.tools import DEFAULT_WEATHER_CITY
+from app.core.timezones import normalize_reminder
+from app.services.tool_execution import (
+    READ_RESOURCE_FUNCTION,
+    REMINDER_TOOL_NAME,
+    ToolExecutionService,
+)
 
 if TYPE_CHECKING:
     from app.modes.base import BotMode
@@ -22,7 +30,7 @@ if TYPE_CHECKING:
 
 ROOT = Path(__file__).resolve().parents[1]
 DATASET_PATH = ROOT / "docs/evaluation/lab2-routing.json"
-TOOL_ACTIONS = {"get_weather", "get_schedule", "get_schedule_week", "read_resource", "add_reminder"}
+TOOL_ACTIONS = {"get_weather", "get_schedule", "get_schedule_week", "resource", "add_reminder"}
 
 
 class MeasurementStatus(StrEnum):
@@ -72,6 +80,7 @@ class CaseResult(CaseScore, ExpectedDecision):
     id: str
     predicted_action: str
     arguments: dict[str, object]
+    resource_uri: NotRequired[str]
     effective_arguments: NotRequired[dict[str, object]]
     error_class: NotRequired[str]
     error_code: NotRequired[str]
@@ -188,13 +197,21 @@ def score_case(
     arguments: Mapping[str, object],
     *,
     today: str | None = None,
+    resource_uri: str | None = None,
 ) -> CaseScore:
     expected_action = case["expected_action"]
     expected_arguments = case.get("expected_arguments", {})
     route_correct = predicted_action == expected_action
     args_applicable = expected_action in TOOL_ACTIONS
-    actual = effective_arguments(predicted_action, arguments, today)
-    expected = effective_arguments(expected_action, expected_arguments, today)
+    if predicted_action == "resource":
+        actual = {"uri": resource_uri} if resource_uri is not None else {}
+    else:
+        actual = effective_arguments(predicted_action, arguments, today)
+
+    if expected_action == "resource":
+        expected = expected_arguments
+    else:
+        expected = effective_arguments(expected_action, expected_arguments, today)
 
     args_correct = None
     if args_applicable:
@@ -206,6 +223,83 @@ def score_case(
         "arguments_correct": args_correct,
         "success": route_correct and (args_correct is not False),
     }
+
+
+class SelectedAction(Exception):
+    def __init__(
+        self,
+        action: str,
+        arguments: Mapping[str, object] | None = None,
+        *,
+        resource_uri: str | None = None,
+    ) -> None:
+        super().__init__(action)
+        self.action = action
+        self.arguments = dict(arguments or {})
+        self.resource_uri = resource_uri
+
+
+class RecordingToolExecutionService(ToolExecutionService):
+    def __init__(self, mcp: ToolClient, clock: FrozenClock) -> None:
+        super().__init__(mcp)
+        self._evaluation_clock = clock
+
+    async def execute(
+        self,
+        state: RunState,
+        calls: Sequence[ToolCall],
+    ) -> AgentResult | StepAction:
+        validated = self._validate_batch(calls)
+        if not validated:
+            return StepAction.CONTINUE
+
+        self._check_budget(state)
+        call, resource_arguments = validated[0]
+        state.last_call = call
+        if call.name == READ_RESOURCE_FUNCTION and resource_arguments is not None:
+            raise SelectedAction("resource", resource_uri=resource_arguments.uri)
+
+        arguments = call.arguments
+        if call.name == REMINDER_TOOL_NAME:
+            arguments = normalize_reminder(
+                arguments,
+                state.timezone,
+                self._evaluation_clock.now(),
+            ).model_dump(mode="json")
+
+        raise SelectedAction(call.name, arguments)
+
+
+def _record_prediction(
+    row: CaseResult,
+    case: RoutingCase,
+    action: str,
+    arguments: Mapping[str, object],
+    today: str,
+    *,
+    resource_uri: str | None = None,
+    public_answer: str | None = None,
+) -> None:
+    row["predicted_action"] = action
+    row["arguments"] = dict(arguments)
+    if resource_uri is not None:
+        row["resource_uri"] = resource_uri
+    if public_answer is not None:
+        row["public_answer"] = public_answer
+
+    if action != "resource":
+        row["effective_arguments"] = effective_arguments(action, arguments, today)
+    score = score_case(
+        case,
+        action,
+        arguments,
+        today=today,
+        resource_uri=resource_uri,
+    )
+    row["route_correct"] = score["route_correct"]
+    row["arguments_applicable"] = score["arguments_applicable"]
+    row["arguments_correct"] = score["arguments_correct"]
+    row["success"] = score["success"]
 
 
 def summarize_cases(cases: Sequence[ScoredDecision]) -> EvaluationSummary:
@@ -280,7 +374,7 @@ def _markdown_report(result: MarkdownReport) -> str:
         f"Cases attempted: {counts['attempted']}/{counts['planned']}",
         f"Cases not run: {counts['not_run']}",
         interpretation,
-        "Scope: dry-run routing and arguments only; "
+        "Scope: recorded routing decisions and arguments before MCP execution; "
         "geocoding, forecast and final weather answers are not measured.",
         "Scoring applies the same city/date defaults to expected and predicted arguments; "
         "raw and effective model arguments are retained in JSON.",
@@ -330,34 +424,55 @@ async def run_evaluation(
 
         cases = [case for case in cases if case["id"] in case_ids]
 
+    from unittest.mock import MagicMock
+
+    import asyncpg
+    import httpx
+    from fastmcp import Client
+
     from app.config import Settings
     from app.llm.client import OpenAIClient
-    from app.mcp.client import MCPClient
-    from app.mcp_server.server import resource_catalog, tool_catalog
+    from app.mcp.connection import create_student_tools_client
     from app.modes.definitions import STUDY_MODE
     from app.services.agent_service import AgentService
-    from app.services.tool_execution import ToolExecutionService
+    from mcp_servers.student_tools.config import ServerSettings
+    from mcp_servers.student_tools.server import build_server
 
     settings = Settings.load()
     from app.logging_setup import configure_logging
 
     configure_logging(settings)
     client = OpenAIClient(settings)
-    mcp = MCPClient(settings)
-    mcp.load_catalog(tool_catalog())
-    mcp.load_resources(resource_catalog())
-    service = AgentService(
-        client,
-        ToolExecutionService(
-            mcp,
-            clock=FrozenClock(datetime.fromisoformat(dataset["evaluation_context"]["now"])),
-            max_calls=settings.agent_max_tool_calls,
-        ),
-        clock=FrozenClock(datetime.fromisoformat(dataset["evaluation_context"]["now"])),
-        max_llm_steps=settings.agent_max_llm_steps,
-    )
-
+    mcp = create_student_tools_client(settings)
     try:
+        frozen_clock = FrozenClock(datetime.fromisoformat(dataset["evaluation_context"]["now"]))
+        server_settings = ServerSettings(
+            postgres_password=settings.postgres_password,
+            mcp_shared_secret=mcp.secret,
+            postgres_host=settings.postgres_host,
+            postgres_port=settings.postgres_port,
+            postgres_db=settings.postgres_db,
+            postgres_user=settings.postgres_user,
+            schedule_path=Path(settings.schedule_path),
+            schedule_timezone=settings.schedule_timezone,
+        )
+        async with httpx.AsyncClient() as http:
+            server = build_server(
+                cast(asyncpg.Pool, MagicMock()),
+                server_settings,
+                http,
+                frozen_clock,
+            )
+            async with Client(server, name="routing-evaluation") as catalog:
+                mcp.load_catalog(await catalog.list_tools())
+                mcp.load_resources(await catalog.list_resources())
+
+        service = AgentService(
+            client,
+            RecordingToolExecutionService(mcp, frozen_clock),
+            clock=frozen_clock,
+            max_llm_steps=settings.agent_max_llm_steps,
+        )
         result_cases, counts = await _evaluate_cases(
             service,
             cases,
@@ -456,31 +571,30 @@ async def _evaluate_cases(
                 timezone=evaluation_context["timezone"],
                 temperature=0.0,
                 model=model,
-                dry_run=True,
             )
             decisions_received += 1
             predicted_action = _action_for_result(agent_result)
             predicted_arguments = dict(agent_result.arguments)
-            row["predicted_action"] = predicted_action
-            row["public_answer"] = agent_result.text
-            row["arguments"] = predicted_arguments
-            row["effective_arguments"] = effective_arguments(
-                predicted_action,
-                predicted_arguments,
-                today,
-            )
-            score = score_case(
+            _record_prediction(
+                row,
                 case,
                 predicted_action,
                 predicted_arguments,
-                today=today,
+                today,
+                public_answer=agent_result.text,
             )
-            row["route_correct"] = score["route_correct"]
-            row["arguments_applicable"] = score["arguments_applicable"]
-            row["arguments_correct"] = score["arguments_correct"]
-            row["success"] = score["success"]
             if agent_result.decision == AgentDecision.ERROR:
                 row["error_class"] = "AgentResultError"
+        except SelectedAction as selected:
+            decisions_received += 1
+            _record_prediction(
+                row,
+                case,
+                selected.action,
+                selected.arguments,
+                today,
+                resource_uri=selected.resource_uri,
+            )
         except Exception as exc:
             row["error_class"] = type(exc).__name__
             if isinstance(exc, LLMError):
@@ -570,15 +684,14 @@ def _dirty() -> bool | None:
 
 def _app_python_sha256() -> str:
     digest = hashlib.sha256()
-    app_root = ROOT / "app"
-
-    for path in sorted(app_root.rglob("*.py")):
-        relative = path.relative_to(ROOT).as_posix().encode("utf-8")
-        content = path.read_bytes()
-        digest.update(len(relative).to_bytes(8, "big"))
-        digest.update(relative)
-        digest.update(len(content).to_bytes(8, "big"))
-        digest.update(content)
+    for source_root in (ROOT / "app", ROOT / "mcp_servers"):
+        for path in sorted(source_root.rglob("*.py")):
+            relative = path.relative_to(ROOT).as_posix().encode("utf-8")
+            content = path.read_bytes()
+            digest.update(len(relative).to_bytes(8, "big"))
+            digest.update(relative)
+            digest.update(len(content).to_bytes(8, "big"))
+            digest.update(content)
 
     return digest.hexdigest()
 

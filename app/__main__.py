@@ -15,6 +15,7 @@ from app.health import HealthState, start_health_server
 from app.llm.client import OpenAIClient
 from app.logging_setup import configure_logging
 from app.mcp.client import MCPClient
+from app.mcp.connection import create_student_tools_client
 from app.services.agent_service import AgentService
 from app.services.confirmation_service import ConfirmationService
 from app.services.dialog_service import DialogService
@@ -39,7 +40,7 @@ async def run(settings: Settings) -> None:
 
         await _prepare_telegram(bot)
 
-        mcp_client = MCPClient(settings)
+        mcp_client = create_student_tools_client(settings)
         await mcp_client.start()
         state.mcp = mcp_client
 

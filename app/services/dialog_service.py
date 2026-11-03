@@ -260,7 +260,11 @@ class DialogService:
             return []
 
         return [
-            ToolStatus(tool.name, tool.description, tool.name == "add_reminder")
+            ToolStatus(
+                tool.name,
+                tool.description,
+                requires_confirmation=not self._tool_client.is_read_only(tool.name),
+            )
             for tool in self._tool_client.tools.values()
         ]
 

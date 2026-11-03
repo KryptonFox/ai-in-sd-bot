@@ -27,6 +27,16 @@ class ContextProvider(StrEnum):
     MODELS = "models"
 
 
+DEFAULT_SCHEDULE_PATH = "mcp_servers/student_tools/data/schedule.json"
+LEGACY_DEFAULT_SCHEDULE_PATH = "app/data/schedule.json"
+
+
+def resolve_schedule_path(value: str) -> str:
+    if value == LEGACY_DEFAULT_SCHEDULE_PATH:
+        return DEFAULT_SCHEDULE_PATH
+    return value
+
+
 def _minimum_integer(key: str, raw_value: str, minimum: int) -> int:
     try:
         number = int(raw_value)
@@ -72,7 +82,7 @@ class Settings:
     agent_max_tool_calls: int = 2
     agent_max_llm_steps: int = 4
     confirmation_ttl: int = 300
-    schedule_path: str = "app/data/schedule.json"
+    schedule_path: str = DEFAULT_SCHEDULE_PATH
     schedule_timezone: str = "Europe/Moscow"
 
     @classmethod
@@ -245,6 +255,6 @@ class Settings:
             agent_max_tool_calls=bounded("AGENT_MAX_TOOL_CALLS", 2, 1, 2),
             agent_max_llm_steps=bounded("AGENT_MAX_LLM_STEPS", 4, 1, 8),
             confirmation_ttl=bounded("CONFIRMATION_TTL", 300, 1, 300),
-            schedule_path=value("SCHEDULE_PATH", "app/data/schedule.json"),
+            schedule_path=resolve_schedule_path(value("SCHEDULE_PATH", DEFAULT_SCHEDULE_PATH)),
             schedule_timezone=value("SCHEDULE_TIMEZONE", "Europe/Moscow"),
         )

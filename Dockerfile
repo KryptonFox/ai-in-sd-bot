@@ -9,5 +9,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-project \
     && useradd --uid 10001 --create-home student
 COPY --chown=student:student app ./app
+COPY --chown=student:student mcp_servers ./mcp_servers
 USER student
 CMD ["python", "-m", "app"]

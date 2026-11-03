@@ -12,7 +12,7 @@
 - **СУБД и пул соединений:** PostgreSQL 16 (в Docker Compose), асинхронный драйвер `asyncpg` с пулом подключений
 - **Миграции базы данных:** собственный асинхронный runner с `pg_advisory_lock` и контрольными суммами SHA-256 (`app/db/migrations/`)
 - **LLM-интеграция:** `openai.AsyncOpenAI` (Chat Completions через HTTPX2; настраиваемый OpenAI-совместимый endpoint)
-- **MCP:** Python MCP SDK; локальный транспорт `stdio` и Streamable HTTP в Compose
+- **MCP:** FastMCP 4.1.5; отдельный сервер `student-tools` на FastMCP и FastMCP Client в приложении, транспорты `stdio` и Streamable HTTP
 - **Схемы и валидация данных:** `pydantic v2` (модели запросов/ответов LLM, сообщений, валидация настроек пользователей)
 - **Форматирование Telegram:** `telegramify-markdown==1.4.1` (текст + entities, готовое разбиение)
 - **Служебный HTTP-сервер:** `aiohttp` (эндпоинт `/health` на порту 8080 для Docker и оркестраторов)
@@ -32,7 +32,7 @@
    - `ContextBuilder` собирает RCTF-инструкции режима, summary, целые пары реплик и проверенный статус последнего подтверждения. История, summary и результаты tools остаются данными, а не новыми системными инструкциями.
    - Metadata размера окна определяется отдельно от генерации и кэшируется по модели/endpoint; для неизвестного провайдера используется `DEFAULT_CONTEXT_LENGTH`. Общий бюджет консервативно оценивает UTF-8 размер сообщений и схем, учитывая резерв вывода; это не точный токенизатор произвольной модели.
    - При компактизации выбирается ограниченная порция старых полных пар. Новая summary и удаление исходных сообщений сохраняются одной транзакцией. `COMPACTION_KEEP_RECENT=3` округляется вверх до четырёх реплик, чтобы сохранить целые пары.
-   - `AgentService` выполняет единственный цикл ответа: LLM → проверка завершения → ответ, чтение инструмента или предложение подтверждения. `ToolExecutionService` проверяет локальную политику, discovery-схемы, расход и размер результата.
+   - `AgentService` выполняет один обычный цикл tool calling и формирует определения локальных функций чтения обнаруженных ресурсов и уточнения. `ToolExecutionService` валидирует весь пакет вызовов, выполняет MCP tools и перехватывает чтение ресурса на стороне приложения; оно не отправляется как `tools/call` на MCP-сервер.
    - Итог события, обе реплики и продуктовый аудит сохраняются атомарно. Сетевые вызовы не удерживают SQL-транзакции. SDK-клиенты живут до остановки приложения; неявные SDK retries отключены.
 4. **Рендеринг и чанкинг:**
    - Полный Markdown один раз проходит `telegramify_markdown.convert(latex_escape=False)` с изолированной конфигурацией без emoji у заголовков/ссылок и с маркером списка `-`. Затем `split_entities(..., max_utf16_len=4096)` делит текст и entities; отправка через aiogram всегда использует `parse_mode=None`.
@@ -76,6 +76,7 @@ ai-in-sd-bot/
 │   ├── core/                          # Ядро приложения и независимые утилиты
 │   │   ├── schemas/                   # Pydantic-схемы данных
 │   │   │   ├── llm.py                 # Модели LLMRequest, LLMResponse, ToolCall
+│   │   │   ├── mcp.py                 # Нейтральные DTO обнаруженных MCP-ресурсов
 │   │   │   ├── message.py             # Модели ChatMessage, MessageRole
 │   │   │   └── user.py                # Модели UserSettings и валидация температур
 │   │   ├── context.py                 # Трассировка запросов через contextvars (request_id)
@@ -98,15 +99,18 @@ ai-in-sd-bot/
 │   │   └── __init__.py                # Объединяющий корневой роутер хэндлеров
 │   ├── llm/                           # Слой интеграции с языковыми моделями
 │   │   ├── base.py                    # Протокол BaseLLMClient (generate, get_context_length, aclose)
-│   │   ├── client.py                  # SDK-адаптер Chat Completions и tools DTO
+│   │   ├── client.py                  # Жизненный цикл OpenAI SDK, таймауты и безопасные логи
+│   │   ├── codec.py                   # Кодирование LLMRequest и декодирование ответов SDK
 │   │   └── context_length.py          # Отдельное определение metadata и fallback
 │   ├── modes/                         # Режимы работы ассистента
 │   │   ├── base.py                    # Pydantic-модели BotMode и FewShotExample
 │   │   ├── definitions.py             # Типизированные RCTF-части режимов и few-shot
 │   │   └── registry.py                # Реестр доступных ролей ModeRegistry
 │   ├── prompts/                       # Builder, политика, Telegram-контракт и компактизация
-│   ├── mcp/                           # MCP-клиент: discovery, схемы и вызовы инструментов
-│   ├── mcp_server/                    # MCP-сервер и реализации инструментов/ресурса
+│   ├── mcp/                           # MCP-транспорт, каталог tools и вызовы
+│   │   ├── connection.py              # FastMCP Client с транспортом и настройками
+│   │   ├── client.py                  # Discovery, catalog delegation и tool/resource RPC
+│   │   └── catalog.py                 # Discovery definitions и compiled input/output validators
 │   ├── services/                      # Слой бизнес-логики
 │   │   ├── dialog_service.py          # Диалоговый сервис: компактизация и вызов агента
 │   │   ├── agent_service.py           # Ограниченный цикл LLM и вызовов MCP
@@ -145,6 +149,7 @@ ai-in-sd-bot/
 │   ├── test_scripts.py                # Тесты инфраструктурных скриптов проекта
 │   └── test_storage.py                # Тесты валидации моделей данных
 ├── compose.yaml                       # PostgreSQL, бот и MCP-сервер для cloud profile
+├── mcp_servers/student_tools/         # Отдельный FastMCP-сервер student-tools
 ├── pyproject.toml                     # Метаданные проекта, зависимости, настройки pytest и ruff
 └── .env.example                       # Шаблон переменных окружения
 ```
@@ -192,7 +197,7 @@ AGENT_MAX_TOOL_CALLS=2
 AGENT_MAX_LLM_STEPS=4
 CONFIRMATION_TTL=300
 MCP_SHARED_SECRET=               # Для HTTP — отдельный секрет не короче 32 символов
-SCHEDULE_PATH=app/data/schedule.json
+SCHEDULE_PATH=mcp_servers/student_tools/data/schedule.json
 SCHEDULE_TIMEZONE=Europe/Moscow
 
 # Сервисные параметры
@@ -321,7 +326,7 @@ Docker-образ собирается на Python 3.12 с uv 0.13.1. Runtime-з
 `/app/.venv/bin/python` для приложения и healthcheck. При старте пакеты не скачиваются.
 Для локальной проверки образа: `docker build -t ai-in-sd-bot:uv .`.
 Архив развёртывания включает конфигурацию uv, исходники, SQL-миграции и JSON из
-`app/data`, исключая `.env`, локальные окружения и ключи.
+`mcp_servers/student_tools/data`, исключая `.env`, локальные окружения и ключи.
 
 Скрипты `scripts/deploy.sh` (Linux/macOS) и `scripts/deploy.ps1` (Windows) автоматизируют развёртывание бота на виртуальной машине в Yandex Cloud:
 
@@ -344,7 +349,7 @@ bash scripts/deploy.sh destroy
 
 ## Lab 2: MCP-агент
 
-Lab2 расширяет этого бота четырьмя MCP-инструментами и ресурсом текущей недели:
+Lab2 расширяет этого бота четырьмя инструментами FastMCP и ресурсом текущей недели:
 `get_weather`, `get_schedule`, `get_schedule_week`, `add_reminder` и
 `schedule://current-week`. Клиент
 получает их входные и выходные схемы через discovery, проверяет аргументы и
@@ -355,23 +360,25 @@ Lab2 расширяет этого бота четырьмя MCP-инструм�
 процесс, поэтому отдельный порт и отдельная команда запуска сервера не нужны.
 Сервер получает отдельное окружение без Telegram- и LLM-секретов. Для HTTP
 используется Streamable HTTP; бот подключается к `/mcp/` с `Authorization: Bearer`.
+Compose service называется `student-tools-mcp`, внутри сети Compose бот обращается
+к `http://student-tools-mcp:8000/mcp`. FastMCP server name — `student-tools`.
 Сервер слушает внутреннюю сеть Compose и не публикует порт наружу. Для этого
 режима задайте один и тот же `MCP_SHARED_SECRET` длиной не менее 32 символов в
 окружении бота и сервера. В режиме `stdio`, если секрет не задан, клиент создаёт
 временный секрет для запуска дочернего процесса.
 
-Для локального запуска MCP-сервера отдельно (например, для MCP Inspector)
+Для локального запуска FastMCP-сервера отдельно (например, для MCP Inspector)
 подготовьте `.env` с PostgreSQL-параметрами и `MCP_SHARED_SECRET` длиной не менее
 32 символов. Не вставляйте реальный секрет в документацию, скриншоты или отчёт.
 Затем запускайте один из транспортов:
 
 ```bash
-uv run --locked python -m app.mcp_server --transport stdio
-uv run --locked python -m app.mcp_server --transport streamable-http
+uv run --locked python -m mcp_servers.student_tools --transport stdio
+uv run --locked python -m mcp_servers.student_tools --transport streamable-http
 ```
 
 Для Inspector 2.12 настройте stdio-сервер командой `uv` и аргументами
-`run --locked python -m app.mcp_server --transport stdio`, передав PostgreSQL-
+`run --locked python -m mcp_servers.student_tools --transport stdio`, передав PostgreSQL-
 переменные и общий `MCP_SHARED_SECRET` в окружение процесса. Для Streamable HTTP
 укажите URL `http://127.0.0.1:8000/mcp/` и заголовок
 `Authorization: Bearer <MCP_SHARED_SECRET>`; секрет должен совпадать с серверным.
@@ -390,8 +397,8 @@ docker compose --profile cloud up --build -d
 изменение. `/timezone Europe/Moscow` сохраняет часовую зону IANA; команда без
 аргумента показывает используемую зону. По умолчанию применяется `Europe/Moscow`;
 явно сохранённая пользователем зона имеет приоритет. `/why` показывает последнее решение,
-выбранный инструмент, ограниченную сводку аргументов, проверку, выполнение и
-понятное объяснение причины без скрытых рассуждений модели. В записи аудита PostgreSQL
+выбранный инструмент, использованные ресурсы, ограниченную сводку аргументов,
+проверку, выполнение и понятное объяснение причины без скрытых рассуждений модели. В записи аудита PostgreSQL
 хранится безопасная ограниченная сводка аргументов; пользовательский текст не
 попадает в текстовые журналы.
 
@@ -415,10 +422,13 @@ docker compose --profile cloud up --build -d
 Архитектура, основные методы, взаимодействие сервисов и порядок чтения кода
 для защиты описаны в [путеводителе по кодовой базе](docs/architecture/overview.md).
 Маршрут сообщения и обязанности методов описаны в
-[схеме AgentService](docs/architecture/agent-service.md). `DialogService` владеет
+[схеме AgentService](docs/architecture/agent-service.md). Реализация упрощения клиента,
+ресурсного контекста и отдельных границ MCP описана в
+[плане 07](docs/plans/lab2/07-post-lab2-simplification.md). `DialogService` владеет
 полным запросом и хранением, `ContextBuilder` — памятью и бюджетом,
-`AgentService.run` — циклом модели, `ToolExecutionService` — политикой инструментов.
-Текущие изменения и критерии: [план 06](docs/plans/lab2/06-agent-reliability-and-weather.md).
+`AgentService.run` — циклом модели и локальными функциями host, `ToolExecutionService` — общей валидацией и исполнением вызовов.
+Надёжность и погода описаны в [плане 06](docs/plans/lab2/06-agent-reliability-and-weather.md),
+последующее упрощение MCP-клиента — в [плане 07](docs/plans/lab2/07-post-lab2-simplification.md).
 
 Общий `AGENT_TIMEOUT=240` ограничивает обработку после получения места в очереди,
 включая metadata, компактизацию, модель и tools. `LLM_TIMEOUT=180` ограничивает одну
@@ -483,7 +493,11 @@ Groq отдельно ограничивает запросы и токены з
 одного процесса оставшиеся `processing` помечаются прерванными. Подтверждения имеют
 собственное восстановление: `invalid_output` после мутации также требует сверки
 с reminder по idempotency key. Повторная доставка предложения учитывает текущее
-состояние подтверждения. `dry_run` вызывает LLM, но не пишет БД и не исполняет MCP.
+состояние подтверждения. Автоматических повторов MCP-вызова после ошибки клиента нет.
+`MCPClient` открывает SDK-контекст на каждую операцию; RPC timeout не сбрасывает
+discovery-каталог и не закрывает другие активные запросы. `__main__` периодически
+повторяет discovery, когда каталог помечен недоступным; уже отправленный RPC не
+переигрывается.
 
 `get_weather(city?, date?)` принимает нормальную форму названия: «в Казани» → «Казань».
 Без города по умолчанию используется Санкт-Петербург; в продолжении диалога агент
@@ -511,32 +525,45 @@ Groq отдельно ограничивает запросы и токены з
 OpenStreetMap; TLS-проверка сохраняется. Если неоднозначность осталась после
 фильтрации, бот просит уточнить место.
 
-Ресурс `schedule://current-week` обнаруживается через MCP и доступен агенту
-через адаптер `read_resource` только для обнаруженных разрешённых URI. Это один
-вызов в бюджете, а не семь запросов по дням. `get_schedule_week(week_offset=1)`
+Ресурс `schedule://current-week` обнаруживается через MCP и доступен модели как
+локальная функция `read_resource(uri)`. Список URI в её схеме строится из discovery
+и проверяется приложением до чтения. Это функция-host-adapter: агент не вызывает её
+через MCP `tools/call`, а сервер не публикует ресурс в `tools/list`. Хост читает URI
+через FastMCP Client `read_resource()`, затем возвращает результат в сообщение роли
+`tool` с исходным `tool_call_id` и JSON-обёрткой `source`, `uri`, `mime_type`, `content`.
+Данные и обёртка недоверенны. Ошибка самого resource RPC возвращается модели как
+tool error content; приложение не повторяет RPC автоматически, а модель может
+продолжить с уточнением или ответом без недоступных данных. Ошибки URI/аргументов,
+бюджета и нативных MCP tools остаются терминальными. Каждый ресурсный RPC расходует
+один MCP-вызов из общего лимита в два; все tool/resource calls используют один
+цикл максимум в четыре шага LLM. Успешные URI попадают в `AgentResult`, JSONB
+аудита и `/why`. `get_schedule_week(week_offset=1)`
 возвращает следующую неделю по календарю сервера; `get_schedule_week(date)` — неделю,
 содержащую дату; `get_schedule(date)` — один день. `data_available=false`
 отличает отсутствие данных от свободного дня; `weekday`, `is_free_day` и список
 `free_days` вычисляются сервером.
 
 В репозитории находится вымышленное расписание на **2–29 сентября 2030 года**:
-`app/data/schedule.json`. За пределами этого периода сервер честно сообщает об
+`mcp_servers/student_tools/data/schedule.json`. За пределами этого периода сервер честно сообщает об
 отсутствии данных. Личное расписание храните в `.local/schedule.json` и задайте
 `SCHEDULE_PATH=.local/schedule.json` в локальном `.env`. Каталог `.local/`
-игнорируется Git и не попадает в образ или архив исходников. Compose подключает
-выбранный файл в MCP-сервер только для чтения; внутри контейнера путь остаётся
-`app/data/schedule.json`. Для нового окружения без личного файла используется
-демонстрационное расписание из репозитория.
+игнорируется Git и не попадает в образ или архив исходников. При создании удалённого
+`.env.cloud` deploy заменяет только `SCHEDULE_PATH`, содержащий сегмент `.local`,
+на упакованное демонстрационное расписание; локальный `.env` не меняется. Другие
+пользовательские пути сохраняются, и относительный путь разрешается от каталога
+проекта на сервере. Compose подключает выбранный файл в MCP-сервер только для чтения;
+в контейнере его целевой путь — `mcp_servers/student_tools/data/schedule.json`.
 
 `DialogService` координирует запрос и обращается к `ConfirmationService` напрямую,
-а каталог `/tools` получает через `ToolClient`. Исполнение чтений и подготовка
-действий остаются в `ToolExecutionService`. В цикле `AgentResult` завершает обработку,
-`None` после чтения продолжает её. `/why` показывает понятную причину маршрута
-и статусы вместо внутренних кодов завершения, без дополнительного вызова LLM.
+а каталог `/tools` и ресурсы получает через `ToolClient`. Исполнение чтений и подготовка
+действий остаются в `ToolExecutionService`. Внутренний `StepAction.CONTINUE`
+продолжает цикл после чтения; приложение предоставляет локальный инструмент
+`clarification(question)` для уточняющего вопроса без MCP-вызова. `/why` показывает
+выбранные ресурсы отдельно от инструментов и объясняет решение без вызова LLM.
 
 Основной routing dataset сохраняет 12 исходных случаев lab2. Ещё 11 сценариев
 вынесены в `docs/evaluation/lab2-routing-extended.json`: нижний регистр, склонения,
-одежда, follow-up, периоды и город по умолчанию. Dry-run эксперимент измеряет только маршрутизацию
+одежда, follow-up, периоды и город по умолчанию. Оценка маршрутизации измеряет только маршрутизацию
 и аргументы. Изолированные проверки полной погодной цепочки отдельно проверяют
 геокодирование, дату/единицы прогноза и ответ; они не доказывают качество живой LLM.
 

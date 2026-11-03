@@ -17,8 +17,8 @@ from app.core.schemas.tools import (
     WeatherResult,
     WeatherStatus,
 )
-from app.mcp_server.conditions import weather_condition
-from app.mcp_server.geocoding import GeoLocation, LocationResolver
+from mcp_servers.student_tools.conditions import weather_condition
+from mcp_servers.student_tools.geocoding import GeoLocation, LocationResolver
 
 
 class WeatherService:

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 from zoneinfo import ZoneInfo
 
 import pytest
-from conftest import DatabaseFixture
+from fastmcp import Client, FastMCP
 
 from app.core.clock import FrozenClock
 from app.core.schemas.agent import AgentDecision, EventContext
@@ -18,10 +18,11 @@ from app.db.records import ConfirmationState
 from app.db.repositories import confirmation_repo, event_repo, reminder_repo
 from app.db.repositories.audit_repo import latest_decision
 from app.mcp.client import MCPClient
-from app.mcp_server.server import tool_catalog
 from app.services.agent_service import AgentService
 from app.services.confirmation_service import ConfirmationService
 from app.services.tool_execution import ToolExecutionService
+from tests.conftest import DatabaseFixture
+from tests.mcp_catalog import tool_catalog
 
 pytestmark = [
     pytest.mark.integration,
@@ -71,6 +72,9 @@ class TimeoutBeforeInsertMCP:
 class MockToolClient(MCPClient):
     call_tool: AsyncMock
 
+    def __init__(self) -> None:
+        super().__init__(Client(FastMCP("lab2-database-test")))
+
 
 def _context(user_id: int, event_id: str) -> EventContext:
     return EventContext(
@@ -100,7 +104,7 @@ async def test_agent_reminder_prepares_before_confirmation_and_creates_once(
         "remind_at": (now + timedelta(hours=2)).isoformat(),
     }
     executor = InsertThenTimeoutMCP(pool, clock, fail_after_insert=False)
-    mcp = MockToolClient(settings)
+    mcp = MockToolClient()
     mcp.load_catalog(tool_catalog())
     mcp.call_tool = AsyncMock(side_effect=executor.call_tool)
     confirmations = ConfirmationService(pool, mcp, clock=clock)
@@ -114,7 +118,7 @@ async def test_agent_reminder_prepares_before_confirmation_and_creates_once(
     )
     agent = AgentService(
         llm,
-        ToolExecutionService(mcp, confirmations, clock=clock),
+        ToolExecutionService(mcp, confirmations),
         clock=clock,
     )
 

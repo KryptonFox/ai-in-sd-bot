@@ -4,16 +4,16 @@ from datetime import datetime
 from unittest.mock import AsyncMock, Mock
 
 import httpx
+import httpx2
 import pytest
 from mcp import ClientSession, types
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
-from pydantic import AnyUrl
 
 from app.core.clock import FrozenClock
-from app.mcp_server.__main__ import http_app
-from app.mcp_server.config import ServerSettings
-from app.mcp_server.server import build_server
+from mcp_servers.student_tools.__main__ import http_app
+from mcp_servers.student_tools.config import ServerSettings
+from mcp_servers.student_tools.server import build_server
 
 SECRET = "transport-test-secret-0123456789abcdef"
 
@@ -118,9 +118,8 @@ import asyncio
 import json
 import httpx
 from pathlib import Path
-from mcp.server.stdio import stdio_server
-from app.mcp_server.config import ServerSettings
-from app.mcp_server.server import build_server
+from mcp_servers.student_tools.config import ServerSettings
+from mcp_servers.student_tools.server import build_server
 
 class Pool:
     async def fetchval(self, *args, **kwargs):
@@ -142,8 +141,7 @@ async def main():
     )
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         server = build_server(Pool(), config, http)
-        async with stdio_server() as (read_stream, write_stream):
-            await server.run(read_stream, write_stream, server.create_initialization_options())
+        await server.run_async(transport="stdio")
 
 asyncio.run(main())
 """
@@ -168,23 +166,35 @@ async def test_stdio_transport_discovers_and_calls_server(tmp_path):
             assert [str(resource.uri) for resource in resources.resources] == [
                 "schedule://current-week"
             ]
+            discovered = {tool.name: tool for tool in tools.tools}
+            assert all(tool.output_schema is not None for tool in discovered.values())
+            assert all(
+                tool.input_schema["additionalProperties"] is False for tool in discovered.values()
+            )
+            assert discovered["get_weather"].annotations is not None
+            assert discovered["get_weather"].annotations.read_only_hint is True
+            assert discovered["add_reminder"].annotations is not None
+            assert discovered["add_reminder"].annotations.read_only_hint is False
+            weather_output_schema = discovered["get_weather"].output_schema
+            assert weather_output_schema is not None
+            assert "anyOf" not in weather_output_schema
 
             schedule = await session.call_tool("get_schedule", {"date": "2030-01-02"})
-            assert schedule.structuredContent is not None
-            assert schedule.isError is not True
-            assert schedule.structuredContent["lessons"][0]["title"] == "Распределённые системы"
+            assert schedule.structured_content is not None
+            assert schedule.is_error is not True
+            assert schedule.structured_content["lessons"][0]["title"] == "Распределённые системы"
             repeated = await session.call_tool("get_schedule", {"date": "2030-01-02"})
-            assert repeated.structuredContent == schedule.structuredContent
+            assert repeated.structured_content == schedule.structured_content
             next_week = await session.call_tool("get_schedule_week", {"week_offset": 1})
-            assert not next_week.isError and next_week.structuredContent is not None
-            assert len(next_week.structuredContent["days"]) == 7
+            assert not next_week.is_error and next_week.structured_content is not None
+            assert len(next_week.structured_content["days"]) == 7
 
             weather = await session.call_tool("get_weather", {"city": "Москва"})
-            assert weather.structuredContent is not None
-            assert weather.isError is not True
-            assert weather.structuredContent["temperature"] == 8.0
+            assert weather.structured_content is not None
+            assert weather.is_error is not True
+            assert weather.structured_content["temperature"] == 8.0
 
-            week = await session.read_resource(AnyUrl("schedule://current-week"))
+            week = await session.read_resource("schedule://current-week")
             content = week.contents[0]
             assert isinstance(content, types.TextResourceContents)
             week_data = json.loads(content.text)
@@ -193,12 +203,12 @@ async def test_stdio_transport_discovers_and_calls_server(tmp_path):
             extra_field = await session.call_tool(
                 "get_schedule", {"date": "2030-01-02", "unexpected": True}
             )
-            assert extra_field.isError is True
+            assert extra_field.is_error is True
             untrusted_mutation = await session.call_tool(
                 "add_reminder",
                 {"text": "Тест", "remind_at": "2030-01-03T09:00:00+03:00"},
             )
-            assert untrusted_mutation.isError is True
+            assert untrusted_mutation.is_error is True
 
 
 @pytest.mark.asyncio
@@ -216,8 +226,8 @@ async def test_streamable_http_transport_auth_and_mcp_contract(tmp_path):
         app = http_app(server, SECRET, pool)
 
         async with app.router.lifespan_context(app):
-            raw_client = httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            raw_client = httpx2.AsyncClient(
+                transport=httpx2.ASGITransport(app=app), base_url="http://test"
             )
             async with raw_client:
                 unauthorized = await raw_client.get("/mcp/")
@@ -225,14 +235,13 @@ async def test_streamable_http_transport_auth_and_mcp_contract(tmp_path):
                 health = await raw_client.get("/health")
                 assert health.status_code == 200
 
-            async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app),
+            async with httpx2.AsyncClient(
+                transport=httpx2.ASGITransport(app=app),
                 headers={"Authorization": f"Bearer {SECRET}", "X-User-Id": "42"},
             ) as client:
                 async with streamable_http_client(url="http://test/mcp/", http_client=client) as (
                     read_stream,
                     write_stream,
-                    _,
                 ):
                     async with ClientSession(read_stream, write_stream) as session:
                         await session.initialize()
@@ -242,36 +251,36 @@ async def test_streamable_http_transport_auth_and_mcp_contract(tmp_path):
                         assert len(resources.resources) == 1
 
                         schedule = await session.call_tool("get_schedule", {"date": "2030-01-02"})
-                        assert schedule.structuredContent is not None
-                        assert schedule.isError is not True
+                        assert schedule.structured_content is not None
+                        assert schedule.is_error is not True
                         assert (
-                            schedule.structuredContent["lessons"][0]["title"]
+                            schedule.structured_content["lessons"][0]["title"]
                             == "Распределённые системы"
                         )
                         weather = await session.call_tool("get_weather", {"city": "Москва"})
-                        assert weather.structuredContent is not None
-                        assert weather.isError is not True
-                        assert weather.structuredContent["status"] == "ok"
+                        assert weather.structured_content is not None
+                        assert weather.is_error is not True
+                        assert weather.structured_content["status"] == "ok"
 
                         default_weather = await session.call_tool("get_weather", {})
-                        assert not default_weather.isError
-                        assert default_weather.structuredContent is not None
-                        assert default_weather.structuredContent["city"] == "Санкт-Петербург"
-                        assert default_weather.structuredContent["requested_date"] == "2030-01-02"
+                        assert not default_weather.is_error
+                        assert default_weather.structured_content is not None
+                        assert default_weather.structured_content["city"] == "Санкт-Петербург"
+                        assert default_weather.structured_content["requested_date"] == "2030-01-02"
                         default_schedule = await session.call_tool("get_schedule", {})
-                        assert not default_schedule.isError
-                        assert default_schedule.structuredContent is not None
-                        assert default_schedule.structuredContent["date"] == "2030-01-02"
-                        assert len(default_schedule.structuredContent["lessons"]) == 1
+                        assert not default_schedule.is_error
+                        assert default_schedule.structured_content is not None
+                        assert default_schedule.structured_content["date"] == "2030-01-02"
+                        assert len(default_schedule.structured_content["lessons"]) == 1
 
-                        week = await session.read_resource(AnyUrl("schedule://current-week"))
+                        week = await session.read_resource("schedule://current-week")
                         content = week.contents[0]
                         assert isinstance(content, types.TextResourceContents)
                         assert len(json.loads(content.text)["days"]) == 7
                         malformed = await session.call_tool(
                             "get_schedule", {"date": "2030-01-02", "unexpected": True}
                         )
-                        assert malformed.isError is True
+                        assert malformed.is_error is True
 
                         missing_context = await session.call_tool(
                             "add_reminder",
@@ -286,7 +295,7 @@ async def test_streamable_http_transport_auth_and_mcp_contract(tmp_path):
                                 "confirmation_id": "00000000-0000-0000-0000-000000000000",
                             },
                         )
-                        assert missing_context.isError is True
-                        assert forged_context.isError is True
+                        assert missing_context.is_error is True
+                        assert forged_context.is_error is True
                         pool.acquire.assert_not_called()
                         pool.fetchval.assert_awaited()

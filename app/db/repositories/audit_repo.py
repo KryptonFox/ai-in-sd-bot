@@ -16,12 +16,16 @@ _SAFE_ARGUMENT_LIMITS = {
 
 
 def _safe_arguments(arguments: Mapping[str, object] | None) -> str:
-    safe: dict[str, str] = {}
+    safe: dict[str, object] = {}
     if isinstance(arguments, Mapping):
         for key, limit in _SAFE_ARGUMENT_LIMITS.items():
             value = arguments.get(key)
             if isinstance(value, str):
                 safe[key] = value[:limit]
+
+        resource_uris = arguments.get("resource_uris")
+        if isinstance(resource_uris, list):
+            safe["resource_uris"] = [uri[:512] for uri in resource_uris if isinstance(uri, str)]
     return json.dumps(safe, ensure_ascii=False)
 
 

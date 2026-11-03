@@ -4,18 +4,18 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from fastmcp import Client, FastMCP
 
-from app.config import Settings
 from app.core.clock import FrozenClock
 from app.core.schemas.agent import AgentDecision, EventContext
 from app.core.schemas.llm import LLMResponse
 from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.core.schemas.tools import ToolFailure
 from app.mcp.client import MCPClient
-from app.mcp_server.server import tool_catalog
-from app.mcp_server.weather import WeatherService
 from app.services.agent_service import AgentService
 from app.services.tool_execution import ToolExecutionService
+from mcp_servers.student_tools.weather import WeatherService
+from tests.mcp_catalog import tool_catalog
 
 CLOCK = FrozenClock(datetime(2026, 10, 26, 22, 30, tzinfo=UTC))
 CITY = {
@@ -221,6 +221,9 @@ async def test_daily_forecast_rejects_wrong_date_units_and_values(change: str) -
 class LocalToolClient(MCPClient):
     call_tool: AsyncMock
 
+    def __init__(self) -> None:
+        super().__init__(Client(FastMCP("weather-resolution")))
+
 
 @pytest.mark.parametrize(
     ("query", "city", "chance"),
@@ -236,8 +239,7 @@ async def test_weather_pipeline_separates_routing_location_forecast_and_answer(
     city: str,
     chance: int,
 ) -> None:
-    settings = Settings(bot_token="unused", postgres_password="unused")
-    tool = LocalToolClient(settings)
+    tool = LocalToolClient()
     tool.load_catalog(tool_catalog())
     requests = []
 
@@ -268,7 +270,7 @@ async def test_weather_pipeline_separates_routing_location_forecast_and_answer(
         async def execute(name, arguments, **kwargs):
             assert name == "get_weather"
             payload = (await weather.get_weather(arguments["city"])).model_dump(mode="json")
-            return tool._validated_output(name, payload)
+            return tool.catalog.validate_output(name, payload)
 
         tool.call_tool = AsyncMock(side_effect=execute)
 
@@ -293,7 +295,7 @@ async def test_weather_pipeline_separates_routing_location_forecast_and_answer(
             )
 
         llm = MagicMock(generate=AsyncMock(side_effect=generate))
-        agent = AgentService(llm, ToolExecutionService(tool, clock=CLOCK), clock=CLOCK)
+        agent = AgentService(llm, ToolExecutionService(tool), clock=CLOCK)
         result = await agent.run(
             [
                 ChatMessage(role=MessageRole.SYSTEM, content="Условия учебного бота"),
@@ -330,11 +332,8 @@ async def test_missing_probability_preserves_current_weather_without_inventing_f
     assert result.today is None
 
 
-async def test_unknown_location_returns_clarification_without_forecast_or_second_generation() -> (
-    None
-):
-    settings = Settings(bot_token="unused", postgres_password="unused")
-    tool = LocalToolClient(settings)
+async def test_unknown_location_returns_model_clarification_without_forecast() -> None:
+    tool = LocalToolClient()
     tool.load_catalog(tool_catalog())
     requests = []
 
@@ -352,28 +351,41 @@ async def test_unknown_location_returns_clarification_without_forecast_or_second
         tool.call_tool = AsyncMock(side_effect=execute)
         llm = MagicMock(
             generate=AsyncMock(
-                return_value=LLMResponse(
-                    content="",
-                    tool_calls=[
-                        ToolCall(
-                            id="weather",
-                            name="get_weather",
-                            arguments={"city": "Несуществующий город"},
-                        )
-                    ],
-                )
+                side_effect=[
+                    LLMResponse(
+                        content="",
+                        tool_calls=[
+                            ToolCall(
+                                id="weather",
+                                name="get_weather",
+                                arguments={"city": "Несуществующий город"},
+                            )
+                        ],
+                    ),
+                    LLMResponse(
+                        content="",
+                        tool_calls=[
+                            ToolCall(
+                                id="clarify",
+                                name="clarification",
+                                arguments={"question": "Какой город вы имеете в виду?"},
+                            )
+                        ],
+                    ),
+                ]
             )
         )
         result = await AgentService(llm, ToolExecutionService(tool)).run(
             [], EventContext(user_id=1, event_id="unknown", request_id="test")
         )
-    assert result.decision == AgentDecision.CLARIFY and "не найден" in result.text
+    assert result.decision == AgentDecision.CLARIFY
+    assert result.text == "Какой город вы имеете в виду?"
     assert len(requests) == 1
-    llm.generate.assert_awaited_once()
+    assert llm.generate.await_count == 2
 
 
 async def test_missing_weather_arguments_use_saint_petersburg_and_today() -> None:
-    tool = LocalToolClient(Settings(bot_token="unused", postgres_password="unused"))
+    tool = LocalToolClient()
     tool.load_catalog(tool_catalog())
     tool.validate_arguments("get_weather", {})
     tool.validate_arguments("get_schedule", {})

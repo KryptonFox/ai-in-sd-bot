@@ -18,7 +18,6 @@ _TOOL_PURPOSE = {
     "get_weather": "Для ответа нужны актуальные погодные данные.",
     "get_schedule": "Для ответа нужно расписание на выбранный день.",
     "get_schedule_week": "Для ответа нужно расписание выбранной недели.",
-    "read_resource": "Для ответа нужно прочитать расписание текущей недели.",
     "add_reminder": "Пользователь запросил создание напоминания.",
 }
 
@@ -34,7 +33,7 @@ _STATUS_TEXT = {
     "cancelled": "действие отменено",
     "expired": "срок подтверждения истёк",
     "failed": "действие не выполнено",
-    "dry_run": "выбрано действие без выполнения",
+    "clarification": "задан уточняющий вопрос",
     "unknown_outcome": "результат действия пока неизвестен",
     "interrupted": "запрос прерван",
     "call_budget": "Достигнут лимит обращений к инструментам.",
@@ -132,10 +131,15 @@ def decision_text(record: DecisionAudit | None) -> str:
     validation = _status_text(record["validation"])
     execution = _status_text(record["execution"])
     reason = _decision_reason(record)
+    resource_uris = record["arguments"].get("resource_uris", [])
+    resources = "нет"
+    if isinstance(resource_uris, list):
+        resources = ", ".join(uri for uri in resource_uris if isinstance(uri, str)) or "нет"
 
     return (
         f"Время: {record['created_at'].isoformat()}\nДействие: {action}\n"
         f"Инструмент: {record['tool_name'] or 'нет'}\nПараметры: {record['arguments']}\n"
+        f"Ресурсы: {resources}\n"
         f"Проверка: {validation}\nВыполнение: {execution}\n"
         f"Длительность: {record['duration_ms']:.0f} мс\nПричина: {reason}"
     )
@@ -152,8 +156,14 @@ def _decision_reason(record: DecisionAudit) -> str:
     if record["decision"] == AgentDecision.CLARIFY:
         return "Для выполнения запроса нужно уточнить недостающие параметры."
 
+    if record["arguments"].get("resource_uris"):
+        return "Для ответа использованы данные обнаруженных MCP-ресурсов."
+
     tool_name = record["tool_name"]
     if tool_name in _TOOL_PURPOSE:
         return _TOOL_PURPOSE[tool_name]
+
+    if tool_name:
+        return "Для ответа потребовались данные MCP-инструмента."
 
     return "На запрос можно ответить без обращения к внешним данным."

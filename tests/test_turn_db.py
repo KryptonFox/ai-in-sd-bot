@@ -4,23 +4,26 @@ from unittest.mock import AsyncMock, MagicMock
 
 import asyncpg
 import pytest
-from conftest import DatabaseFixture
 
 from app.core.clock import FrozenClock
 from app.core.schemas.agent import Acquired, AgentDecision, AgentResult, EventContext, Replay
 from app.core.schemas.llm import LLMResponse
-from app.core.schemas.message import ChatMessage, MessageRole
+from app.core.schemas.mcp import ResourceContent
+from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.core.schemas.tools import ToolFailure
 from app.db.connection import create_pool
 from app.db.repositories import confirmation_repo, history_repo, reminder_repo, timezone_repo
+from app.db.repositories.audit_repo import latest_decision
 from app.db.repositories.turn_repo import PostgresTurnStore
 from app.db.repositories.user_repo import get_or_create_user
-from app.mcp.client import MCPClient
-from app.mcp_server.server import resource_catalog, tool_catalog
+from app.mcp.connection import create_student_tools_client
+from app.presentation.agent import decision_text
 from app.services.agent_service import AgentService
 from app.services.confirmation_service import ConfirmationService
 from app.services.dialog_service import DialogService
-from app.services.tool_execution import ToolExecutionService
+from app.services.tool_execution import READ_RESOURCE_FUNCTION, ToolExecutionService
+from tests.conftest import DatabaseFixture
+from tests.mcp_catalog import resource_catalog, tool_catalog
 
 pytestmark = [
     pytest.mark.integration,
@@ -53,13 +56,13 @@ async def test_dialog_restores_history_and_effective_timezone_from_database(
             ]
         ),
     )
-    mcp = MCPClient(settings)
+    mcp = create_student_tools_client(settings)
     mcp.load_catalog(tool_catalog())
     mcp.load_resources(resource_catalog())
 
     def make_service() -> DialogService:
         store = PostgresTurnStore(pool)
-        tools = ToolExecutionService(mcp, store=store, clock=clock)
+        tools = ToolExecutionService(mcp, store=store)
         agent = AgentService(llm, tools, clock=clock)
         return DialogService(
             pool,
@@ -93,6 +96,107 @@ async def test_dialog_restores_history_and_effective_timezone_from_database(
         ]
         assert conversation == ["Запомни слово Альфа", "Слово запомнил.", "Какое слово я назвал?"]
         assert len(await history_repo.get_user_messages_with_ids(pool, 1)) == 4
+    finally:
+        await pool.close()
+
+
+async def test_native_resource_is_saved_in_audit_and_replayed_without_model_or_rpc(
+    database: DatabaseFixture,
+) -> None:
+    settings = database[0]
+    pool = await create_pool(settings)
+    uri = "schedule://current-week"
+    clock = FrozenClock(NOW)
+    llm = MagicMock(
+        get_context_length=AsyncMock(return_value=32768),
+        generate=AsyncMock(
+            side_effect=[
+                LLMResponse(
+                    content="",
+                    tool_calls=[
+                        ToolCall(
+                            id="resource",
+                            name=READ_RESOURCE_FUNCTION,
+                            arguments={"uri": uri},
+                        )
+                    ],
+                ),
+                LLMResponse(content="В понедельник занятий нет."),
+            ]
+        ),
+    )
+    mcp = create_student_tools_client(settings)
+    mcp.load_catalog(tool_catalog())
+    mcp.load_resources(resource_catalog())
+    mcp.read_resource = AsyncMock(return_value=ResourceContent(uri, '{"days": []}'))
+    store = PostgresTurnStore(pool)
+    agent = AgentService(llm, ToolExecutionService(mcp, store=store), clock=clock)
+    dialog = DialogService(pool, settings, llm, agent=agent, store=store, clock=clock)
+
+    try:
+        first = await dialog.process_user_message(1, "Когда я свободен на неделе?", event_id="week")
+        replay = await dialog.process_user_message(
+            1, "Когда я свободен на неделе?", event_id="week"
+        )
+
+        assert isinstance(first, AgentResult)
+        assert replay == first
+        assert first.resource_uris == [uri]
+        assert first.tool_name is None
+        assert llm.generate.await_count == 2
+        mcp.read_resource.assert_awaited_once_with(uri)
+        audit = await latest_decision(pool, 1)
+        assert audit is not None
+        assert audit["tool_name"] is None
+        assert audit["arguments"]["resource_uris"] == [uri]
+        assert f"Ресурсы: {uri}" in decision_text(audit)
+        assert await pool.fetchval("SELECT calls_used FROM agent_events WHERE event_id='week'") == 1
+
+        await pool.execute(
+            "UPDATE agent_events SET result=(result - 'resource_uris') "
+            "|| '{\"planned\": false}'::jsonb WHERE event_id='week'"
+        )
+        legacy = await dialog.process_user_message(1, "Повтор", event_id="week")
+        assert isinstance(legacy, AgentResult)
+        assert legacy.resource_uris == []
+        assert llm.generate.await_count == 2
+    finally:
+        await pool.close()
+
+
+async def test_existing_confirmation_with_legacy_position_is_reused_without_new_proposal(
+    database: DatabaseFixture,
+) -> None:
+    settings = database[0]
+    pool = await create_pool(settings)
+    clock = FrozenClock(NOW)
+    llm = MagicMock(generate=AsyncMock(side_effect=AssertionError("Unexpected LLM call")))
+    mcp = create_student_tools_client(settings)
+    mcp.call_tool = AsyncMock(side_effect=AssertionError("Unexpected MCP call"))
+    confirmations = ConfirmationService(pool, mcp, clock)
+    context = EventContext(user_id=1, event_id="legacy-reminder", request_id="legacy")
+
+    try:
+        await get_or_create_user(pool, 1)
+        prepared = await confirmations.prepare(
+            context,
+            {"text": "Проверить проект", "remind_at": (NOW + timedelta(days=1)).isoformat()},
+            "UTC",
+            position=203,
+            calls_remaining=2,
+        )
+        dialog = DialogService(pool, settings, llm, confirmations=confirmations, clock=clock)
+
+        result = await dialog.process_user_message(1, "Повтор запроса", event_id=context.event_id)
+
+        assert isinstance(result, AgentResult)
+        assert result.confirmation_id == prepared.confirmation_id
+        existing = await confirmation_repo.find_event(pool, 1, context.event_id)
+        assert existing is not None
+        assert existing["position"] == 203
+        assert await pool.fetchval("SELECT count(*) FROM pending_confirmations") == 1
+        llm.generate.assert_not_awaited()
+        mcp.call_tool.assert_not_awaited()
     finally:
         await pool.close()
 

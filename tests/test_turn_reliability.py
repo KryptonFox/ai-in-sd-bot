@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import asyncpg
 import pytest
+from fastmcp import Client, FastMCP
+from mcp import types
 
 from app.config import Settings
 from app.core.budget import ContextBudget
@@ -15,12 +17,13 @@ from app.core.schemas.agent import AgentDecision, AgentResult, EventContext, InP
 from app.core.schemas.llm import FinishReason, LLMResponse, ToolDefinition
 from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.mcp.client import MCPClient
-from app.mcp_server.server import resource_catalog, tool_catalog
+from app.mcp.connection import create_student_tools_client
 from app.services.agent_service import AgentService
 from app.services.confirmation_service import ConfirmationService
 from app.services.dialog_service import DialogService
 from app.services.tool_execution import ToolExecutionService
 from tests.fake_turns import MemoryHistory, MemoryTurn, MemoryTurnStore
+from tests.mcp_catalog import tool_catalog
 from tests.test_bot_scenarios import InMemoryPool, _InMemoryConnectionContext, make_dialog
 
 NOW = datetime(2026, 10, 27, 9, tzinfo=UTC)
@@ -29,6 +32,9 @@ SETTINGS = Settings(bot_token="unused", postgres_password="unused")
 
 class MockTools(MCPClient):
     call_tool: AsyncMock
+
+    def __init__(self) -> None:
+        super().__init__(Client(FastMCP("turn-reliability")))
 
 
 async def test_replay_precedes_compaction_and_writes_one_turn() -> None:
@@ -45,9 +51,9 @@ async def test_replay_precedes_compaction_and_writes_one_turn() -> None:
 async def test_dialog_with_full_tool_catalog_keeps_previous_turn_in_model_context() -> None:
     pool = InMemoryPool()
     store = MemoryTurnStore(cast(MemoryHistory, pool))
-    mcp = MCPClient(SETTINGS)
+    mcp = create_student_tools_client(SETTINGS)
     mcp.load_catalog(tool_catalog())
-    mcp.load_resources(resource_catalog())
+    mcp.load_resources([])
     clock = FrozenClock(NOW)
     llm = MagicMock(
         generate=AsyncMock(
@@ -57,7 +63,7 @@ async def test_dialog_with_full_tool_catalog_keeps_previous_turn_in_model_contex
             ]
         )
     )
-    agent = AgentService(llm, ToolExecutionService(mcp, store=store, clock=clock), clock=clock)
+    agent = AgentService(llm, ToolExecutionService(mcp, store=store), clock=clock)
     service = DialogService(
         cast(asyncpg.Pool, pool),
         SETTINGS,
@@ -134,7 +140,7 @@ async def test_replayed_confirmation_uses_current_state_without_llm_or_history_w
 
 
 async def test_dialog_tools_status_reflects_discovered_catalog_and_availability() -> None:
-    mcp = MCPClient(SETTINGS)
+    mcp = create_student_tools_client(SETTINGS)
     mcp.load_catalog(tool_catalog())
     service = DialogService(
         cast(asyncpg.Pool, InMemoryPool()),
@@ -263,56 +269,45 @@ async def test_cancelled_waiter_releases_registration() -> None:
         assert await queue.get_queue_size(1) == 1
 
 
-@pytest.mark.parametrize(
-    "response",
-    [
-        LLMResponse(content="plain"),
-        LLMResponse(
-            content="",
-            tool_calls=[
-                ToolCall(
-                    id="finish",
-                    name="finish_response",
-                    arguments={"action": "respond", "text": "final"},
-                )
-            ],
-        ),
-        LLMResponse(content="", tool_calls=[ToolCall(id="invalid", name="missing", arguments={})]),
-        LLMTimeoutError("timeout"),
-    ],
-)
-async def test_dry_run_does_not_touch_store_on_any_outcome(response) -> None:
-    store = MagicMock(
-        reserve=AsyncMock(),
-        complete=AsyncMock(),
-        interrupt=AsyncMock(),
-        claim=AsyncMock(),
+async def test_unclassified_mutation_is_rejected_before_store_reservation() -> None:
+    mcp = MockTools()
+    unknown_mutation = tool_catalog()[0].model_copy(
+        update={
+            "name": "send_email",
+            "annotations": types.ToolAnnotations(read_only_hint=False),
+        }
     )
+    mcp.load_catalog([unknown_mutation])
+    mcp.call_tool = AsyncMock()
+    store = MagicMock(reserve=AsyncMock(return_value=True))
     llm = MagicMock(
-        generate=AsyncMock(side_effect=response)
-        if isinstance(response, Exception)
-        else AsyncMock(return_value=response)
-    )
-    agent = AgentService(llm, ToolExecutionService(store=store))
-    if isinstance(response, Exception):
-        with pytest.raises(LLMTimeoutError):
-            await agent.run(
-                [],
-                EventContext(user_id=1, event_id="real", request_id="request"),
-                dry_run=True,
+        generate=AsyncMock(
+            return_value=LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        id="send-email",
+                        name="send_email",
+                        arguments={"city": "Казань"},
+                    )
+                ],
             )
-    else:
-        await agent.run(
-            [],
-            EventContext(user_id=1, event_id="real", request_id="request"),
-            dry_run=True,
         )
-    for method in (store.claim, store.reserve, store.complete, store.interrupt):
-        method.assert_not_awaited()
+    )
+
+    result = await AgentService(llm, ToolExecutionService(mcp, store=store)).run(
+        [],
+        EventContext(user_id=1, event_id="mutation", request_id="mutation"),
+    )
+
+    assert result.reason == "unsupported_action"
+    assert result.decision == AgentDecision.ERROR
+    store.reserve.assert_not_awaited()
+    mcp.call_tool.assert_not_awaited()
 
 
 async def test_truncated_tool_call_never_dispatches() -> None:
-    mcp = MockTools(SETTINGS)
+    mcp = MockTools()
     mcp.load_catalog(tool_catalog())
     call = AsyncMock()
     mcp.call_tool = call
@@ -338,7 +333,7 @@ async def test_partial_read_then_timeout_requires_new_turn_without_repeating_rpc
     pool = InMemoryPool()
     store = MemoryTurnStore(cast(MemoryHistory, pool))
     clock = FrozenClock(NOW)
-    mcp = MockTools(SETTINGS)
+    mcp = MockTools()
     mcp.load_catalog(tool_catalog())
     call = AsyncMock(return_value={"status": "ok"})
     mcp.call_tool = call
@@ -355,7 +350,7 @@ async def test_partial_read_then_timeout_requires_new_turn_without_repeating_rpc
             ]
         )
     )
-    tools = ToolExecutionService(mcp, store=store, clock=clock)
+    tools = ToolExecutionService(mcp, store=store)
     agent = AgentService(llm, tools, clock=clock)
     service = DialogService(
         cast(asyncpg.Pool, pool),
@@ -484,7 +479,7 @@ async def test_compaction_processes_bounded_batches_and_preserves_recent_pairs()
 
 
 async def test_oversized_tool_result_does_not_break_json_or_call_model_again() -> None:
-    mcp = MockTools(SETTINGS)
+    mcp = MockTools()
     mcp.load_catalog(tool_catalog())
     mcp.call_tool = AsyncMock(return_value={"status": "ok", "large": "x" * 1000})
     llm = MagicMock(

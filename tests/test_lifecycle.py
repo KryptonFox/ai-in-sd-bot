@@ -147,7 +147,7 @@ async def test_application_closes_llm_at_every_lifecycle_boundary(monkeypatch, f
     from app import __main__ as application
 
     mcp = Mock(start=AsyncMock(), aclose=AsyncMock(), available=False)
-    monkeypatch.setattr(application, "MCPClient", Mock(return_value=mcp))
+    monkeypatch.setattr(application, "create_student_tools_client", Mock(return_value=mcp))
     llm = Mock(aclose=AsyncMock())
     monkeypatch.setattr(
         application,

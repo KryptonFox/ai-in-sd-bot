@@ -5,26 +5,31 @@ from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
+from jsonschema import Draft202012Validator
+from jsonschema import ValidationError as SchemaValidationError
 from mcp import types
 
 from app.config import Settings
 from app.core.clock import FrozenClock
 from app.core.schemas.agent import AgentDecision, EventContext
-from app.core.schemas.llm import LLMResponse
+from app.core.schemas.llm import FinishReason, LLMResponse
 from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.core.schemas.tools import ScheduleWeekArguments, ToolFailure
 from app.mcp.client import MCPClient
-from app.mcp_server.schedule import ScheduleService
-from app.mcp_server.server import resource_catalog, tool_catalog
-from app.mcp_server.weather import WeatherService
+from app.mcp.connection import create_student_tools_client
 from app.services.agent_service import AgentService
-from app.services.tool_execution import ToolExecutionService
+from app.services.tool_execution import READ_RESOURCE_FUNCTION, ToolExecutionService
+from mcp_servers.student_tools.schedule import ScheduleService
+from mcp_servers.student_tools.weather import WeatherService
+from tests.fake_mcp import mock_sdk_client
+from tests.mcp_catalog import resource_catalog, tool_catalog
 
 CLOCK = FrozenClock(datetime.fromisoformat("2026-10-27T23:30:00+03:00"))
 
 
 async def test_discovered_week_resource_reaches_agent_and_counts_as_one_call() -> None:
-    client = MCPClient(Settings(bot_token="unused", postgres_password="unused"))
+    sdk, sdk_mock = mock_sdk_client()
+    client = MCPClient(sdk)
     client.load_catalog(tool_catalog())
     client.load_resources(resource_catalog())
     week = {
@@ -34,26 +39,26 @@ async def test_discovered_week_resource_reaches_agent_and_counts_as_one_call() -
         "days": [],
     }
     command = AsyncMock(
-        return_value=types.ReadResourceResult(
-            contents=[
-                types.TextResourceContents(
-                    uri="schedule://current-week",
-                    mimeType="application/json",
-                    text=json.dumps(week),
-                )
-            ]
-        )
+        return_value=[
+            types.TextResourceContents(
+                uri="schedule://current-week",
+                mime_type="application/json",
+                text=json.dumps(week),
+            )
+        ]
     )
-    client._command = command
+    sdk_mock.read_resource = command
+    client.available = True
     llm = Mock()
     llm.generate = AsyncMock(
         side_effect=[
             LLMResponse(
                 content="",
+                finish_reason=FinishReason.TOOL_CALLS,
                 tool_calls=[
                     ToolCall(
                         id="week",
-                        name="read_resource",
+                        name=READ_RESOURCE_FUNCTION,
                         arguments={"uri": "schedule://current-week"},
                     )
                 ],
@@ -66,26 +71,46 @@ async def test_discovered_week_resource_reaches_agent_and_counts_as_one_call() -
         [ChatMessage(role=MessageRole.USER, content="Когда я свободен на этой неделе?")],
         EventContext(user_id=1, event_id="week", request_id="week"),
     )
-    assert result.decision == AgentDecision.TOOL and result.tool_name == "read_resource"
-    command.assert_awaited_once_with("read_resource", "schedule://current-week")
+    assert result.decision == AgentDecision.RESPOND
+    assert result.tool_name is None
+    assert result.resource_uris == ["schedule://current-week"]
+    command.assert_awaited_once_with("schedule://current-week")
     store.reserve.assert_awaited_once()
-    tool_message = llm.generate.await_args_list[1].args[0].messages[-1]
-    assert tool_message.role == MessageRole.TOOL and tool_message.tool_call_id == "week"
-    assert json.loads(tool_message.content)["data"]["start_date"] == "2026-10-26"
+    resource_message = llm.generate.await_args_list[1].args[0].messages[-1]
+    assert resource_message.role == MessageRole.TOOL
+    assert resource_message.tool_call_id == "week"
+    resource_payload = json.loads(resource_message.content)
+    assert resource_payload["source"] == "mcp_resource"
+    assert resource_payload["uri"] == "schedule://current-week"
+    assert json.loads(resource_payload["content"])["start_date"] == "2026-10-26"
 
 
-def test_resource_adapter_rejects_undiscovered_and_arbitrary_uris() -> None:
-    client = MCPClient(Settings(bot_token="unused", postgres_password="unused"))
+async def test_resource_adapter_rejects_undiscovered_and_arbitrary_uris() -> None:
+    client = create_student_tools_client(Settings(bot_token="unused", postgres_password="unused"))
     client.load_catalog(tool_catalog())
     assert "read_resource" not in client.tools
     client.load_resources(resource_catalog())
+    resource_tool = next(
+        tool
+        for tool in AgentService(Mock(), ToolExecutionService(client)).definitions
+        if tool.name == READ_RESOURCE_FUNCTION
+    )
+    assert resource_tool.parameters["properties"]["uri"]["enum"] == ["schedule://current-week"]
+    Draft202012Validator(resource_tool.parameters).validate({"uri": "schedule://current-week"})
 
     for uri in ("file:///etc/passwd", "https://example.org", "schedule://next-week"):
         with pytest.raises(ToolFailure):
-            client.validate_arguments("read_resource", {"uri": uri})
+            await client.read_resource(uri)
+
+    with pytest.raises(SchemaValidationError):
+        Draft202012Validator(resource_tool.parameters).validate(
+            {"uri": "schedule://current-week", "path": "/etc/passwd"}
+        )
 
     client.load_resources([])
-    assert "read_resource" not in client.tools
+    assert READ_RESOURCE_FUNCTION not in {
+        tool.name for tool in AgentService(Mock(), ToolExecutionService(client)).definitions
+    }
 
 
 async def test_week_crosses_month_boundary_and_distinguishes_unknown_days(
@@ -114,7 +139,7 @@ async def test_relative_week_uses_server_calendar_and_timezone(
     service = ScheduleService(path, "Europe/Moscow", clock)
     week = await service.relative_week(1)
     assert (week.start_date, week.end_date) == ("2026-11-09", "2026-11-15")
-    client = MCPClient(Settings(bot_token="unused", postgres_password="unused"))
+    client = create_student_tools_client(Settings(bot_token="unused", postgres_password="unused"))
     client.load_catalog(tool_catalog())
     client.validate_arguments("get_schedule_week", {"week_offset": 1})
 

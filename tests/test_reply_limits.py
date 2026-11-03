@@ -1,18 +1,16 @@
 from unittest.mock import AsyncMock, Mock
 
-from mcp import types
-
 from app.config import Settings
 from app.core.budget import ContextBudget
 from app.core.formatters import _split_messages
 from app.core.schemas.agent import AgentDecision, EventContext
 from app.core.schemas.llm import LLMResponse
 from app.core.schemas.message import ToolCall
-from app.mcp.client import MCPClient
-from app.mcp_server.server import tool_catalog
+from app.mcp.connection import create_student_tools_client
 from app.services.agent_service import AgentService
 from app.services.context_builder import ContextBuilder
 from app.services.tool_execution import ToolExecutionService
+from tests.mcp_catalog import tool_catalog
 
 
 async def test_output_budget_preserves_large_configured_limit() -> None:
@@ -31,14 +29,7 @@ async def test_large_structured_answer_is_preserved_and_split_for_telegram() -> 
     llm = Mock(
         generate=AsyncMock(
             return_value=LLMResponse(
-                content="",
-                tool_calls=[
-                    ToolCall(
-                        id="finish",
-                        name="finish_response",
-                        arguments={"action": "respond", "text": text},
-                    )
-                ],
+                content=text,
             )
         )
     )
@@ -52,23 +43,20 @@ async def test_large_structured_answer_is_preserved_and_split_for_telegram() -> 
 
 
 async def test_tool_results_shrink_output_reserve_without_discarding_answer() -> None:
-    client = MCPClient(Settings(bot_token="unused", postgres_password="unused"))
+    client = create_student_tools_client(Settings(bot_token="unused", postgres_password="unused"))
     client.load_catalog(tool_catalog())
-    client._command = AsyncMock(
-        return_value=types.CallToolResult(
-            structuredContent={
-                "date": "2026-10-27",
-                "lessons": [
-                    {
-                        "start": "09:00",
-                        "end": "10:30",
-                        "title": "Дискретная математика " * 200,
-                        "location": "Аудитория 1",
-                    }
-                ],
-            },
-            content=[],
-        )
+    client.call_tool = AsyncMock(
+        return_value={
+            "date": "2026-10-27",
+            "lessons": [
+                {
+                    "start": "09:00",
+                    "end": "10:30",
+                    "title": "Дискретная математика " * 200,
+                    "location": "Аудитория 1",
+                }
+            ],
+        }
     )
     llm = Mock(
         generate=AsyncMock(

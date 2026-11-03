@@ -80,6 +80,10 @@ class PostgresTurnStore:
                     json.dumps(item.metadata),
                     context.event_id,
                 )
+            audit_arguments = dict(result.arguments)
+            if result.resource_uris:
+                audit_arguments["resource_uris"] = list(result.resource_uris)
+
             await record_on_connection(
                 conn,
                 user_id=context.user_id,
@@ -87,7 +91,7 @@ class PostgresTurnStore:
                 request_id=context.request_id,
                 decision=result.decision,
                 tool_name=result.tool_name,
-                arguments=result.arguments,
+                arguments=audit_arguments,
                 validation=result.reason
                 if result.decision in {AgentDecision.ERROR, AgentDecision.CLARIFY}
                 else "ok",

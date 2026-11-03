@@ -6,7 +6,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import dotenv_values
 
-from app.config import ConfigError, MCPTransport
+from app.config import (
+    DEFAULT_SCHEDULE_PATH,
+    ConfigError,
+    MCPTransport,
+    resolve_schedule_path,
+)
 
 
 @dataclass(frozen=True)
@@ -19,7 +24,7 @@ class ServerSettings:
     postgres_user: str = "bot"
     mcp_host: str = "0.0.0.0"
     mcp_port: int = 8000
-    schedule_path: Path = Path("app/data/schedule.json")
+    schedule_path: Path = Path(DEFAULT_SCHEDULE_PATH)
     schedule_timezone: str = "Europe/Moscow"
     mcp_transport: MCPTransport = MCPTransport.STDIO
 
@@ -75,7 +80,9 @@ class ServerSettings:
             mcp_shared_secret=shared_secret,
             mcp_host=value("MCP_HOST", "0.0.0.0"),
             mcp_port=port("MCP_PORT", "8000"),
-            schedule_path=Path(value("SCHEDULE_PATH", "app/data/schedule.json")),
+            schedule_path=Path(
+                resolve_schedule_path(value("SCHEDULE_PATH", DEFAULT_SCHEDULE_PATH))
+            ),
             schedule_timezone=timezone,
             mcp_transport=transport,
         )

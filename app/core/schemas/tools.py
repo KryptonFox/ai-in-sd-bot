@@ -5,6 +5,24 @@ from typing import Annotated, Literal
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 DEFAULT_WEATHER_CITY = "Санкт-Петербург"
+CityName = Annotated[
+    str,
+    Field(
+        min_length=1,
+        max_length=100,
+        pattern=r"\S",
+        description="Город. Если не указан — Санкт-Петербург.",
+    ),
+]
+ReminderText = Annotated[str, Field(min_length=1, max_length=500, pattern=r"\S")]
+WeekOffset = Annotated[
+    int,
+    Field(
+        ge=-52,
+        le=52,
+        description="0 — эта неделя, 1 — следующая, 2 — через две недели.",
+    ),
+]
 
 
 def _validate_iso_date(value: str) -> str:
@@ -32,13 +50,7 @@ class ToolDTO(BaseModel):
 
 
 class WeatherArguments(ToolDTO):
-    city: str = Field(
-        default=DEFAULT_WEATHER_CITY,
-        min_length=1,
-        max_length=100,
-        pattern=r"\S",
-        description="Город. Если не указан — Санкт-Петербург.",
-    )
+    city: CityName = DEFAULT_WEATHER_CITY
     date: ISODate | None = Field(
         default=None,
         description=(
@@ -66,12 +78,7 @@ class ScheduleWeekArguments(ToolDTO):
             "Дата внутри конкретной недели. Для относительных недель используй week_offset."
         ),
     )
-    week_offset: int = Field(
-        default=0,
-        ge=-52,
-        le=52,
-        description="0 — эта неделя, 1 — следующая, 2 — через две недели.",
-    )
+    week_offset: WeekOffset = 0
 
     @model_validator(mode="after")
     def validate_selection(self) -> "ScheduleWeekArguments":
@@ -81,7 +88,7 @@ class ScheduleWeekArguments(ToolDTO):
 
 
 class ReminderArguments(ToolDTO):
-    text: str = Field(min_length=1, max_length=500, pattern=r"\S")
+    text: ReminderText
     remind_at: datetime
 
     @field_validator("text", mode="before")
@@ -256,19 +263,19 @@ class ReminderResult(ToolDTO):
         return value
 
 
-class ToolErrorDetail(ToolDTO):
-    code: str = Field(pattern=r"^[A-Za-z0-9_]+$")
-    message: str
-
-
-class ToolErrorResult(ToolDTO):
-    error: ToolErrorDetail
+TOOL_ERROR_MESSAGES: dict[str, str] = {
+    "forecast_date_unavailable": "Прогноз доступен на сегодня и следующие 15 дней.",
+    "weather_unavailable": "Сервис погоды сейчас недоступен. Попробуйте позже.",
+    "schedule_unavailable": "Не удалось прочитать расписание. Попробуйте позже.",
+}
 
 
 class ToolFailure(Exception):
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str | None = None) -> None:
         if not code or not code.replace("_", "").isalnum():
             raise ValueError("code must be a safe identifier")
-        super().__init__(message)
         self.code = code
+        if message is None:
+            message = TOOL_ERROR_MESSAGES.get(code, "Инструмент не смог выполнить запрос.")
         self.message = message
+        super().__init__(self.message)

@@ -291,12 +291,15 @@ def test_deploy_archive_never_contains_env_or_keys(tmp_path):
     migrations = tmp_path / "app" / "db" / "migrations" / "sql"
     migrations.mkdir(parents=True)
     (migrations / "0001_initial_schema.sql").write_text("SELECT 1;", encoding="utf-8")
-    data = tmp_path / "app" / "data"
-    data.mkdir()
+    data = tmp_path / "mcp_servers" / "student_tools" / "data"
+    data.mkdir(parents=True)
     (data / "schedule.json").write_text("[]", encoding="utf-8")
+    (data.parent / "__init__.py").write_text("", encoding="utf-8")
+    (data.parent / "server.py").write_text("SERVER", encoding="utf-8")
+    (data.parent / "credentials.json").write_text('{"token": "PRIVATE"}', encoding="utf-8")
     (tmp_path / "app" / ".env").write_text("SECRET=yes", encoding="utf-8")
     (tmp_path / ".env.cloud").write_text("SECRET=yes", encoding="utf-8")
-    private_data = tmp_path / ".local"
+    private_data = tmp_path / "mcp_servers" / "student_tools" / ".local"
     private_data.mkdir()
     (private_data / "schedule.json").write_text("PRIVATE_SCHEDULE", encoding="utf-8")
     (tmp_path / ".deploy").mkdir()
@@ -308,6 +311,8 @@ def test_deploy_archive_never_contains_env_or_keys(tmp_path):
         names = archive.getnames()
 
     assert ".local/schedule.json" not in names
+    assert "mcp_servers/student_tools/.local/schedule.json" not in names
+    assert "mcp_servers/student_tools/credentials.json" not in names
 
     assert "app/__init__.py" in names
     assert {
@@ -317,7 +322,8 @@ def test_deploy_archive_never_contains_env_or_keys(tmp_path):
         "uv.lock",
         ".python-version",
         "app/db/migrations/sql/0001_initial_schema.sql",
-        "app/data/schedule.json",
+        "mcp_servers/student_tools/server.py",
+        "mcp_servers/student_tools/data/schedule.json",
     } <= set(names)
     assert all(".env" not in n and "id_ed25519" not in n for n in names)
 
@@ -370,7 +376,22 @@ def test_provision_builds_private_network_and_nonpreemptible_vm(tmp_path, monkey
     assert "swapfile" in initialization
 
 
-def test_deploy_uploads_secrets_only_over_ssh_stdin(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("schedule_path", "remote_schedule_path"),
+    [
+        (
+            "mcp_servers/student_tools/.local/schedule.json",
+            "mcp_servers/student_tools/data/schedule.json",
+        ),
+        ("data/custom-schedule.json", "data/custom-schedule.json"),
+    ],
+)
+def test_deploy_uploads_secrets_only_over_ssh_stdin(
+    tmp_path,
+    monkeypatch,
+    schedule_path,
+    remote_schedule_path,
+):
     import base64
 
     from app.config import Settings
@@ -392,6 +413,7 @@ def test_deploy_uploads_secrets_only_over_ssh_stdin(tmp_path, monkeypatch):
         postgres_password="p$a#s's",
         telegram_proxy_url="http://user:password@proxy:3128",
         mcp_shared_secret="m" * 40,
+        schedule_path=schedule_path,
     )
     deployment.deploy({}, settings)
 
@@ -409,10 +431,17 @@ def test_deploy_uploads_secrets_only_over_ssh_stdin(tmp_path, monkeypatch):
     assert values["POSTGRES_PASSWORD"] == "p$a#s's"
     assert values["POSTGRES_HOST"] == "db"
     assert values["MCP_SHARED_SECRET"] == "m" * 40
+    assert values["SCHEDULE_PATH"] == remote_schedule_path
     assert all("m" * 40 not in command for command, _ in calls)
     deployment_command = next(command for command, _ in calls if "tar -xzf" in command)
     assert "config --services" in deployment_command
     assert "stop mcp-server" in deployment_command
+    assert "stop student-tools-mcp" in deployment_command
+    assert "--remove-orphans" in deployment_command
+    assert (
+        "rm -rf /home/student/course-bot/app /home/student/course-bot/mcp_servers"
+        in deployment_command
+    )
 
     cloud_init = next(kwargs for cmd, kwargs in calls if "cloud-init status" in cmd)
     deployment_cmd = next(kwargs for cmd, kwargs in calls if "--wait --wait-timeout 180" in cmd)
@@ -440,7 +469,7 @@ def test_cloud_help_renders(capsys):
     ("action", "expected"),
     [
         ("status", "ps --all"),
-        ("logs", "logs --tail 100 bot mcp-server db"),
+        ("logs", "logs --tail 100 bot student-tools-mcp db"),
     ],
 )
 def test_cloud_status_and_logs_include_mcp_server(tmp_path, monkeypatch, action, expected):

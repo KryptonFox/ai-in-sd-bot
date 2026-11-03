@@ -6,18 +6,25 @@ from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from app.config import ContextProvider, MCPTransport, Settings
-from app.core.schemas.agent import AgentDecision, AgentResult, ResponseDecision, TurnState
+from app.core.schemas.agent import (
+    AgentDecision,
+    AgentResult,
+    ClarificationArguments,
+    TurnState,
+)
+from app.core.schemas.execution import StepAction
 from app.core.schemas.llm import FinishReason, LLMResponse
 from app.core.schemas.tools import WeatherResult, WeatherStatus
 from app.db.records import ConfirmationState
-from app.mcp_server.server import output_schema
 from scripts.run_routing_eval import MeasurementStatus
+from tests.mcp_catalog import tool_catalog
 
 
 @pytest.mark.parametrize(
     "enum_type",
     [
         AgentDecision,
+        StepAction,
         TurnState,
         ConfirmationState,
         WeatherStatus,
@@ -36,23 +43,27 @@ def test_enum_values_remain_strings_for_json_and_environment(enum_type: type[Str
 @pytest.mark.parametrize("decision", list(AgentDecision))
 def test_agent_result_accepts_existing_string_payloads(decision: AgentDecision) -> None:
     result = AgentResult.model_validate(
-        {"text": "Ответ", "decision": decision.value, "planned": decision == AgentDecision.PREPARE}
+        {
+            "text": "Ответ",
+            "decision": decision.value,
+            **(
+                {"confirmation_id": "confirmation-123"} if decision == AgentDecision.PREPARE else {}
+            ),
+        }
     )
     assert result.decision is decision
     assert json.loads(result.model_dump_json())["decision"] == decision.value
 
 
-@pytest.mark.parametrize("action", [AgentDecision.RESPOND, AgentDecision.CLARIFY])
-def test_finish_response_accepts_only_public_response_actions(action: AgentDecision) -> None:
-    result = ResponseDecision.model_validate({"text": "Ответ", "action": action.value})
-    assert result.action is action
-    assert result.model_dump(mode="json")["action"] == action.value
+def test_clarification_arguments_accept_public_question() -> None:
+    result = ClarificationArguments.model_validate({"question": "  Какой день?  "})
+    assert result.question == "Какой день?"
 
 
-@pytest.mark.parametrize("action", ["prepare", "tool", "error", "unknown"])
-def test_finish_response_rejects_internal_and_unknown_actions(action: str) -> None:
+@pytest.mark.parametrize("payload", [{"question": "  "}, {"question": "Вопрос", "extra": True}])
+def test_clarification_arguments_reject_empty_and_extra_fields(payload: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
-        ResponseDecision.model_validate({"text": "Ответ", "action": action})
+        ClarificationArguments.model_validate(payload)
 
 
 @pytest.mark.parametrize("reason", list(FinishReason))
@@ -67,7 +78,8 @@ def test_weather_enum_keeps_discovered_output_schema_and_json_compatible() -> No
     weather = WeatherResult.model_validate(payload)
     assert weather.status is WeatherStatus.NOT_FOUND
     assert weather.model_dump(mode="json")["status"] == "not_found"
-    schema = output_schema(WeatherResult)
+    schema = next(tool.output_schema for tool in tool_catalog() if tool.name == "get_weather")
+    assert schema is not None
     Draft202012Validator.check_schema(schema)
     validator = Draft202012Validator(schema)
     assert validator.is_valid(payload)

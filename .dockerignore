@@ -4,9 +4,12 @@
 !uv.lock
 !app/
 !app/**
+!mcp_servers/
+!mcp_servers/**
 **/__pycache__/
 **/*.pyc
 **/.env*
+**/.local/
 **/*.pem
 **/id_*
 **/.venv/

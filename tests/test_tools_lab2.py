@@ -19,8 +19,8 @@ from app.core.schemas.tools import (
     WeatherStatus,
 )
 from app.core.timezones import normalize_reminder
-from app.mcp_server.schedule import ScheduleService
-from app.mcp_server.weather import WeatherService
+from mcp_servers.student_tools.schedule import ScheduleService
+from mcp_servers.student_tools.weather import WeatherService
 
 
 @pytest.mark.parametrize("schema", [WeatherArguments, ScheduleArguments, ScheduleWeekArguments])
@@ -76,6 +76,27 @@ def test_tool_argument_dtos_strip_and_reject_invalid_values() -> None:
         ReminderArguments(text="work", remind_at=1_793_102_400)
 
 
+def test_discovered_inputs_reuse_dto_field_constraints() -> None:
+    from tests.mcp_catalog import tool_catalog
+
+    tools = {tool.name: tool for tool in tool_catalog()}
+    weather_city = tools["get_weather"].input_schema["properties"]["city"]
+    reminder_text = tools["add_reminder"].input_schema["properties"]["text"]
+    week_offset = tools["get_schedule_week"].input_schema["properties"]["week_offset"]
+
+    dto_city = WeatherArguments.model_json_schema()["properties"]["city"]
+    dto_text = ReminderArguments.model_json_schema()["properties"]["text"]
+    dto_offset = ScheduleWeekArguments.model_json_schema()["properties"]["week_offset"]
+    for field, dto_field in (
+        (weather_city, dto_city),
+        (reminder_text, dto_text),
+        (week_offset, dto_offset),
+    ):
+        for key in ("minLength", "maxLength", "pattern", "minimum", "maximum", "description"):
+            if key in dto_field:
+                assert field[key] == dto_field[key]
+
+
 def test_weather_result_requires_fields_for_each_status() -> None:
     with pytest.raises(ValidationError):
         WeatherResult(status=WeatherStatus.OK, city="Paris")
@@ -84,9 +105,9 @@ def test_weather_result_requires_fields_for_each_status() -> None:
 
 
 def test_weather_schema_enforces_status_requirements_and_candidate_count() -> None:
-    from app.mcp_server.server import tool_catalog
+    from tests.mcp_catalog import tool_catalog
 
-    schema = next(tool.outputSchema for tool in tool_catalog() if tool.name == "get_weather")
+    schema = next(tool.output_schema for tool in tool_catalog() if tool.name == "get_weather")
     assert schema is not None
     validator = Draft202012Validator(schema)
     valid_ok = {

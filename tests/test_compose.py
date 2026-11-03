@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.config import ConfigError, MCPTransport
-from app.mcp_server.config import ServerSettings
+from mcp_servers.student_tools.config import ServerSettings
 from scripts.common import compose_quote
 from scripts.local import compose_command
 
@@ -63,28 +63,35 @@ def test_local_and_cloud_compose_ports_credentials_and_healthchecks(tmp_path):
     assert all(not service.get("ports") for service in cloud.values())
     assert cloud["bot"]["environment"]["POSTGRES_HOST"] == "db"
     assert cloud["bot"]["environment"]["POSTGRES_PORT"] == "5432"
-    assert cloud["bot"]["image"] == cloud["mcp-server"]["image"] == "itmo-ai-bot:local"
-    assert cloud["bot"]["build"] == cloud["mcp-server"]["build"]
-    assert cloud["mcp-server"]["command"] == [
+    assert cloud["bot"]["environment"]["MCP_SERVER_URL"] == "http://student-tools-mcp:8000/mcp"
+    assert cloud["bot"]["image"] == cloud["student-tools-mcp"]["image"] == "itmo-ai-bot:local"
+    assert cloud["bot"]["build"] == cloud["student-tools-mcp"]["build"]
+    assert cloud["student-tools-mcp"]["command"] == [
         "python",
         "-m",
-        "app.mcp_server",
+        "mcp_servers.student_tools",
         "--transport",
         "streamable-http",
     ]
-    assert "BOT_TOKEN" not in cloud["mcp-server"]["environment"]
-    assert "env_file" not in cloud["mcp-server"]
-    assert not cloud["mcp-server"].get("ports")
-    assert cloud["mcp-server"]["depends_on"]["db"]["condition"] == "service_healthy"
+    assert "BOT_TOKEN" not in cloud["student-tools-mcp"]["environment"]
+    assert "env_file" not in cloud["student-tools-mcp"]
+    assert not cloud["student-tools-mcp"].get("ports")
+    assert cloud["student-tools-mcp"]["depends_on"]["db"]["condition"] == "service_healthy"
     assert cloud["bot"]["depends_on"].keys() == {"db"}
-    assert "mcp_internal" in cloud["mcp-server"]["networks"]
+    assert "mcp_internal" in cloud["student-tools-mcp"]["networks"]
     assert "mcp_internal" in cloud["bot"]["networks"]
-    assert cloud["mcp-server"]["healthcheck"]["test"][-1] == "app.mcp_server.healthcheck"
-    schedule_mount = cloud["mcp-server"]["volumes"][0]
+    assert (
+        cloud["student-tools-mcp"]["healthcheck"]["test"][-1]
+        == "mcp_servers.student_tools.healthcheck"
+    )
+    schedule_mount = cloud["student-tools-mcp"]["volumes"][0]
     assert schedule_mount["type"] == "bind"
-    assert schedule_mount["target"] == "/app/app/data/schedule.json"
+    assert schedule_mount["target"] == "/app/mcp_servers/student_tools/data/schedule.json"
     assert schedule_mount["read_only"] is True
-    assert cloud["mcp-server"]["environment"]["SCHEDULE_PATH"] == "app/data/schedule.json"
+    assert (
+        cloud["student-tools-mcp"]["environment"]["SCHEDULE_PATH"]
+        == "mcp_servers/student_tools/data/schedule.json"
+    )
     assert "app.healthcheck" in cloud["bot"]["healthcheck"]["test"]
     assert cloud["bot"]["healthcheck"]["timeout"] == "20s"
     assert cloud["bot"]["depends_on"]["db"]["condition"] == "service_healthy"
@@ -100,7 +107,7 @@ def test_server_settings_loads_without_bot_token(tmp_path):
     assert settings.mcp_shared_secret == "s" * 32
     assert settings.mcp_transport == MCPTransport.STDIO
     assert settings.mcp_port == 8000
-    assert settings.schedule_path == Path("app/data/schedule.json")
+    assert settings.schedule_path == Path("mcp_servers/student_tools/data/schedule.json")
     assert "database" not in repr(settings)
     assert "s" * 32 not in repr(settings)
 

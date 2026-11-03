@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -20,10 +19,9 @@ class TurnState(StrEnum):
     INTERRUPTED = "interrupted"
 
 
-class ResponseDecision(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    action: Literal[AgentDecision.RESPOND, AgentDecision.CLARIFY]
-    text: str = Field(min_length=1)
+class ClarificationArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    question: str = Field(min_length=1, max_length=4000)
 
 
 class AgentResult(BaseModel):
@@ -34,13 +32,13 @@ class AgentResult(BaseModel):
     arguments: dict[str, object] = Field(default_factory=dict)
     reason: str = "completed"
     truncated: bool = False
-    planned: bool = False
+    resource_uris: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_confirmation(self) -> "AgentResult":
-        if self.decision == AgentDecision.PREPARE and not self.planned and not self.confirmation_id:
+        if self.decision == AgentDecision.PREPARE and not self.confirmation_id:
             raise ValueError("prepared action requires confirmation_id")
-        if self.confirmation_id and (self.decision != AgentDecision.PREPARE or self.planned):
+        if self.confirmation_id and self.decision != AgentDecision.PREPARE:
             raise ValueError("confirmation_id is only valid for a prepared action")
         return self
 

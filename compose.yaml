@@ -40,7 +40,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       HEALTH_PORT: ${HEALTH_PORT:-8080}
       MCP_TRANSPORT: streamable-http
-      MCP_SERVER_URL: http://mcp-server:8000/mcp
+      MCP_SERVER_URL: http://student-tools-mcp:8000/mcp
       MCP_SHARED_SECRET: ${MCP_SHARED_SECRET:-}
     env_file:
       - .env
@@ -62,11 +62,11 @@ services:
       - default
       - mcp_internal
 
-  mcp-server:
+  student-tools-mcp:
     profiles: ["cloud"]
     build: .
     image: itmo-ai-bot:local
-    command: ["python", "-m", "app.mcp_server", "--transport", "streamable-http"]
+    command: ["python", "-m", "mcp_servers.student_tools", "--transport", "streamable-http"]
     restart: unless-stopped
     environment:
       POSTGRES_HOST: db
@@ -77,12 +77,12 @@ services:
       MCP_SHARED_SECRET: ${MCP_SHARED_SECRET:-}
       MCP_HOST: 0.0.0.0
       MCP_PORT: "8000"
-      SCHEDULE_PATH: app/data/schedule.json
+      SCHEDULE_PATH: mcp_servers/student_tools/data/schedule.json
       SCHEDULE_TIMEZONE: ${SCHEDULE_TIMEZONE:-Europe/Moscow}
     volumes:
       - type: bind
-        source: ${SCHEDULE_PATH:-./app/data/schedule.json}
-        target: /app/app/data/schedule.json
+        source: ${SCHEDULE_PATH:-./mcp_servers/student_tools/data/schedule.json}
+        target: /app/mcp_servers/student_tools/data/schedule.json
         read_only: true
     depends_on:
       db:
@@ -91,7 +91,7 @@ services:
       - default
       - mcp_internal
     healthcheck:
-      test: ["CMD", "python", "-m", "app.mcp_server.healthcheck"]
+      test: ["CMD", "python", "-m", "mcp_servers.student_tools.healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 6
