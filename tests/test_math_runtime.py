@@ -33,6 +33,11 @@ for line in sys.stdin:
     print(json.dumps(response), flush=True)
 """
 
+STARTUP_STALL_WORKER = """
+import time
+time.sleep(60)
+"""
+
 CRASHING_WORKER = """
 import json
 import sys
@@ -112,6 +117,60 @@ async def test_timeout_kills_and_joins_worker_process() -> None:
     assert worker.is_running is False
     assert worker.pid is None
     assert not process_exists(pid)
+
+
+async def test_startup_timeout_has_distinct_code_and_metrics() -> None:
+    worker = MathWorker(
+        command=python_command(STARTUP_STALL_WORKER),
+        startup_timeout=0.2,
+    )
+
+    with pytest.raises(MathError) as captured:
+        await worker.request({"operation": "calculate"})
+
+    assert captured.value.code == "worker_start_timeout"
+    metrics = worker.last_metrics
+    assert metrics is not None
+    assert metrics.startup_seconds >= 0.15
+    assert metrics.operation_seconds == 0
+
+
+async def test_queue_timeout_has_distinct_code_and_measures_wait() -> None:
+    worker = MathWorker(
+        command=python_command(ECHO_WORKER),
+        timeout=5,
+        queue_timeout=0.05,
+    )
+    first = asyncio.create_task(worker.request({"operation": "calculate", "value": 1}))
+    await wait_for_process(worker)
+    await asyncio.sleep(0.02)
+
+    try:
+        with pytest.raises(MathError) as captured:
+            await worker.request({"operation": "calculate", "value": 2})
+        queue_metrics = worker.last_metrics
+    finally:
+        await first
+        await worker.aclose()
+
+    assert captured.value.code == "queue_timeout"
+    assert queue_metrics is not None
+    assert queue_metrics.queue_wait_seconds >= 0.04
+
+
+async def test_warmup_starts_worker_and_reports_numeric_metrics() -> None:
+    runtime = MathRuntime()
+    try:
+        result = await runtime.warmup()
+        metrics = runtime.worker.last_metrics
+    finally:
+        await runtime.aclose()
+
+    assert result["status"] == "ok"
+    assert metrics is not None
+    assert metrics.startup_seconds > 0
+    assert metrics.operation_seconds > 0
+    assert metrics.queue_wait_seconds >= 0
 
 
 async def test_cancellation_kills_and_joins_worker_process() -> None:

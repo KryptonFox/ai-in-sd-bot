@@ -1,10 +1,14 @@
 import io
 import json
 import sys
+from pathlib import Path
 from types import TracebackType
 
 import pytest
 
+from app.config import Settings
+from app.core.schemas.tools import ToolFailure
+from app.mcp.connection import create_math_tools_client
 from mcp_servers.math_tools import healthcheck
 from mcp_servers.math_tools.config import MathConfigError, MathSettings, MathTransport
 
@@ -63,6 +67,29 @@ def test_settings_reject_invalid_transport_and_port(tmp_path) -> None:
         MathSettings.load(tmp_path / "missing.env", environ={"MCP_PORT": "0"})
     with pytest.raises(MathConfigError):
         MathSettings.load(tmp_path / "missing.env", environ={"MCP_PORT": "text"})
+
+
+async def test_stdio_enforces_png_limit_from_dotenv(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("MATH_MCP_MAX_PNG_BYTES=1024\n", encoding="utf-8")
+    settings = Settings.load(
+        env_file,
+        environ={
+            "BOT_TOKEN": "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk",
+            "POSTGRES_PASSWORD": "test-password",
+            "MCP_TRANSPORT": "stdio",
+        },
+    )
+    client = create_math_tools_client(settings)
+    assert client is not None
+
+    try:
+        assert await client.start()
+        with pytest.raises(ToolFailure) as error:
+            await client.call_tool("math_plot", {"functions": ["x^2"]})
+        assert error.value.code == "resource_limit"
+    finally:
+        await client.aclose()
 
 
 class FakeResponse:

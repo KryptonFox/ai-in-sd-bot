@@ -99,6 +99,8 @@ def source_archive(root: Path) -> Path:
             "uv.lock",
             ".python-version",
             "compose.yaml",
+            "compose.config.yaml",
+            "config.toml",
         ]
     ]
     candidates.extend((root / "app").rglob("*.py"))
@@ -577,7 +579,11 @@ class Cloud:
         finally:
             archive.unlink(missing_ok=True)
 
-        values = {key.upper(): str(value) for key, value in asdict(settings).items()}
+        values = {
+            key.upper(): str(value)
+            for key, value in asdict(settings).items()
+            if not isinstance(value, dict)
+        }
         values.update(POSTGRES_HOST="db", POSTGRES_PORT="5432")
         if ".local" in Path(values["SCHEDULE_PATH"]).parts:
             values["SCHEDULE_PATH"] = "mcp_servers/student_tools/data/schedule.json"

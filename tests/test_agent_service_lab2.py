@@ -10,14 +10,16 @@ from mcp import types
 from app.core.clock import FrozenClock
 from app.core.schemas.agent import AgentDecision, AgentResult, EventContext
 from app.core.schemas.llm import LLMRequest, LLMResponse
+from app.core.schemas.mcp import ResourceContent
 from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.core.schemas.tools import ToolFailure
 from app.mcp.client import MCPClient
 from app.services.agent_service import AgentService
-from app.services.tool_execution import ToolExecutionService
-from tests.mcp_catalog import tool_catalog
+from app.services.tool_execution import READ_RESOURCE_FUNCTION, ToolExecutionService
+from tests.mcp_catalog import resource_catalog, tool_catalog
 
 EVALUATION_TIME = datetime.fromisoformat("2026-10-12T09:00:00+03:00")
+RESOURCE_URI = "schedule://current-week"
 
 
 def context() -> EventContext:
@@ -58,6 +60,10 @@ class MockToolClient(MCPClient):
 
     def __init__(self) -> None:
         super().__init__(Client(FastMCP("agent-service-test")))
+
+
+class MockResourceToolClient(MockToolClient):
+    read_resource: AsyncMock
 
 
 def make_agent(
@@ -284,6 +290,44 @@ async def test_three_tool_calls_in_one_batch_stop_at_two_call_budget() -> None:
 
     assert result.decision == AgentDecision.ERROR
     assert mcp.call_tool.await_count == 2
+    llm.generate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_default_call_budget_allows_five_mixed_reads_and_blocks_the_sixth() -> None:
+    llm = MagicMock(
+        generate=AsyncMock(
+            return_value=LLMResponse(
+                content="",
+                tool_calls=[
+                    tool_call(READ_RESOURCE_FUNCTION, {"uri": RESOURCE_URI}, "resource-1"),
+                    tool_call("get_weather", {"city": "Казань"}, "weather-1"),
+                    tool_call(READ_RESOURCE_FUNCTION, {"uri": RESOURCE_URI}, "resource-2"),
+                    tool_call("get_schedule", {"date": "2026-10-12"}, "schedule-1"),
+                    tool_call(READ_RESOURCE_FUNCTION, {"uri": RESOURCE_URI}, "resource-3"),
+                    tool_call("get_weather", {"city": "Москва"}, "weather-2"),
+                ],
+            )
+        )
+    )
+    mcp = MockResourceToolClient()
+    mcp.load_catalog(tool_catalog())
+    mcp.load_resources(resource_catalog())
+    mcp.call_tool = AsyncMock(return_value=weather_result())
+    mcp.read_resource = AsyncMock(
+        return_value=ResourceContent(RESOURCE_URI, '{"days": []}'),
+    )
+    store = MagicMock(reserve=AsyncMock(return_value=True))
+    service = AgentService(llm, ToolExecutionService(mcp, store=store))
+
+    result = await service.run(system_message(), context())
+
+    assert result.decision == AgentDecision.ERROR
+    assert result.reason == "call_budget"
+    assert mcp.read_resource.await_count == 3
+    assert mcp.call_tool.await_count == 2
+    assert store.reserve.await_count == 5
+    assert all(awaited.args == (context(), 5) for awaited in store.reserve.await_args_list)
     llm.generate.assert_awaited_once()
 
 

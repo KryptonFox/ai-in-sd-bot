@@ -74,9 +74,10 @@ async def test_stdio_transport_discovery_and_calls() -> None:
             await session.initialize()
             tools = await session.list_tools()
             discovered = assert_discovery(tools.tools)
-            assert (
-                discovered["math_calculate"].input_schema["properties"]["expression"]["maxLength"]
-                == 512
+            calculate_input = discovered["math_calculate"].input_schema["properties"]
+            expression_schema = calculate_input["expression"]
+            assert expression_schema.get("maxLength") == 512 or any(
+                part.get("maxLength") == 512 for part in expression_schema.get("anyOf", [])
             )
             assert discovered["math_calculate"].input_schema["properties"]["operation"]["enum"] == [
                 "simplify",
@@ -85,10 +86,18 @@ async def test_stdio_transport_discovery_and_calls() -> None:
                 "diff",
                 "integrate",
                 "limit",
+                "partial_diff",
+                "jacobian",
+                "constrained_extrema",
+                "series",
             ]
             calculate_schema = discovered["math_calculate"].output_schema
             assert calculate_schema is not None
-            assert calculate_schema["properties"]["status"]["enum"] == ["ok", "undefined"]
+            assert calculate_schema["properties"]["status"]["enum"] == [
+                "ok",
+                "undefined",
+                "no_solution",
+            ]
             assert calculate_schema["properties"]["operation"]["enum"] == [
                 "simplify",
                 "evaluate",
@@ -96,9 +105,21 @@ async def test_stdio_transport_discovery_and_calls() -> None:
                 "diff",
                 "integrate",
                 "limit",
+                "partial_diff",
+                "jacobian",
+                "constrained_extrema",
+                "series",
             ]
             assert discovered["math_solve"].input_schema["properties"]["equations"]["maxItems"] == 3
             assert discovered["math_plot"].input_schema["properties"]["functions"]["maxItems"] == 4
+            assert discovered["math_plot"].input_schema["properties"]["plot_type"]["enum"] == [
+                "curve",
+                "parametric",
+                "contour",
+                "domain_coloring",
+                "surface",
+                "complex_height",
+            ]
 
             calculated = await session.call_tool(
                 "math_calculate",

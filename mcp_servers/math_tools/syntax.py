@@ -1,4 +1,5 @@
 import ast
+import keyword
 import math
 import re
 
@@ -171,6 +172,7 @@ def validate_variable(name: str) -> str:
         or len(stripped) > MAX_VARIABLE_LENGTH
         or not stripped.isascii()
         or not VARIABLE_PATTERN.fullmatch(stripped)
+        or keyword.iskeyword(stripped)
         or stripped in RESERVED_NAMES
         or stripped in FUNCTION_ARITIES
     ):

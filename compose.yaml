@@ -115,6 +115,11 @@ services:
       MCP_PORT: "8000"
       HOME: /home/student
       MPLCONFIGDIR: /tmp/matplotlib
+      MATH_MCP_STARTUP_TIMEOUT_SECONDS:
+      MATH_MCP_OPERATION_TIMEOUT_SECONDS:
+      MATH_MCP_QUEUE_TIMEOUT_SECONDS:
+      MATH_MCP_MEMORY_LIMIT_MIB:
+      MATH_MCP_MAX_PNG_BYTES:
     networks:
       - mcp_internal
     healthcheck:

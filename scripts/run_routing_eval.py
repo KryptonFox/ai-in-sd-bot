@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, cast
 from app.core.clock import FrozenClock
 from app.core.context import set_request_id
 from app.core.exceptions import LLMError
+from app.core.limits import DEFAULT_AGENT_MAX_TOOL_CALLS
 from app.core.ports import ToolClient
 from app.core.schemas.agent import AgentDecision, AgentResult, EventContext
 from app.core.schemas.execution import RunState, StepAction
@@ -240,8 +241,14 @@ class SelectedAction(Exception):
 
 
 class RecordingToolExecutionService(ToolExecutionService):
-    def __init__(self, mcp: ToolClient, clock: FrozenClock) -> None:
-        super().__init__(mcp)
+    def __init__(
+        self,
+        mcp: ToolClient,
+        clock: FrozenClock,
+        *,
+        max_calls: int = DEFAULT_AGENT_MAX_TOOL_CALLS,
+    ) -> None:
+        super().__init__(mcp, max_calls=max_calls)
         self._evaluation_clock = clock
 
     async def execute(
@@ -469,7 +476,11 @@ async def run_evaluation(
 
         service = AgentService(
             client,
-            RecordingToolExecutionService(mcp, frozen_clock),
+            RecordingToolExecutionService(
+                mcp,
+                frozen_clock,
+                max_calls=settings.agent_max_tool_calls,
+            ),
             clock=frozen_clock,
             max_llm_steps=settings.agent_max_llm_steps,
         )

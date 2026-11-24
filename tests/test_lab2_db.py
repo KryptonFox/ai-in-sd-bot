@@ -9,7 +9,8 @@ import pytest
 from fastmcp import Client, FastMCP
 
 from app.core.clock import FrozenClock
-from app.core.schemas.agent import AgentDecision, EventContext
+from app.core.schemas.agent import AgentDecision, AgentResult, EventContext
+from app.core.schemas.execution import RunState, StepAction
 from app.core.schemas.llm import LLMResponse
 from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.core.schemas.tools import ToolFailure
@@ -17,6 +18,7 @@ from app.db.connection import create_pool
 from app.db.records import ConfirmationState
 from app.db.repositories import confirmation_repo, event_repo, reminder_repo
 from app.db.repositories.audit_repo import latest_decision
+from app.db.repositories.turn_repo import PostgresTurnStore
 from app.mcp.client import MCPClient
 from app.services.agent_service import AgentService
 from app.services.confirmation_service import ConfirmationService
@@ -399,7 +401,9 @@ async def test_lost_mcp_response_recovers_from_committed_reminder(database: Data
         await pool.close()
 
 
-async def test_event_retry_preserves_call_budget_and_caches_result(database: DatabaseFixture):
+async def test_event_retry_preserves_five_call_budget_and_caches_result(
+    database: DatabaseFixture,
+) -> None:
     settings, *_ = database
     pool = await create_pool(settings)
     now = datetime(2033, 7, 1, 12, 0, tzinfo=ZoneInfo("Europe/Moscow"))
@@ -418,15 +422,15 @@ async def test_event_retry_preserves_call_budget_and_caches_result(database: Dat
 
         assert first == {"claimed": True, "calls_used": 0}
         assert duplicate_in_progress == {"claimed": False, "calls_used": 0}
-        assert await event_repo.reserve(pool, user_id, event_id, 2) is True
-        assert await event_repo.reserve(pool, user_id, event_id, 2) is True
-        assert await event_repo.reserve(pool, user_id, event_id, 2) is False
+        for _ in range(5):
+            assert await event_repo.reserve(pool, user_id, event_id, 5) is True
+        assert await event_repo.reserve(pool, user_id, event_id, 5) is False
 
         await event_repo.fail(pool, user_id, event_id, now + timedelta(seconds=2))
         retry = await event_repo.begin(pool, user_id, event_id, now + timedelta(seconds=3))
 
-        assert retry == {"claimed": True, "calls_used": 2}
-        assert await event_repo.reserve(pool, user_id, event_id, 2) is False
+        assert retry == {"claimed": True, "calls_used": 5}
+        assert await event_repo.reserve(pool, user_id, event_id, 5) is False
 
         finished_at = now + timedelta(seconds=4)
         await event_repo.finish(pool, user_id, event_id, payload, finished_at)
@@ -444,9 +448,93 @@ async def test_event_retry_preserves_call_budget_and_caches_result(database: Dat
 
         assert cached == {"claimed": False, "result": payload}
         assert row["state"] == "done"
-        assert row["calls_used"] == 2
+        assert row["calls_used"] == 5
         assert stored_result == payload
         assert row["updated_at"] == finished_at
+    finally:
+        await pool.close()
+
+
+async def test_confirmation_after_four_reads_spends_saved_remaining_attempt(
+    database: DatabaseFixture,
+) -> None:
+    settings, *_ = database
+    pool = await create_pool(settings)
+    now = datetime(2037, 10, 1, 12, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+    clock = FrozenClock(now)
+    context = _context(908, "eval:four-read-confirmation")
+    reminder_arguments = {
+        "text": "Проверить бюджет",
+        "remind_at": (now + timedelta(days=1)).isoformat(),
+    }
+    reminder_payload = {
+        "id": 1,
+        "text": reminder_arguments["text"],
+        "remind_at": reminder_arguments["remind_at"],
+        "timezone": "Europe/Moscow",
+        "created": True,
+    }
+    mcp = MockToolClient()
+    mcp.load_catalog(tool_catalog())
+    mcp.call_tool = AsyncMock(
+        side_effect=[{"status": "ok"}] * 4 + [reminder_payload],
+    )
+    confirmations = ConfirmationService(pool, mcp, clock=clock)
+    tools = ToolExecutionService(
+        mcp,
+        confirmations,
+        PostgresTurnStore(pool),
+    )
+    state = RunState(context=context, conversation=[], timezone="Europe/Moscow")
+
+    try:
+        await event_repo.begin(pool, context.user_id, context.event_id, now)
+        reads = [
+            ToolCall(
+                id=f"read-{index}",
+                name="get_schedule",
+                arguments={"date": f"2026-10-{12 + index}"},
+            )
+            for index in range(4)
+        ]
+        outcome = await tools.execute(state, reads)
+
+        assert outcome == StepAction.CONTINUE
+        assert state.calls_used == 4
+
+        prepared = await tools.execute(
+            state,
+            [ToolCall(id="reminder", name="add_reminder", arguments=reminder_arguments)],
+        )
+        assert isinstance(prepared, AgentResult)
+        assert prepared.decision == AgentDecision.PREPARE
+        assert prepared.confirmation_id is not None
+        pending = await confirmation_repo.find_event(pool, context.user_id, context.event_id)
+        assert pending is not None
+        assert pending["calls_remaining"] == 1
+
+        confirmed = await confirmations.confirm(context.user_id, prepared.confirmation_id)
+        after_confirmation = await confirmation_repo.find_event(
+            pool,
+            context.user_id,
+            context.event_id,
+        )
+        assert confirmed.decision == AgentDecision.TOOL
+        assert after_confirmation is not None
+        assert after_confirmation["state"] == "succeeded"
+        assert after_confirmation["calls_remaining"] == 0
+        assert mcp.call_tool.await_count == 5
+        assert (
+            await pool.fetchval(
+                "SELECT calls_used FROM agent_events WHERE user_id=$1 AND event_id=$2",
+                context.user_id,
+                context.event_id,
+            )
+            == 4
+        )
+
+        await confirmations.confirm(context.user_id, prepared.confirmation_id)
+        assert mcp.call_tool.await_count == 5
     finally:
         await pool.close()
 

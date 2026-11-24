@@ -78,7 +78,7 @@ async def test_tool_results_shrink_output_reserve_without_discarding_answer() ->
     result = await AgentService(llm, ToolExecutionService(client)).run(
         [],
         EventContext(user_id=1, event_id="budget", request_id="budget"),
-        budget=ContextBudget(24000, 16384),
+        budget=ContextBudget(24000, 16384, 64),
     )
     assert result.decision == AgentDecision.TOOL
     first, second = [call.args[0].max_tokens for call in llm.generate.await_args_list]

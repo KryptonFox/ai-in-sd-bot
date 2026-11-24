@@ -103,7 +103,8 @@ class DialogService:
 
         async with self._queue.acquire(user_id):
             started = time.monotonic()
-            deadline = asyncio.timeout(self._settings.agent_timeout)
+            deadline_at = asyncio.get_running_loop().time() + self._settings.agent_timeout
+            deadline = asyncio.timeout_at(deadline_at)
 
             try:
                 async with deadline:
@@ -126,6 +127,7 @@ class DialogService:
                         user_text,
                         claim.calls_used,
                         started,
+                        deadline_at,
                     )
             except BaseException as error:
                 reason = error.code if isinstance(error, LLMError) else type(error).__name__
@@ -147,6 +149,7 @@ class DialogService:
         text: str,
         calls_used: int,
         started: float,
+        deadline_at: float,
     ) -> AgentResult:
         existing = None
         if self._confirmations is not None:
@@ -154,7 +157,7 @@ class DialogService:
         if existing is not None:
             result = existing
         else:
-            result = await self._run_agent(context, text, calls_used)
+            result = await self._run_agent(context, text, calls_used, deadline_at)
 
         user_message = ChatMessage(role=MessageRole.USER, content=text)
         assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=reply_text(result))
@@ -175,6 +178,7 @@ class DialogService:
         context: EventContext,
         text: str,
         calls_used: int,
+        deadline_at: float,
     ) -> AgentResult:
         try:
             user = await get_or_create_user(self._pool, context.user_id)
@@ -201,6 +205,8 @@ class DialogService:
                 model=self.model_name,
                 calls_used=calls_used,
                 budget=prepared.budget,
+                protected_prefix=prepared.protected_prefix,
+                deadline_at=deadline_at,
             )
         except ToolFailure as error:
             return AgentResult(

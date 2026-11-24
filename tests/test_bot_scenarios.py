@@ -490,10 +490,11 @@ async def test_scenario_main_menu_role_buttons_and_callback(in_memory_pool, base
     assert len(send_messages) == 1
     markup = send_messages[0].reply_markup
     assert markup is not None
-    assert len(markup.inline_keyboard) == 3
+    assert len(markup.inline_keyboard) == 4
     assert markup.inline_keyboard[0][0].callback_data == "set_role:study"
     assert markup.inline_keyboard[1][0].callback_data == "set_role:translate"
     assert markup.inline_keyboard[2][0].callback_data == "set_role:review"
+    assert markup.inline_keyboard[3][0].callback_data == "set_role:everyday"
 
     mock_llm = MagicMock()
     mock_llm.generate = AsyncMock(return_value=LLMResponse(content="Привет!"))
@@ -526,7 +527,7 @@ async def test_scenario_main_menu_role_buttons_and_callback(in_memory_pool, base
     assert len(user_msgs_after) == 0
 
 
-async def test_compaction_triggered_when_threshold_reached(in_memory_pool, base_settings):
+async def test_compaction_triggered_when_history_exceeds_window(in_memory_pool, base_settings):
     summary_text = "Саммари: студент изучает алгоритмы сортировки на Python."
     answer_text = "Timsort имеет сложность O(N log N)."
 
@@ -536,18 +537,19 @@ async def test_compaction_triggered_when_threshold_reached(in_memory_pool, base_
     ]
     mock_llm = MagicMock()
     mock_llm.generate = AsyncMock(side_effect=llm_responses)
-    mock_llm.get_context_length = AsyncMock(return_value=32768)
+    mock_llm.get_context_length = AsyncMock(return_value=24576)
 
     service = make_dialog(in_memory_pool, base_settings, mock_llm, registry)
 
     for i in range(10):
+        content = f"Сообщение {i} " * 100
         in_memory_pool.messages.append(
             {
                 "id": in_memory_pool._msg_id_counter,
                 "user_id": 99,
                 "role": "user" if i % 2 == 0 else "assistant",
-                "content": f"Сообщение {i}",
-                "char_count": len(f"Сообщение {i}"),
+                "content": content,
+                "char_count": len(content),
                 "metadata": {},
             }
         )

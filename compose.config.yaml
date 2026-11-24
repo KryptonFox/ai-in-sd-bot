@@ -1,0 +1,20 @@
+# Необязательный профиль: отдельные config.toml для бота и MathMCP.
+# Использование:
+#   BOT_CONFIG_FILE=./config.bot.toml MATH_MCP_CONFIG_FILE=./config.math.toml \
+#   docker compose -f compose.yaml -f compose.config.yaml --profile cloud up -d
+services:
+  bot:
+    configs:
+      - source: bot-config
+        target: /app/config.toml
+
+  math-tools-mcp:
+    configs:
+      - source: math-config
+        target: /app/config.toml
+
+configs:
+  bot-config:
+    file: ${BOT_CONFIG_FILE:?Задайте BOT_CONFIG_FILE}
+  math-config:
+    file: ${MATH_MCP_CONFIG_FILE:?Задайте MATH_MCP_CONFIG_FILE}

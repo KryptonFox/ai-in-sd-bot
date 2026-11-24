@@ -8,6 +8,7 @@ from mcp_servers.math_tools.errors import MathError
 from mcp_servers.math_tools.limits import (
     MAX_EQUATIONS,
     MAX_FUNCTIONS,
+    MAX_PLOT_LEVELS,
     MAX_PNG_BYTES,
     MAX_VARIABLES,
 )
@@ -19,6 +20,7 @@ from mcp_servers.math_tools.schemas import (
     MathPlotResult,
     MathSolveResult,
     PlotOutput,
+    PlotType,
 )
 from mcp_servers.math_tools.syntax import (
     equation_sides,
@@ -29,34 +31,50 @@ from mcp_servers.math_tools.syntax import (
 
 
 class MathService:
-    def __init__(self, runtime: MathRuntime | None = None) -> None:
+    def __init__(
+        self, runtime: MathRuntime | None = None, *, max_png_bytes: int = MAX_PNG_BYTES
+    ) -> None:
         self.runtime = runtime or MathRuntime()
+        self._max_png_bytes = max_png_bytes
 
     async def calculate(
         self,
-        expression: str,
+        expression: str | None = None,
         *,
         operation: CalculateOperation = CalculateOperation.SIMPLIFY,
-        variable: str = "x",
+        variable: str | None = None,
         order: int = 1,
         lower: str | float | int | None = None,
         upper: str | float | int | None = None,
         point: str | float | int | None = None,
         direction: LimitDirection = LimitDirection.BOTH,
+        variables: Sequence[str] | None = None,
+        functions: Sequence[str] | None = None,
+        constraints: Sequence[str] | None = None,
     ) -> MathCalculateResult:
-        normalized = normalize_expression(expression)
-        variable_name = validate_variable(variable)
+        variable_name = validate_variable(
+            variable if variable is not None else _default_variable(operation)
+        )
         if not 1 <= order <= 5:
             raise MathError("invalid_arguments")
 
         payload: dict[str, object] = {
             "operation": "calculate",
             "calculation": operation,
-            "expression": normalized,
             "variable": variable_name,
             "order": order,
             "direction": direction,
         }
+
+        if expression is not None:
+            payload["expression"] = normalize_expression(expression)
+
+        if variables is not None:
+            payload["variables"] = _variable_names(variables)
+        if functions is not None:
+            payload["functions"] = _normalized_list(functions, MAX_FUNCTIONS)
+        if constraints is not None:
+            payload["constraints"] = _normalized_equations(constraints, MAX_EQUATIONS)
 
         if operation == CalculateOperation.INTEGRATE:
             lower_text = _bound_text(lower)
@@ -71,6 +89,20 @@ class MathService:
                 if variable_name in expression_variables(upper_normalized):
                     raise MathError("invalid_arguments")
                 payload["lower"] = lower_normalized
+                payload["upper"] = upper_normalized
+
+        if operation == CalculateOperation.SERIES:
+            lower_text = _bound_text(lower)
+            upper_text = _bound_text(upper)
+            if lower_text:
+                lower_normalized = normalize_expression(lower_text)
+                if variable_name in expression_variables(lower_normalized):
+                    raise MathError("invalid_arguments")
+                payload["lower"] = lower_normalized
+            if upper_text:
+                upper_normalized = normalize_expression(upper_text)
+                if variable_name in expression_variables(upper_normalized):
+                    raise MathError("invalid_arguments")
                 payload["upper"] = upper_normalized
 
         if operation == CalculateOperation.LIMIT:
@@ -130,36 +162,101 @@ class MathService:
         self,
         functions: Sequence[str],
         *,
-        variable: str = "x",
-        x_min: float = -10.0,
-        x_max: float = 10.0,
+        plot_type: PlotType = PlotType.CURVE,
+        variable: str | None = None,
+        parameter: str = "t",
+        y_variable: str = "y",
+        x_min: float | None = None,
+        x_max: float | None = None,
+        y_min: float | None = None,
+        y_max: float | None = None,
+        levels: Sequence[float] | None = None,
     ) -> PlotOutput:
         if not 1 <= len(functions) <= MAX_FUNCTIONS:
             raise MathError("invalid_arguments")
-        variable_name = validate_variable(variable)
-        if not math.isfinite(x_min) or not math.isfinite(x_max) or x_min >= x_max:
-            raise MathError("invalid_arguments")
-
-        normalized_functions: list[str] = []
-        for text in functions:
-            normalized = normalize_expression(text)
-            extra = set(expression_variables(normalized)) - {variable_name}
-            if extra:
-                raise MathError(
-                    "invalid_expression",
-                    f"Функция должна зависеть только от {variable_name}.",
-                )
-            normalized_functions.append(normalized)
-
-        response = await self.runtime.request(
-            {
-                "operation": "plot",
-                "functions": normalized_functions,
-                "variable": variable_name,
-                "x_min": x_min,
-                "x_max": x_max,
-            }
+        variable_name = validate_variable(
+            variable if variable is not None else _default_plot_variable(plot_type)
         )
+        parameter_name = validate_variable(parameter)
+        y_variable_name = validate_variable(y_variable)
+        _validate_range(x_min, x_max)
+        _validate_range(y_min, y_max)
+
+        normalized_functions = [normalize_expression(text) for text in functions]
+        if plot_type is PlotType.CURVE:
+            for normalized in normalized_functions:
+                extra = set(expression_variables(normalized)) - {variable_name}
+                if extra:
+                    raise MathError(
+                        "invalid_expression",
+                        f"Функция должна зависеть только от {variable_name}.",
+                    )
+        elif plot_type is PlotType.PARAMETRIC:
+            if len(normalized_functions) != 2:
+                raise MathError(
+                    "invalid_arguments",
+                    "Для параметрической кривой нужны две функции x(t) и y(t).",
+                )
+            for normalized in normalized_functions:
+                extra = set(expression_variables(normalized)) - {parameter_name}
+                if extra:
+                    raise MathError(
+                        "invalid_expression",
+                        f"Функция должна зависеть только от {parameter_name}.",
+                    )
+        elif plot_type in (PlotType.CONTOUR, PlotType.SURFACE):
+            if len(normalized_functions) != 1:
+                raise MathError("invalid_arguments", "Для этого типа графика нужна одна функция.")
+            allowed = {variable_name, y_variable_name}
+            for normalized in normalized_functions:
+                if set(expression_variables(normalized)) - allowed:
+                    raise MathError(
+                        "invalid_expression",
+                        f"Функция должна зависеть только от {variable_name} и {y_variable_name}.",
+                    )
+        else:
+            if len(normalized_functions) != 1:
+                raise MathError("invalid_arguments", "Для этого типа графика нужна одна функция.")
+            for normalized in normalized_functions:
+                extra = set(expression_variables(normalized)) - {variable_name}
+                if extra:
+                    raise MathError(
+                        "invalid_expression",
+                        f"Комплексная функция должна зависеть только от {variable_name}.",
+                    )
+
+        payload: dict[str, object] = {
+            "operation": "plot",
+            "plot_type": plot_type,
+            "functions": normalized_functions,
+            "variable": variable_name,
+        }
+        if x_min is not None and x_max is not None:
+            payload["x_min"] = x_min
+            payload["x_max"] = x_max
+        if y_min is not None and y_max is not None:
+            payload["y_min"] = y_min
+            payload["y_max"] = y_max
+        if plot_type is PlotType.PARAMETRIC:
+            payload["parameter"] = parameter_name
+        if plot_type in (PlotType.CONTOUR, PlotType.SURFACE):
+            payload["y_variable"] = y_variable_name
+        if levels is not None:
+            if plot_type is not PlotType.CONTOUR:
+                raise MathError("invalid_arguments", "levels применимы только к contour.")
+            if not 1 <= len(levels) <= MAX_PLOT_LEVELS:
+                raise MathError("invalid_arguments")
+            normalized_levels: list[float] = []
+            for level in levels:
+                if isinstance(level, bool) or not isinstance(level, (int, float)):
+                    raise MathError("invalid_arguments")
+                number = float(level)
+                if not math.isfinite(number):
+                    raise MathError("invalid_arguments")
+                normalized_levels.append(number)
+            payload["levels"] = normalized_levels
+
+        response = await self.runtime.request(payload)
         result_payload = response.get("result")
         encoded_png = response.get("png_base64")
         if not isinstance(result_payload, dict) or not isinstance(encoded_png, str):
@@ -176,10 +273,57 @@ class MathService:
             or result.png_bytes != len(png)
         ):
             raise MathError("evaluation_failed")
+        if len(png) > self._max_png_bytes:
+            raise MathError("resource_limit", "PNG превышает настроенный предел размера.")
+
         return PlotOutput(result=result, png=png)
 
     async def aclose(self) -> None:
         await self.runtime.aclose()
+
+
+def _default_variable(operation: CalculateOperation) -> str:
+    return "n" if operation is CalculateOperation.SERIES else "x"
+
+
+def _default_plot_variable(plot_type: PlotType) -> str:
+    if plot_type in (PlotType.DOMAIN_COLORING, PlotType.COMPLEX_HEIGHT):
+        return "z"
+    return "x"
+
+
+def _validate_range(lower: float | None, upper: float | None) -> None:
+    if (lower is None) != (upper is None):
+        raise MathError("invalid_arguments")
+    if lower is None or upper is None:
+        return
+    if not math.isfinite(lower) or not math.isfinite(upper) or lower >= upper:
+        raise MathError("invalid_arguments")
+
+
+def _variable_names(variables: Sequence[str]) -> list[str]:
+    if not 1 <= len(variables) <= MAX_VARIABLES:
+        raise MathError("invalid_arguments")
+    names = [validate_variable(name) for name in variables]
+    if len(set(names)) != len(names):
+        raise MathError("invalid_arguments")
+    return names
+
+
+def _normalized_list(values: Sequence[str], maximum: int) -> list[str]:
+    if not 1 <= len(values) <= maximum:
+        raise MathError("invalid_arguments")
+    return [normalize_expression(value) for value in values]
+
+
+def _normalized_equations(values: Sequence[str], maximum: int) -> list[str]:
+    if not 1 <= len(values) <= maximum:
+        raise MathError("invalid_arguments")
+    result: list[str] = []
+    for value in values:
+        left, right = equation_sides(value)
+        result.append(f"{left} = {right}")
+    return result
 
 
 def _calculate_result(payload: Mapping[str, object]) -> MathCalculateResult:

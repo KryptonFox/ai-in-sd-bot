@@ -1,0 +1,2157 @@
+{
+  "dataset_sha256": "93b06fd74de3f10d0c763a71cebab7463eb19a025e1df8926d6b699bb2328eb4",
+  "provider": "OpenCode Go",
+  "model": "deepseek-v4.1-flash",
+  "temperature": 0.0,
+  "window": 131072,
+  "output_tokens": 32768,
+  "max_llm_steps": 4,
+  "max_tool_calls": 5,
+  "cases": [
+    {
+      "id": "improper-log",
+      "direct": {
+        "matched": false,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 1687,
+            "arguments": {
+              "operation": "integrate",
+              "expression": "log(1+x^2)/(1+x^2)",
+              "lower": 0,
+              "upper": "oo"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "integrate",
+              "expression": "log(1+x**2)/(1+x**2)",
+              "variable": "x",
+              "result": "meijerg(((1/2, 1, 1), ()), ((1/2, 1), (0,)), 1)/2",
+              "numeric": "",
+              "exact": true,
+              "detail": "Определённый интеграл по x от 0 до oo."
+            },
+            "error": null,
+            "images": [],
+            "matches": false
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "reason": "plain_response",
+        "answer": "**Краткая суть:** интеграл сходится и равен `π·ln 2 ≈ 2.17758609030360`. Самый быстрый путь — замена `x = tg t`, которая превращает его в табличный логарифмический интеграл по `[0, π/2]`.\n\n**1. Сходимость**\n\nОсобые точки: `x = 0` и `x → +∞` (подынтегральная функция положительна и непрерывна при `x > 0`).\n\n- Около нуля: `ln(1+x²) ~ x²`, знаменатель `1+x² → 1`, значит подынтегральное выражение `~ x²`. Это ограниченная функция, особенность устранимая — вклад конечен.\n- На бесконечности: `ln(1+x²) ~ 2 ln x`, поэтому\n`ln(1+x²)/(1+x²) ~ 2 ln x / x²`.\nСравним с `x^(-3/2)`: при больших `x` верно `ln x ≤ x^(1/2)`, значит `2 ln x / x² ≤ 2/x^(3/2)`. Интеграл от `x^(-3/2)` на `[1, +∞)` сходится (показатель `3/2 > 1`), а сходимость мажорантой — по признаку сравнения. Итог: интеграл сходится, причём абсолютно.\n\n**2. Вычисление**\n\nЗамена `x = tg t`, где `t` меняется от `0` до `π/2` (границы: `x=0 → t=0`, `x→+∞ → t→π/2`):\n\n`dx = dt / cos²t`, при этом `1+x² = 1+tg²t = 1/cos²t`.\n\nТогда `dx/(1+x²) = dt` — вся «рациональная» часть сокращается:\n\n`I = ∫₀^{π/2} ln(1+tg²t) dt`.\n\nДалее `1+tg²t = 1/cos²t`, поэтому `ln(1+tg²t) = -2 ln(cos t)`, и\n\n`I = -2 ∫₀^{π/2} ln(cos t) dt`.\n\nОстаётся стандартный интеграл `J = ∫₀^{π/2} ln(cos t) dt = -(π/2)·ln 2`. Короткий вывод: замена `t → π/2 - t` даёт `J = ∫₀^{π/2} ln(sin t) dt`, поэтому\n\n`2J = ∫₀^{π/2} ln(sin t · cos t) dt = ∫₀^{π/2} ln((sin 2t)/2) dt = ∫₀^{π/2} ln(sin 2t) dt - (π/2)·ln 2`.\n\nПосле замены `u = 2t` и использования симметрии `sin u = sin(π - u)` получаем `∫₀^{π/2} ln(sin 2t) dt = J`. Значит `2J = J - (π/2)ln 2`, откуда `J = -(π/2)ln 2`.\n\nПодставляем:\n\n`I = -2 · (-(π/2)ln 2) = π·ln 2 ≈ 2.1775860903`.\n\n**3. Проверка другим способом (метод параметра)**\n\nПусть `F(a) = ∫₀^∞ ln(1+a²x²)/(1+x²) dx`, `F(0)=0`. Дифференцирование по параметру (допустимо: производная мажорируется интегрируемой функцией `2x²/(1+x²)²`):\n\n`F'(a) = 2a ∫₀^∞ x²/((1+a²x²)(1+x²)) dx`.\n\nРазложение на простейшие: `x²/((1+x²)(1+a²x²)) = (1/(a²-1))·[1/(1+x²) - 1/(1+a²x²)]`. Тогда\n\n`F'(a) = (2a/(a²-1))·(π/2)·(1 - 1/a) = π/(a+1)`,\n\n`F(a) = π ln(1+a)`, и при `a = 1` снова `I = π ln 2`. Два независимых вывода совпали — это и есть проверка результата.\n\n**Ключевой вывод:** замена `x = tg t` убирает `1+x²` и сводит задачу к классическому `∫₀^{π/2} ln(cos t) dt = -(π/2)ln 2`; ответ `π ln 2 ≈ 2.1776`, сходимость обеспечивается поведением `~x²` в нуле и `~ln x / x²` на бесконечности.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 23179,
+        "steps": [
+          {
+            "duration_ms": 4823,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 3644,
+            "completion_tokens": 501,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "expression": "log(1+x^2)/(1+x^2)",
+                  "operation": "integrate",
+                  "lower": "0",
+                  "upper": "infinity",
+                  "variable": "x"
+                }
+              },
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "expression": "pi*ln(2)",
+                  "operation": "numeric"
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 15506,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 3992,
+            "completion_tokens": 2373,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 2843,
+            "arguments": {
+              "expression": "log(1+x^2)/(1+x^2)",
+              "operation": "integrate",
+              "lower": "0",
+              "upper": "infinity",
+              "variable": "x"
+            },
+            "output": {
+              "status": "undefined",
+              "operation": "integrate",
+              "expression": "log(1+x**2)/(1+x**2)",
+              "variable": "x",
+              "result": "",
+              "numeric": "",
+              "exact": true,
+              "detail": "Результат остался в невычисленном виде."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 5,
+            "arguments": {
+              "expression": "pi*ln(2)",
+              "operation": "numeric"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "numeric",
+              "expression": "pi*ln(2)",
+              "variable": "x",
+              "result": "2.17758609030360",
+              "numeric": "2.17758609030360",
+              "exact": false,
+              "detail": "Численное значение с 15 значащими цифрами."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "limit-cancellation",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 52,
+            "arguments": {
+              "operation": "limit",
+              "expression": "(sin(x)-x+x^3/6)/x^5",
+              "point": 0
+            },
+            "output": {
+              "status": "ok",
+              "operation": "limit",
+              "expression": "(sin(x)-x+x**3/6)/x**5",
+              "variable": "x",
+              "result": "1/120",
+              "numeric": "0.00833333333333333",
+              "exact": true,
+              "detail": "Предел по x в точке 0, направление both."
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "reason": "plain_response",
+        "answer": "**Краткая суть:** предел двусторонний и равен `1/120` — числитель устроен так, что первые два слагаемых ряда Тейлора синуса (`x` и `x³/6`) взаимно уничтожаются с вычитаемыми, и остаётся ведущий член `−x⁵/120`.\n\n**Объяснение**\n\n1. Разложение синуса по Тейлору в нуле (радианы):\n`sin x = x − x³/6 + x⁵/120 − x⁷/5040 + O(x⁹)`\n\n2. Подставляем в числитель:\n`sin x − x + x³/6 = (x − x³/6 + x⁵/120 − …) − x + x³/6 = x⁵/120 + O(x⁷)`\n\nЧто сократилось:\n- `x` из ряда синуса — с членом `−x`;\n- `−x³/6` из ряда синуса — с членом `+x³/6`.\nОстаётся первое «нескомпенсированное» слагаемое `x⁵/120`; все дальнейшие члены имеют порядок `x⁷` и выше.\n\n3. Делим на `x⁵` (при `x ≠ 0`, что как раз и нужно для предела):\n`(x⁵/120 + O(x⁷))/x⁵ = 1/120 + O(x²) → 1/120` при `x → 0`.\n\n4. Двусторонность: функция `f(x) = (sin x − x + x³/6)/x⁵` нечётна (синус и все вычитаемые нечётны, степень `x⁵` нечётна), поэтому значения слева и справа симметричны по знаку: односторонние пределы совпадают, оба равны `1/120`. Проверка через инструмент даёт одинаковый результат для `both`, `left` и `right`.\n\n**Альтернативная проверка (правило Лопиталя):** форма `0/0`. Пять дифференцирований числителя дают `−cos x` (члены `−x`, `+x³/6` и постоянные при дифференцировании обнуляются), знаменатель после пяти дифференцирований равен `120`. Итог: `−cos(0)/120 = −1/120`… — здесь легко ошибиться знаком, поэтому аккуратно:\n\n- 1-я производная: `cos x − 1 + x²/2`\n- 2-я: `−sin x + x`\n- 3-я: `−cos x + 1`\n- 4-я: `sin x`\n- 5-я: `cos x`\n- знаменатель `x⁵` после 5 дифференцирований: `120`.\n\nТо есть предел `cos(0)/120 = 1/120` — совпадает с рядом Тейлора. Это же подтверждает, что порядок нуля числителя ровно 5: пятая производная в нуле равна 1, а не 0.\n\n**Ключевой вывод:** `lim(x→0) (sin x − x + x³/6)/x⁵ = 1/120`; сокращаются ровно члены `x` и `x³/6`, а предел определяется коэффициентом при `x⁵` в разложении синуса.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 9953,
+        "steps": [
+          {
+            "duration_ms": 2869,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 3647,
+            "completion_tokens": 338,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "limit",
+                  "expression": "(sin(x) - x + x^3/6)/x^5",
+                  "point": "0",
+                  "direction": "both"
+                }
+              },
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "limit",
+                  "expression": "(sin(x) - x + x^3/6)/x^5",
+                  "point": "0",
+                  "direction": "left"
+                }
+              },
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "limit",
+                  "expression": "(sin(x) - x + x^3/6)/x^5",
+                  "point": "0",
+                  "direction": "right"
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 7065,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 4243,
+            "completion_tokens": 875,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 7,
+            "arguments": {
+              "operation": "limit",
+              "expression": "(sin(x) - x + x^3/6)/x^5",
+              "point": "0",
+              "direction": "both"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "limit",
+              "expression": "(sin(x) - x + x**3/6)/x**5",
+              "variable": "x",
+              "result": "1/120",
+              "numeric": "0.00833333333333333",
+              "exact": true,
+              "detail": "Предел по x в точке 0, направление both."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 6,
+            "arguments": {
+              "operation": "limit",
+              "expression": "(sin(x) - x + x^3/6)/x^5",
+              "point": "0",
+              "direction": "left"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "limit",
+              "expression": "(sin(x) - x + x**3/6)/x**5",
+              "variable": "x",
+              "result": "1/120",
+              "numeric": "0.00833333333333333",
+              "exact": true,
+              "detail": "Предел по x в точке 0, направление left."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 6,
+            "arguments": {
+              "operation": "limit",
+              "expression": "(sin(x) - x + x^3/6)/x^5",
+              "point": "0",
+              "direction": "right"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "limit",
+              "expression": "(sin(x) - x + x**3/6)/x**5",
+              "variable": "x",
+              "result": "1/120",
+              "numeric": "0.00833333333333333",
+              "exact": true,
+              "detail": "Предел по x в точке 0, направление right."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "one-sided-limit",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 20,
+            "arguments": {
+              "operation": "limit",
+              "expression": "(1-cos(x))/x^2",
+              "point": 0,
+              "direction": "right"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "limit",
+              "expression": "(1-cos(x))/x**2",
+              "variable": "x",
+              "result": "1/2",
+              "numeric": "0.500000000000000",
+              "exact": true,
+              "detail": "Предел по x в точке 0, направление right."
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "reason": "plain_response",
+        "answer": "**Ответ:** `1/2`.\n\n**Почему так**\n\nФункция `(1 − cos x)/x²` чётная, поэтому односторонний предел справа совпадает с двусторонним. Есть несколько способов обосновать значение.\n\n1. Через эквивалентность. При `x → 0`:\n   `1 − cos x ~ x²/2`, значит\n   `(1 − cos x)/x² → (x²/2)/x² = 1/2`.\n\n2. Через формулу понижения степени. Так как `1 − cos x = 2·sin²(x/2)`, то\n   `(1 − cos x)/x² = 2·sin²(x/2)/x² = (1/2)·(sin(x/2)/(x/2))²`.\n   Предел `sin t / t → 1` при `t = x/2 → 0`, отсюда `(1/2)·1² = 1/2`.\n\n3. Через ряд Тейлора. `cos x = 1 − x²/2 + x⁴/24 − …`, поэтому числитель `x²/2 + O(x⁴)`, и после деления на `x²` получаем `1/2 + O(x²) → 1/2`.\n\n**Ключевой момент:** односторонность (справа) здесь ни на что не влияет — предел конечен, функция чётна и не имеет особенности в нуле, куда мы стремимся. Значение `1/2`.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 4637,
+        "steps": [
+          {
+            "duration_ms": 1559,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 3636,
+            "completion_tokens": 108,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "expression": "(1 - cos(x))/x^2",
+                  "operation": "limit",
+                  "point": "0",
+                  "direction": "right"
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 3071,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 3829,
+            "completion_tokens": 362,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 6,
+            "arguments": {
+              "expression": "(1 - cos(x))/x^2",
+              "operation": "limit",
+              "point": "0",
+              "direction": "right"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "limit",
+              "expression": "(1 - cos(x))/x**2",
+              "variable": "x",
+              "result": "1/2",
+              "numeric": "0.500000000000000",
+              "exact": true,
+              "detail": "Предел по x в точке 0, направление right."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "two-sided-disagreement",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 8,
+            "arguments": {
+              "operation": "limit",
+              "expression": "abs(x)/x",
+              "point": 0,
+              "direction": "left"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "limit",
+              "expression": "abs(x)/x",
+              "variable": "x",
+              "result": "-1",
+              "numeric": "-1.00000000000000",
+              "exact": true,
+              "detail": "Предел по x в точке 0, направление left."
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 10,
+            "arguments": {
+              "operation": "limit",
+              "expression": "abs(x)/x",
+              "point": 0,
+              "direction": "right"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "limit",
+              "expression": "abs(x)/x",
+              "variable": "x",
+              "result": "1",
+              "numeric": "1.00000000000000",
+              "exact": true,
+              "detail": "Предел по x в точке 0, направление right."
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "reason": "plain_response",
+        "answer": "**Кратко:** двустороннего предела нет; односторонние равны `-1` (слева) и `1` (справа).\n\n**Почему.** Функция `f(x) = |x|/x` определена при всех `x ≠ 0`. Раскроем модуль по знаку:\n\n1. При `x > 0` имеем `|x| = x`, значит `f(x) = x/x = 1` — функция постоянна на `(0, +∞)`.\n   Отсюда предел справа: `lim_{x→0+} |x|/x = 1`.\n\n2. При `x < 0` имеем `|x| = -x`, значит `f(x) = (-x)/x = -1` — постоянна на `(-∞, 0)`.\n   Отсюда предел слева: `lim_{x→0-} |x|/x = -1`.\n\n**Вывод.** Двусторонний предел существует тогда и только тогда, когда оба односторонних предела конечны и совпадают. Здесь `-1 ≠ 1`, поэтому `lim_{x→0} |x|/x` **не существует**. Точка `x = 0` — точка разрыва первого рода (устранимого типа быть не может: значения пределов разные), скачок равен `1 - (-1) = 2`.\n\nПроверка на числах: `f(-0.001) = -1`, `f(0.001) = 1` — результат не зависит от того, насколько близко мы подходим к нулю с каждой стороны. Инструмент подтвердил оба односторонних предела: `-1` и `1`.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 5066,
+        "steps": [
+          {
+            "duration_ms": 1812,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 3641,
+            "completion_tokens": 215,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "expression": "abs(x)/x",
+                  "operation": "limit",
+                  "point": "0",
+                  "direction": "left"
+                }
+              },
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "expression": "abs(x)/x",
+                  "operation": "limit",
+                  "point": "0",
+                  "direction": "right"
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 3241,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 3991,
+            "completion_tokens": 397,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 6,
+            "arguments": {
+              "expression": "abs(x)/x",
+              "operation": "limit",
+              "point": "0",
+              "direction": "left"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "limit",
+              "expression": "abs(x)/x",
+              "variable": "x",
+              "result": "-1",
+              "numeric": "-1.00000000000000",
+              "exact": true,
+              "detail": "Предел по x в точке 0, направление left."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 6,
+            "arguments": {
+              "expression": "abs(x)/x",
+              "operation": "limit",
+              "point": "0",
+              "direction": "right"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "limit",
+              "expression": "abs(x)/x",
+              "variable": "x",
+              "result": "1",
+              "numeric": "1.00000000000000",
+              "exact": true,
+              "detail": "Предел по x в точке 0, направление right."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "divergent-integral",
+      "direct": {
+        "matched": false,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 49,
+            "arguments": {
+              "operation": "integrate",
+              "expression": "1/x",
+              "lower": 1,
+              "upper": "oo"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "integrate",
+              "expression": "1/x",
+              "variable": "x",
+              "result": "oo",
+              "numeric": "",
+              "exact": true,
+              "detail": "Определённый интеграл по x от 1 до oo."
+            },
+            "error": null,
+            "images": [],
+            "matches": false
+          }
+        ]
+      },
+      "live": {
+        "decision": "respond",
+        "reason": "plain_response",
+        "answer": "**Краткая суть**\n\nИнтеграл расходится, но расходится «медленно»: усечённый интеграл равен `ln R` и уходит в бесконечность логарифмически.\n\n**Вычисление**\n\nФункция `1/x` непрерывна и положительна на `[1, +∞)`, поэтому интеграл понимается как предел:\n\n∫₁^R (1/x) dx = ln x |₁^R = ln R − ln 1 = ln R\n\nЗначит по определению:\n\n∫₁^∞ dx/x = lim (R→+∞) ln R = +∞ — интеграл расходится.\n\n**Доказательство расходимости без явного предела (критерий Коши)**\n\nДля сходящегося интеграла должно быть: для любого ε>0 существует R₀ такое, что при всех R₂>R₁>R₀ выполнено |∫_{R₁}^{R₂} f| < ε. Возьмём «растянутый» отрезок `[R, 2R]`:\n\n∫_R^{2R} dx/x ≥ (1/(2R))·(2R − R) = 1/2\n\n(оценка через минимум подынтегральной функции — она убывает). Величина 1/2 не стремится к нулю при R→∞, значит условие Коши нарушено и конечного предела нет. Тот же приём: на `[R, eR]` интеграл ровно равен 1, то есть «на каждое приращение площади 1 нужен множитель e к аргументу».\n\n**Поведение усечённых интегралов**\n\n- `F(R) = ln R`, растёт неограниченно, но крайне медленно: производная `1/R → 0`.\n- Значения: `F(10) ≈ 2.303`, `F(100) ≈ 4.605`, `F(10⁶) ≈ 13.816`, `F(10⁹) ≈ 20.723`.\n- Удвоение верхнего предела даёт постоянную добавку: `F(2R) − F(R) = ln 2 ≈ 0.6931`. Поэтому «догнать» большую площадь можно только экспоненциальным ростом R: чтобы получить `F(R) = 100`, нужно `R = e^{100} ≈ 2.69·10^{43}`.\n- На произвольном отрезке: `∫_a^b dx/x = ln(b/a)`, результат зависит только от отношения границ (масштабная инвариантность — причина логарифма).\n- Сравнение с рядом: `∫₁^N dx/x = ln N`, а гармоническая сумма `H_N ≈ ln N + γ + o(1)` (γ ≈ 0.5772), то есть `H_N − ln N → γ`. Расходимость интеграла и гармонического ряда — одно и то же явление.\n\n**Ключевой вывод**\n\n`1/x` — граничный случай между сходящимися `1/x^p` при `p>1` и расходящимися при `p≤1`: убывания «ровно настолько, чтобы не хватило» для сходимости. Усечённые интегралы ведут себя как `ln R` и стремятся к бесконечности, но так медленно, что для значений порядка сотни нужны астрономические пределы интегрирования.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 9303,
+        "steps": [
+          {
+            "duration_ms": 9303,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 3645,
+            "completion_tokens": 1082,
+            "calls": []
+          }
+        ],
+        "calls": []
+      }
+    },
+    {
+      "id": "series-converges",
+      "direct": {
+        "matched": null,
+        "calls": []
+      },
+      "live": {
+        "decision": "respond",
+        "reason": "plain_response",
+        "answer": "# Сходимость\n\nРяд `Σ 1/n²` сходится. Самый короткий аргумент — интегральный признак Коши: функция `f(x) = 1/x²` положительна, непрерывна и монотонно убывает при x ≥ 1, а несобственный интеграл\n\n`∫ от 1 до ∞ (1/x²) dx = 1`\n\nсходится. Значит, ряд ведёт себя так же, и его сумма конечна.\n\nПолезно сразу получить грубые границы. Так как для n ≥ 2 выполнено `1/n² ≤ 1/(n(n−1)) = 1/(n−1) − 1/n`, телескопическая сумма даёт оценку хвоста, и в итоге\n\n`1 < S < 1 + 1 = 2`.\n\nЧисленная проверка согласуется: частичные суммы растут к ≈1.64, то есть лежат внутри интервала.\n\n# Точная сумма\n\nЭто базельская задача Эйлера:\n\n`Σ от n=1 до ∞ 1/n² = π²/6 ≈ 1.6449340668`\n\nОдин из стандартных выводов — через ряд Фурье для `f(x) = x²` на `[−π, π]`:\n\n`x² = π²/3 + 4 · Σ от n=1 до ∞ (−1)^n cos(nx)/n²`\n\nПодставляем `x = π`. Тогда `cos(nπ) = (−1)^n`, произведение `(−1)^n · (−1)^n = 1`, и левая часть равна `π²`:\n\n`π² = π²/3 + 4 · Σ 1/n²`\n\nОтсюда `4S = 2π²/3`, то есть `S = π²/6`. Важно, что ряд Фурье для `x²` сходится к самой функции в точке `x = π` (функция гладкая и `x²` на конце отрезка непрерывна с периодом — подстановка законна).\n\n**Ключевой вывод:** сходимость даёт интегральный признак (сравнение с `∫ dx/x²`), а точное значение `π²/6` получается из ряда Фурье; полезно помнить и оценку `1 < S < 2` как быструю проверку на правдоподобие.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 8068,
+        "steps": [
+          {
+            "duration_ms": 8067,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 3778,
+            "completion_tokens": 960,
+            "calls": []
+          }
+        ],
+        "calls": []
+      }
+    },
+    {
+      "id": "series-conditional",
+      "direct": {
+        "matched": null,
+        "calls": []
+      },
+      "live": {
+        "decision": "respond",
+        "reason": "plain_response",
+        "answer": "**Кратко:** ряд сходится, но только условно; сумма равна `ln 2 ≈ 0.693147`.\n\n**Разбор**\n\nРяд ∑ от n=1 до ∞ от `(−1)^(n−1)/n` — это знакочередующийся гармонический ряд.\n\n1) **Сходимость (по признаку Лейбница).** Члены `a_n = 1/n` положительны, монотонно убывают (`a_{n+1} < a_n`) и стремятся к нулю (`a_n → 0`). Оба условия признака Лейбница выполнены, значит ряд сходится.\n\n2) **Абсолютная сходимость.** Рассмотрим ряд из модулей: ∑ `1/n` — гармонический ряд, он расходится (например, группировкой членов: суммы по блокам длины `2^k` не меньше `1/2` каждая). Значит исходный ряд **не** сходится абсолютно.\n\nВывод: сходимость **условная** — сам ряд сходится, а ряд из абсолютных величин расходится. Это же показывает, что переставлять члены такого ряда нельзя: из гармонического ряда можно перестановкой получить любую наперёд заданную сумму (теорема Римана о перестановках).\n\n3) **Точная сумма.** Из разложения `ln(1+x) = x − x²/2 + x³/3 − …` при `|x| ≤ 1`, `x ≠ −1`, подставляем `x = 1`:\n\n`ln 2 = 1 − 1/2 + 1/3 − 1/4 + …`\n\nТо есть сумма равна `ln 2 ≈ 0.6931471806`. Ряд сходится медленно: остаток после n членов по модулю не превосходит `1/(n+1)`, поэтому для 6 знаков нужно порядка миллиона членов.\n\n**Ключевой вывод:** признак Лейбница даёт сходимость, расходимость гармонического ряда — отсутствие абсолютной сходимости, а сумма равна `ln 2`.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 5201,
+        "steps": [
+          {
+            "duration_ms": 5200,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 3787,
+            "completion_tokens": 603,
+            "calls": []
+          }
+        ],
+        "calls": []
+      }
+    },
+    {
+      "id": "partial-derivative",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 72,
+            "arguments": {
+              "operation": "diff",
+              "expression": "x^3*y^2+sin(x*y)",
+              "variable": "x",
+              "order": 2
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "x**3*y**2+sin(x*y)",
+              "variable": "x",
+              "result": "y**2*(6*x - sin(x*y))",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 2 по переменной x."
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "reason": "plain_response",
+        "answer": "**Суть:** дважды дифференцируем по `x`, считая `y` константой.\n\n**Вычисление**\n\n1. Обозначим `z(x, y) = x³y² + sin(xy)`.\n\n2. Первая производная по `x` (`y` — параметр, правило цепочки для `sin(xy)`):\n`z_x = 3x²y² + cos(xy)·(xy)'_x = 3x²y² + y·cos(xy)`\n\n3. Вторая производная по `x`:\n`z_xx = 6xy² + y·(−sin(xy)·y) = 6xy² − y²sin(xy)`\n\nУдобно записать в факторизованном виде:\n\n`z_xx = y²(6x − sin(xy))`\n\n**Проверка:** член `y·cos(xy)` — это `y` (константа) умножить на `cos(xy)`, чья производная по `x` равна `−y·sin(xy)`, значит вклад `−y²sin(xy)`; член `3x²y²` даёт `6xy²`. Оба согласуются с результатом.\n\n**Ключевой вывод:** `∂²/∂x² [x³y² + sin(xy)] = 6xy² − y²sin(xy) = y²(6x − sin(xy))`. Заодно полезно: `z_xy = 6x²y + cos(xy) − xy·sin(xy)`, что по теореме Шварца совпадёт с `z_yx`.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 5527,
+        "steps": [
+          {
+            "duration_ms": 1691,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 3636,
+            "completion_tokens": 172,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "expression": "x^3*y^2 + sin(x*y)",
+                  "operation": "diff",
+                  "variable": "x",
+                  "order": 2
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 3781,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 3829,
+            "completion_tokens": 439,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 53,
+            "arguments": {
+              "expression": "x^3*y^2 + sin(x*y)",
+              "operation": "diff",
+              "variable": "x",
+              "order": 2
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "x**3*y**2 + sin(x*y)",
+              "variable": "x",
+              "result": "y**2*(6*x - sin(x*y))",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 2 по переменной x."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "mixed-derivative",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 8,
+            "arguments": {
+              "operation": "diff",
+              "expression": "x^2*y^3",
+              "variable": "x"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "x**2*y**3",
+              "variable": "x",
+              "result": "2*x*y**3",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 1 по переменной x."
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 7,
+            "arguments": {
+              "operation": "diff",
+              "expression": "2*x*y^3",
+              "variable": "y"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "2*x*y**3",
+              "variable": "y",
+              "result": "6*x*y**2",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 1 по переменной y."
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "reason": "plain_response",
+        "answer": "**Кратко:** смешанная производная равна `6xy²`.\n\n**Ход решения**\n\nДано `f(x, y) = x²y³`.\n\n1. Сначала по `x` (при этом `y` — константа):\n   `∂f/∂x = 2xy³`.\n2. Затем по `y` (при этом `x` — константа, а `y³ → 3y²`):\n   `∂/∂y (2xy³) = 2x · 3y² = 6xy²`.\n\n**Обозначение и проверка**\n\nЗапись `∂²f/∂y∂x` (или `f''xy`) означает именно «сначала по `x`, потом по `y`».\n\nПроверка в обратном порядке: `∂f/∂y = 3x²y²`, затем `∂/∂x (3x²y²) = 6xy²` — совпало. Это ожидаемо: для многочлена (и вообще при непрерывных вторых частных производных) смешанные производные равны по теореме Шварца.\n\n**Вывод:** `∂²/∂y∂x (x²y³) = 6xy²`.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 7599,
+        "steps": [
+          {
+            "duration_ms": 2409,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 3632,
+            "completion_tokens": 217,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "expression": "x^2*y^3",
+                  "operation": "diff",
+                  "variable": "x",
+                  "order": 1
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 2260,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 3811,
+            "completion_tokens": 105,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "expression": "2*x*y^3",
+                  "operation": "diff",
+                  "order": 1,
+                  "variable": "y"
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 2914,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 3988,
+            "completion_tokens": 286,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 9,
+            "arguments": {
+              "expression": "x^2*y^3",
+              "operation": "diff",
+              "variable": "x",
+              "order": 1
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "x**2*y**3",
+              "variable": "x",
+              "result": "2*x*y**3",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 1 по переменной x."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 6,
+            "arguments": {
+              "expression": "2*x*y^3",
+              "operation": "diff",
+              "order": 1,
+              "variable": "y"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "2*x*y**3",
+              "variable": "y",
+              "result": "6*x*y**2",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 1 по переменной y."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "jacobian",
+      "direct": {
+        "matched": null,
+        "calls": []
+      },
+      "live": {
+        "decision": "tool",
+        "reason": "plain_response",
+        "answer": "**Кратко:** отображение F(x,y) = (x² + y², xy). Матрица Якоби — из частных производных по столбцам-переменным:\n\n```\nJ(x,y) = [ ∂(x²+y²)/∂x   ∂(x²+y²)/∂y ]   = [ 2x  2y ]\n         [ ∂(xy)/∂x      ∂(xy)/∂y    ]     [ y   x  ]\n```\n\n**Определитель:**\n\n`det J = (2x)(x) − (2y)(y) = 2x² − 2y² = 2(x − y)(x + y)`\n\n**Что это значит проверочно**\n\n- Считаем якобиан как det J (для квадратной матрицы 2×2 это и есть якобиан). В точке (x,y) = (1,1): J = [[2,2],[1,1]], det = 0 — строки пропорциональны, ранг падает до 1.\n- det J = 0 на прямых `x = y` и `x = −y`. Там отображение локально не обратимо (в этих точках два разных прообраза склеиваются: F(x,y) = F(y,x), симметрия по x и y).\n- В точке (1,−1) det = 0 тоже; в точке (2,0) det = 8 ≠ 0 — локальный диффеоморфизм.\n- Проверка через симметрию: замена y ↔ x не меняет F, поэтому J(y,x) получается из J(x,y) перестановкой столбцов, а det меняет знак — согласуется с 2(x²−y²).\n\n**Вывод:** `J = [[2x, 2y], [y, x]]`, `det J = 2(x² − y²)`; вырождение ровно на биссектрисах `y = ±x`, включая начало координат, где J нулевая.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 8360,
+        "steps": [
+          {
+            "duration_ms": 3349,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 3642,
+            "completion_tokens": 403,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "expression": "x^2 + y^2",
+                  "operation": "diff",
+                  "variable": "x"
+                }
+              },
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "expression": "x^2 + y^2",
+                  "operation": "diff",
+                  "variable": "y"
+                }
+              },
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "expression": "x*y",
+                  "operation": "diff",
+                  "variable": "x"
+                }
+              },
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "expression": "x*y",
+                  "operation": "diff",
+                  "variable": "y"
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 4980,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 4226,
+            "completion_tokens": 564,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 9,
+            "arguments": {
+              "expression": "x^2 + y^2",
+              "operation": "diff",
+              "variable": "x"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "x**2 + y**2",
+              "variable": "x",
+              "result": "2*x",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 1 по переменной x."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 9,
+            "arguments": {
+              "expression": "x^2 + y^2",
+              "operation": "diff",
+              "variable": "y"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "x**2 + y**2",
+              "variable": "y",
+              "result": "2*y",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 1 по переменной y."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 5,
+            "arguments": {
+              "expression": "x*y",
+              "operation": "diff",
+              "variable": "x"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "x*y",
+              "variable": "x",
+              "result": "y",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 1 по переменной x."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 7,
+            "arguments": {
+              "expression": "x*y",
+              "operation": "diff",
+              "variable": "y"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "x*y",
+              "variable": "y",
+              "result": "x",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 1 по переменной y."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "constrained-extrema",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_solve",
+            "duration_ms": 47,
+            "arguments": {
+              "equations": [
+                "y=2*l*x",
+                "x=2*l*y",
+                "x^2+y^2=1"
+              ],
+              "variables": [
+                "x",
+                "y",
+                "l"
+              ]
+            },
+            "output": {
+              "status": "solutions",
+              "equations": [
+                "y = 2*l*x",
+                "x = 2*l*y",
+                "x**2+y**2 = 1"
+              ],
+              "variables": [
+                "x",
+                "y",
+                "l"
+              ],
+              "solutions": [
+                {
+                  "x": "-sqrt(2)/2",
+                  "y": "-sqrt(2)/2",
+                  "l": "1/2"
+                },
+                {
+                  "x": "-sqrt(2)/2",
+                  "y": "sqrt(2)/2",
+                  "l": "-1/2"
+                },
+                {
+                  "x": "sqrt(2)/2",
+                  "y": "-sqrt(2)/2",
+                  "l": "-1/2"
+                },
+                {
+                  "x": "sqrt(2)/2",
+                  "y": "sqrt(2)/2",
+                  "l": "1/2"
+                }
+              ],
+              "numeric_solutions": [
+                {
+                  "x": "-0.707106781186548",
+                  "y": "-0.707106781186548",
+                  "l": "0.500000000000000"
+                },
+                {
+                  "x": "-0.707106781186548",
+                  "y": "0.707106781186548",
+                  "l": "-0.500000000000000"
+                },
+                {
+                  "x": "0.707106781186548",
+                  "y": "-0.707106781186548",
+                  "l": "-0.500000000000000"
+                },
+                {
+                  "x": "0.707106781186548",
+                  "y": "0.707106781186548",
+                  "l": "0.500000000000000"
+                }
+              ],
+              "discarded": [],
+              "real_only": true,
+              "verified": true,
+              "detail": "Все решения проверены подстановкой в исходные уравнения и по области определения."
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "reason": "plain_response",
+        "answer": "**Суть**\n\nНа окружности `x² + y² = 1` функция `f(x,y) = xy` принимает значения от `-1/2` до `1/2`. Максимум `1/2` достигается в двух точках: `(1/√2, 1/√2)` и `(-1/√2, -1/√2)`. Минимум `-1/2` — тоже в двух: `(1/√2, -1/√2)` и `(-1/√2, 1/√2)`.\n\n**Способ 1: параметризация (самый быстрый)**\n\nЛюбая точка окружности имеет вид `x = cos t`, `y = sin t`, `t ∈ [0, 2π)`, причём каждое такое `t` даёт точку окружности — то есть перебор полный, ничего не теряем. Тогда\n\n`f = cos t · sin t = (1/2) sin 2t`\n\nФункция `sin 2t` пробегает отрезок `[-1, 1]`, поэтому `f ∈ [-1/2, 1/2]`.\n\n- `sin 2t = 1` при `2t = π/2 + 2πk`, то есть `t = π/4 + πk`: это `t = π/4` и `t = 5π/4`, откуда точки `(1/√2, 1/√2)` и `(-1/√2, -1/√2)` — значение `1/2`.\n- `sin 2t = -1` при `2t = 3π/2 + 2πk`, то есть `t = 3π/4 + πk`: точки `(-1/√2, 1/√2)` и `(1/√2, -1/√2)` — значение `-1/2`.\n\n**Способ 2: метод множителей Лагранжа (проверка)**\n\nОграничение `g = x² + y² - 1 = 0`. Система:\n\n`y = 2λx`, `x = 2λy`, `x² + y² = 1`\n\nПодстановка второго в первое: `x = 4λ²x`, то есть `x(1 - 4λ²) = 0`. Случай `x = 0` даёт `y = 0` (из первого уравнения), а это противоречит `x² + y² = 1`. Значит `λ = ±1/2`, и тогда `y = ±x`. Вместе с `x² + y² = 1` получаем `|x| = |y| = 1/√2` — те же четыре точки, с разными комбинациями знаков.\n\n**Почему других экстремумов нет**\n\n1. Окружность — замкнутое и ограниченное (компактное) множество, а `f(x,y) = xy` непрерывна. По теореме Вейерштрасса глобальные максимум и минимум существуют и достигаются.\n2. Кривая гладкая: `∇g = (2x, 2y) ≠ (0,0)` во всех точках окружности, поэтому в любой точке локального экстремума выполняется условие Лагранжа. Значит, кандидатов можно искать только среди решений системы — их ровно четыре.\n3. Из четырёх кандидатов значения бывают только `1/2` и `-1/2`; сравнив их, получаем глобальные экстремумы. Параметризация даёт то же самое независимо, уже без обращения к необходимым условиям.\n\nДополнительно: неравенство `|xy| ≤ (x² + y²)/2 = 1/2` (это следствие `(x-y)² ≥ 0` и `(x+y)² ≥ 0`) сразу ограничивает значения, а равенство достигается ровно при `y = ±x` — это ещё одно, самое короткое доказательство отсутствия других экстремумов.\n\n**Ключевой вывод**\n\nМаксимум `1/2` — при `xy > 0` (одинаковые знаки), минимум `-1/2` — при `xy < 0` (разные знаки); в точках `(±1, 0)` и `(0, ±1)` значение `0`, это не экстремум. Полнота перебора обеспечена компактностью окружности и условием Лагранжа либо полной параметризацией.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 16595,
+        "steps": [
+          {
+            "duration_ms": 5283,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 3648,
+            "completion_tokens": 609,
+            "calls": [
+              {
+                "name": "math_solve",
+                "arguments": {
+                  "equations": [
+                    "y = 2*L*x",
+                    "x = 2*L*y",
+                    "x^2 + y^2 = 1"
+                  ],
+                  "variables": [
+                    "x",
+                    "y",
+                    "L"
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 11267,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 4122,
+            "completion_tokens": 1517,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_solve",
+            "duration_ms": 44,
+            "arguments": {
+              "equations": [
+                "y = 2*L*x",
+                "x = 2*L*y",
+                "x^2 + y^2 = 1"
+              ],
+              "variables": [
+                "x",
+                "y",
+                "L"
+              ]
+            },
+            "output": {
+              "status": "solutions",
+              "equations": [
+                "y = 2*L*x",
+                "x = 2*L*y",
+                "x**2 + y**2 = 1"
+              ],
+              "variables": [
+                "x",
+                "y",
+                "L"
+              ],
+              "solutions": [
+                {
+                  "x": "-sqrt(2)/2",
+                  "y": "-sqrt(2)/2",
+                  "L": "1/2"
+                },
+                {
+                  "x": "-sqrt(2)/2",
+                  "y": "sqrt(2)/2",
+                  "L": "-1/2"
+                },
+                {
+                  "x": "sqrt(2)/2",
+                  "y": "-sqrt(2)/2",
+                  "L": "-1/2"
+                },
+                {
+                  "x": "sqrt(2)/2",
+                  "y": "sqrt(2)/2",
+                  "L": "1/2"
+                }
+              ],
+              "numeric_solutions": [
+                {
+                  "x": "-0.707106781186548",
+                  "y": "-0.707106781186548",
+                  "L": "0.500000000000000"
+                },
+                {
+                  "x": "-0.707106781186548",
+                  "y": "0.707106781186548",
+                  "L": "-0.500000000000000"
+                },
+                {
+                  "x": "0.707106781186548",
+                  "y": "-0.707106781186548",
+                  "L": "-0.500000000000000"
+                },
+                {
+                  "x": "0.707106781186548",
+                  "y": "0.707106781186548",
+                  "L": "0.500000000000000"
+                }
+              ],
+              "discarded": [],
+              "real_only": true,
+              "verified": true,
+              "detail": "Все решения проверены подстановкой в исходные уравнения и по области определения."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "parametric",
+      "direct": {
+        "matched": null,
+        "calls": []
+      },
+      "live": {
+        "decision": "tool",
+        "reason": "plain_response",
+        "answer": "**Суть.** Кривая x = 2cos t, y = sin t при t ∈ [0, 2π] — это эллипс с полуосями a = 2 (по x) и b = 1 (по y), обходимый против часовой стрелки, с началом и концом в точке (2, 0).\n\n**Как получается уравнение линии**\n\nВозводим каждое равенство в квадрат и складываем, пользуясь тем, что cos²t + sin²t = 1:\n\n`x²/4 + y²/1 = cos²t + sin²t = 1`\n\nТо есть `x²/4 + y² = 1` — канонический эллипс. Обратное тоже верно: любая точка этого эллипса представляется указанным t, причём единственным на [0, 2π). Отсюда `y = ±√(1 − x²/4)`, где x ∈ [−2, 2].\n\n**График.** Встроенный плоттер строит только функции вида y = f(x), поэтому параметрическая кривая показана двумя её ветвями: `y = √(1 − x²/4)` и `y = −√(1 − x²/4)` — вместе они дают тот же эллипс (см. картинку выше по ответу; «разрывы» вблизи x = ±2 — это просто концы области определения).\n\n**Пересечения с осями**\n\nОсь Ox (y = 0): `sin t = 0` → t = 0, π, 2π.\n- t = 0 и t = 2π → точка **(2, 0)** (одна и та же, кривая замкнута);\n- t = π → точка **(−2, 0)**.\n\nОсь Oy (x = 0): `cos t = 0` → t = π/2, 3π/2.\n- t = π/2 → **(0, 1)**;\n- t = 3π/2 → **(0, −1)**.\n\nПроверка: подстановка (0, 1) в `x²/4 + y² = 1` даёт 1 — точка лежит на кривой. Итого четыре точки пересечения с осями, все лежат на эллипсе, кратности нет.\n\n**Ключевой вывод.** Параметризация — это растянутая в 2 раза по x единичная окружность: параметр t — не полярный угол эллипса, а угол соответствующей точки на окружности. Обход: (2,0) → (0,1) → (−2,0) → (0,−1) → снова (2,0), против часовой стрелки; x пробегает [−2, 2], y — [−1, 1].",
+        "truncated": false,
+        "images": [
+          "parametric-live-1.png"
+        ],
+        "duration_ms": 11860,
+        "steps": [
+          {
+            "duration_ms": 2748,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 3651,
+            "completion_tokens": 283,
+            "calls": [
+              {
+                "name": "math_plot",
+                "arguments": {
+                  "functions": [
+                    "sqrt(1 - x**2/4)",
+                    "-sqrt(1 - x**2/4)"
+                  ],
+                  "x_min": -2.6,
+                  "x_max": 2.6
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 8825,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 3932,
+            "completion_tokens": 935,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_plot",
+            "duration_ms": 287,
+            "arguments": {
+              "functions": [
+                "sqrt(1 - x**2/4)",
+                "-sqrt(1 - x**2/4)"
+              ],
+              "x_min": -2.6,
+              "x_max": 2.6
+            },
+            "output": {
+              "status": "ok",
+              "functions": [
+                {
+                  "expression": "sqrt(1 - x**2/4)",
+                  "segments": 1,
+                  "discontinuities": [
+                    "-1.9994",
+                    "1.9994"
+                  ]
+                },
+                {
+                  "expression": "-sqrt(1 - x**2/4)",
+                  "segments": 1,
+                  "discontinuities": [
+                    "-1.9994",
+                    "1.9994"
+                  ]
+                }
+              ],
+              "variable": "x",
+              "x_min": -2.6,
+              "x_max": 2.6,
+              "samples": 2001,
+              "png_bytes": 29312,
+              "detail": "График построен; разрывы и участки вне вещественной области разорваны."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "level-curves",
+      "direct": {
+        "matched": null,
+        "calls": []
+      },
+      "live": {
+        "decision": "tool",
+        "reason": "plain_response",
+        "answer": "**Кратко:** линии уровня x²+y² = c при c = 1 и c = 2 — это окружности с центром в начале координат радиусов 1 и √2 ≈ 1.414. Обе целиком лежат внутри квадрата [−2,2]×[−2,2], поэтому обрезки квадратом не происходит (квадрат их только «обрамляет»).\n\n**Что построено**\n\nУравнение уровня x²+y² = c разрешаем относительно y: y = ±√(c − x²), причём подкоренное выражение требует |x| ≤ √c. Отсюда четыре ветви, которые вместе образуют две замкнутые кривые:\n\n- c = 1: y = ±√(1 − x²), x ∈ [−1, 1] — верхняя и нижняя полуокружности радиуса 1;\n- c = 2: y = ±√(2 − x²), x ∈ [−√2, √2] ≈ [−1.414, 1.414] — полуокружности радиуса √2.\n\nНа рисунке (x от −2 до 2) видно: малая окружность радиуса 1 целиком внутри, большая радиуса √2 — тоже внутри квадрата, но ближе к его сторонам. Расстояния от центра до сторон квадрата равны 2, а √2 < 2, так что касания сторон нет.\n\n**Проверка и детали**\n\n- Радиус уровня c равен √c: при c = 1 получаем r = 1, при c = 2 получаем r = √2.\n- В полярных координатах x = r cos φ, y = r sin φ имеем x²+y² = r², поэтому линии уровня — это просто r = const, то есть окружности; удобная параметризация: (x, y) = (√c · cos t, √c · sin t), t ∈ [0, 2π).\n- Линии уровня разных значений не пересекаются: если x²+y² = 1 и одновременно = 2, противоречие.\n- Градиент ∇f = (2x, 2y) направлен по радиусу от начала координат, то есть перпендикулярен окружностям — стандартное свойство: градиент ортогонален линии уровня.\n- Значения функции: в центре f = 0, в углах квадрата (±2, ±2) имеем f = 8; на сторонах x = ±2 значение не меньше 4, поэтому уровни 1 и 2 достигаются только во внутренней части квадрата.\n\nКлючевой вывод: линии уровня x²+y² — концентрические окружности с центром в (0,0), и внутри данного квадрата уровни 1 и 2 — полные окружности радиусов 1 и √2 без обрезания.",
+        "truncated": false,
+        "images": [
+          "level-curves-live-1.png"
+        ],
+        "duration_ms": 11025,
+        "steps": [
+          {
+            "duration_ms": 3431,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 3649,
+            "completion_tokens": 378,
+            "calls": [
+              {
+                "name": "math_plot",
+                "arguments": {
+                  "functions": [
+                    "sqrt(1 - x^2)",
+                    "-sqrt(1 - x^2)",
+                    "sqrt(2 - x^2)",
+                    "-sqrt(2 - x^2)"
+                  ],
+                  "x_min": -2,
+                  "x_max": 2,
+                  "variable": "x"
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 7412,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 4012,
+            "completion_tokens": 849,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_plot",
+            "duration_ms": 181,
+            "arguments": {
+              "functions": [
+                "sqrt(1 - x^2)",
+                "-sqrt(1 - x^2)",
+                "sqrt(2 - x^2)",
+                "-sqrt(2 - x^2)"
+              ],
+              "x_min": -2,
+              "x_max": 2,
+              "variable": "x"
+            },
+            "output": {
+              "status": "ok",
+              "functions": [
+                {
+                  "expression": "sqrt(1 - x**2)",
+                  "segments": 1,
+                  "discontinuities": [
+                    "-1",
+                    "1"
+                  ]
+                },
+                {
+                  "expression": "-sqrt(1 - x**2)",
+                  "segments": 1,
+                  "discontinuities": [
+                    "-1",
+                    "1"
+                  ]
+                },
+                {
+                  "expression": "sqrt(2 - x**2)",
+                  "segments": 1,
+                  "discontinuities": [
+                    "-1.414",
+                    "1.414"
+                  ]
+                },
+                {
+                  "expression": "-sqrt(2 - x**2)",
+                  "segments": 1,
+                  "discontinuities": [
+                    "-1.414",
+                    "1.414"
+                  ]
+                }
+              ],
+              "variable": "x",
+              "x_min": -2.0,
+              "x_max": 2.0,
+              "samples": 2001,
+              "png_bytes": 37274,
+              "detail": "График построен; разрывы и участки вне вещественной области разорваны."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "complex-pole",
+      "direct": {
+        "matched": null,
+        "calls": []
+      },
+      "live": {
+        "decision": "respond",
+        "reason": "plain_response",
+        "answer": "**Суть**\n\nСам файл-картинку здесь отрисовать не могу — среди доступных инструментов есть только плоттер вещественных графиков `y=f(x)`, цветных карт комплексной фазы он не строит. Поэтому ниже: (1) готовый скрипт, который вы запустите и получите ровно такую карту, (2) разбор того, что на ней будет видно, особенно в нуле.\n\n**Код (Python, numpy + matplotlib)**\n\n```python\nimport numpy as np\nimport matplotlib.pyplot as plt\nfrom matplotlib.colors import hsv_to_rgb\n\nlim, n = 2.0, 1201                      # 1201 -> пиксель ровно в z = 0\nx = np.linspace(-lim, lim, n)\ny = np.linspace(-lim, lim, n)\nX, Y = np.meshgrid(x, y)\nZ = X + 1j * Y\n\nwith np.errstate(divide='ignore', invalid='ignore'):\n    W = 1.0 / Z\nW[Z == 0] = np.nan                      # точка 0 не определена\n\nphase = np.angle(W)                     # arg(1/z)\nmod   = np.abs(W)                       # |1/z|\n\nH = (phase / (2 * np.pi)) % 1.0          # фаза -> оттенок\nS = np.ones_like(H)                      # насыщенность максимальная\nV = 0.5 + 0.5 * np.tanh(np.log(mod))     # модуль -> яркость (лог. шкала)\n\n# чередующиеся сектора по pi/6, чтобы границы фазовых лучей были видны\nband = (np.floor((phase % (2 * np.pi)) / (np.pi / 6)) % 2)\nV = V * np.where(band == 0, 1.0, 0.72)\n\nrgb = hsv_to_rgb(np.dstack([H, S, V]))\nrgb[np.isnan(rgb)] = 0.0                 # неопределённую точку — в чёрный\n\nplt.figure(figsize=(6, 6))\nplt.imshow(rgb, origin='lower', extent=[-lim, lim, -lim, lim])\nplt.xlabel('Re z'); plt.ylabel('Im z')\nplt.title('1/z: hue = arg(1/z), brightness ~ |1/z|')\nplt.tight_layout()\nplt.savefig('inv_z.png', dpi=200)\nplt.show()\n```\n\nЕсли нужна «чистая» фаза без яркостной модуляции — поставьте `V = np.ones_like(H)`; тогда карта будет сплошной цветовой круг с резким переходом оттенков на луче отрицательной вещественной оси.\n\n**Что видно и почему**\n\n- Главное тождество: `1/z = conj(z) / |z|^2`, поэтому `arg(1/z) = -arg(z)`, а `|1/z| = 1/|z|`. Отсюда вся структура карты читается сразу.\n- Линии постоянной фазы — лучи из начала координат: на луче `arg z = θ` постоянно и `arg(1/z) = -θ`. Цвет вдоль луча не меняется, поперёк — меняется полностью.\n- Линии постоянного модуля — окружности `|z| = r` (в них `|1/z| = 1/r`). Они ортогональны лучам, и это не случайность: `1/z` голоморфна в `C \\ {0}`, её производная `-1/z^2` нигде не ноль, значит отображение конформно — углы между линиями уровня сохраняются.\n- Яркость монотонно растёт к центру и падает к краям квадрата: в углу `|z| ≈ 2.83`, там `|1/z| ≈ 0.35`; на середине стороны `|1/z| = 0.5`.\n- Цветовой круг прокручивается **в обратную сторону** по сравнению с картой самой `z`: при обходе вокруг нуля против часовой стрелки `arg z` растёт, а `arg(1/z)` убывает. Это ровно то, что даёт минус в формуле, и это же — «зеркальность» фазового портрета относительно портрета `z`.\n\n**Что происходит в нуле**\n\n- В самой точке `z = 0` функция не определена — на карте это одна чёрная точка (её и закрашивает строка `W[Z == 0] = np.nan`). Это не «дырка от неаккуратного рисования», а реальная особенность.\n- Вокруг нуля все оттенки сходятся в одну точку: любой маленький замкнутый контур вокруг `0` при обходе против часовой стрелки проходит **весь цветовой круг ровно один раз** в отрицательном направлении. В терминах аргумента: `Δ arg(1/z) = -2π` за оборот, то есть число оборотов (индекс/виток) равно `-1`.\n- По принципу аргумента `(1/2π)·Δarg = Z - P`, где `Z` — число нулей, `P` — число полюсов внутри контура. Здесь `Z - P = -1` при отсутствии нулей внутри, значит `P = 1`: простой полюс. Модуль при подходе к нулю неограниченно растёт (яркость уходит в максимум), функция не имеет конечного предела.\n- Нуля у `1/z` в конечной плоскости нет вовсе. Он «переехал» в бесконечность: на сфере Римана в точке `z = ∞` у `1/z` простой нуль, и при больших `|z|` карта на краях квадрата уже показывает окрестность этого нуля — оттенки сходятся так же, но цветовой круг прокручивается в ту же сторону, что видно и в центре (оба витка дают `-1`, если смотреть на сферу целиком).\n\n**Проверка результата**\n\nПроконтролируйте себя по трём точкам: `z = 2` → `1/z = 0.5`, фаза `0` (красный по соглашению `hsv`); `z = 2i` → `1/z = -0.5i`, фаза `-π/2`; `z = -2` → `1/z = -0.5`, фаза `π` (граница круга, там же виден «шов» перехода оттенков). Если на вашей карте при обходе против часовой стрелки оттенок идёт по часовой — значит взят `angle(Z)`, а не `angle(1/Z)`.\n\n**Ключевой вывод**: карта `1/z` — это фазовый портрет `z`, отражённый по аргументу и с обращённой радиальной яркостью; в нуле стоит простой полюс, который виден как точка встречи всех цветов с индексом `-1` и уходом модуля в бесконечность.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 36322,
+        "steps": [
+          {
+            "duration_ms": 36322,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 3655,
+            "completion_tokens": 4354,
+            "calls": []
+          }
+        ],
+        "calls": []
+      }
+    },
+    {
+      "id": "complex-log",
+      "direct": {
+        "matched": null,
+        "calls": []
+      },
+      "live": {
+        "decision": "respond",
+        "reason": "plain_response",
+        "answer": "**Кратко.** Для главной ветви `Log z = ln|z| + i Arg z`, `Arg z ∈ (-π, π]`, разрез идёт по отрицательной вещественной оси. На квадрате `[-2,2] × [-2,2]` это отрезок `[-2, 0]`. На нём `Log z` терпит скачок на `2πi`, а в `z = 0` находится точка ветвления: логарифм там не определён.\n\n**Код для карты фазы**\n\nНиже стандартная domain-coloring карта: цвет в точке `z` кодирует `arg(Log z)`, яркость — `|Log z|`. Разрез рисуется поверх чёрно-белой линией.\n\n```python\nimport numpy as np\nimport matplotlib.pyplot as plt\nfrom matplotlib.colors import hsv_to_rgb\n\nN = 1401\nx = np.linspace(-2.0, 2.0, N)\ny = np.linspace(-2.0, 2.0, N)\nX, Y = np.meshgrid(x, y)\nZ = X + 1j * Y\n\nwith np.errstate(divide=\"ignore\", invalid=\"ignore\"):\n    W = np.log(Z)                 # главная ветвь Log z\n\nphase = np.angle(W)               # цвет: arg(Log z)\nabsW = np.abs(W)\n\nh = (phase + np.pi) / (2.0 * np.pi)\ns = np.ones_like(h)\nv = 0.15 + 0.85 * np.tanh(absW)   # яркость: |Log z|\n\nrgb = hsv_to_rgb(np.dstack([h, s, np.clip(v, 0.0, 1.0)]))\nrgb[~np.isfinite(W)] = 0.0        # z = 0\n\nfig, ax = plt.subplots(figsize=(7, 7), dpi=150)\nax.imshow(rgb, extent=(-2, 2, -2, 2), origin=\"lower\",\n          interpolation=\"nearest\")\n\n# Разрез: отрицательная вещественная ось\nax.plot([-2, 0], [0, 0], color=\"black\", lw=3.2,\n        solid_capstyle=\"butt\", zorder=3)\nax.plot([-2, 0], [0, 0], color=\"white\", lw=1.1,\n        ls=(0, (4, 4)), zorder=4)\n\n# Точка ветвления z=0 и нуль Log z в z=1\nax.plot(0, 0, \"o\", ms=7, mfc=\"black\", mec=\"white\", mew=1.2, zorder=5)\nax.plot(1, 0, \"o\", ms=5, mfc=\"white\", mec=\"black\", mew=1.2, zorder=5)\n\nax.set_xlim(-2, 2)\nax.set_ylim(-2, 2)\nax.set_aspect(\"equal\")\nax.set_xlabel(\"Re z\")\nax.set_ylabel(\"Im z\")\nax.set_title(\"Фаза главной ветви Log z: hue = arg(Log z)\")\nax.plot([], [], color=\"black\", lw=3.2, label=\"разрез [-2, 0]\")\nax.legend(loc=\"upper right\")\nplt.show()\n```\n\nЕсли нужна не фаза значения `Log z`, а карта мнимой части `Im Log z = Arg z`, замените одну строку:\n\n```python\nphase = np.angle(Z)   # вместо np.angle(W)\n```\n\n**Что происходит на разрезе**\n\nПусть `z = -r`, `r > 0`. Если подходить сверху и снизу:\n\n- сверху: `Log z = ln r + iπ`;\n- снизу: `Log z = ln r − iπ`.\n\nРазность равна `2πi`. Поэтому `Log z` нельзя непрерывно продолжить через отрицательную вещественную ось: это и есть разрез. Вещественная часть `ln|z|` при этом непрерывна, а мнимая часть скачет.\n\nДля фазы `arg(Log z)` скачок тоже есть, но его величина зависит от `r`:\n\n- при `r = 1` фазы равны `+π/2` и `−π/2` — скачок `π`;\n- при `r → 0` скачок стремится к `2π` (в циклической HSV-палитре это почти незаметно, поэтому разрез и рисуют отдельно);\n- при `r → ∞` обе фазы стремятся к `0`.\n\nВ точке `z = 0` логарифм не определён: `ln|z| → −∞`, а аргумент зависит от направления подхода. Это точка ветвления.\n\n**Почему без разреза нельзя**\n\nОбойдём `0` по окружности `z = εe^{iφ}`, `φ: 0 → 2π`. Тогда\n\n`Log z = ln ε + iφ`.\n\nПосле полного обхода значение изменилось на `2πi`, то есть вернулось не туда, откуда начали. Поэтому однозначную непрерывную ветвь `log z` в проколотой окрестности нуля построить нельзя. Разрез разрывает такие обходы; его можно провести по любому лучу из нуля, а главная ветвь традиционно выбирает отрицательную вещественную ось.\n\n**Вывод.** На карте фаза `Log z` раскрашена по `arg(Log z)`, разрез `[-2,0]` отмечен линией, а `z=0` — точка ветвления. При пересечении разреза значение `Log z` меняется на `2πi`; это не полюс и не нуль, а следствие выбора однозначной ветви многозначного логарифма.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 145005,
+        "steps": [
+          {
+            "duration_ms": 145004,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 3657,
+            "completion_tokens": 19564,
+            "calls": []
+          }
+        ],
+        "calls": []
+      }
+    },
+    {
+      "id": "surface-saddle",
+      "direct": {
+        "matched": null,
+        "calls": []
+      },
+      "live": {
+        "decision": "tool",
+        "reason": "plain_response",
+        "answer": "**Важное ограничение:** доступный мне инструмент строит только 2D-графики, 3D-поверхность я отрисовать не могу. Вместо этого приложил 2D-иллюстрацию: сечения поверхности `z = xy` плоскостями `y = ±x`. По оси абсцисс — параметр вдоль диагонали, кривые `x²` (сечение `y = x`, то есть `z = x²`) и `-x²` (сечение `y = -x`, то есть `z = -x²`), плюс прямая `0`. По ним видно, что в нуле одна диагональ идёт вверх, другая — вниз: типичное седло.\n\n**Формальный анализ**\n\nФункция `z = f(x, y) = xy` гладкая, критическая точка определяется из условия ∇f = 0:\n- `f_x = y`, `f_y = x` ⟹ единственная критическая точка `(0, 0)`.\n\nМатрица Гессе постоянна:\n`H = [[f_xx, f_xy], [f_xy, f_yy]] = [[0, 1], [1, 0]]`\n\nСпособы классификации (все дают одно и то же):\n1. Собственные значения `H`: из `λ² - 1 = 0` получаем `λ₁ = 1 > 0`, `λ₂ = -1 < 0`. Есть и положительное, и отрицательное ⟹ матрица неопределённая ⟹ седло.\n2. Через определитель: `det H = 0·0 - 1·1 = -1 < 0`. При `f_xx = A`, `det = AC - B² < 0` — седловая точка (критерий второго порядка для функции двух переменных).\n\n**Почему именно седло, а не экстремум**\n\nРассмотрим поведение вдоль направлений `y = kx`:\n- `k = 1`: `z = x² ≥ 0`, минимум вдоль этой прямой в нуле;\n- `k = -1`: `z = -x² ≤ 0`, максимум вдоль неё.\n\nЗначит, в любой проколотой окрестности нуля есть точки со значениями и больше `f(0,0) = 0` (например, `(ε, ε)`: `z = ε²`), и меньше (`(ε, -ε)`: `z = -ε²`). Это прямое опровержение локального экстремума по определению, без ссылок на Гессиан. Заметим: вдоль осей (`x = 0` или `y = 0`) `z = 0`, поэтому нулевое множество — это пара координатных осей, а линии уровня `xy = c` — гиперболы в квадрантах I и III при `c > 0` и во II и IV при `c < 0`.\n\n**Ключевой вывод:** `(0, 0)` — стационарная точка, но не экстремум, а **седловая точка** (точка минимакса): Гессиан неопределён, `det H = -1 < 0`, знак приращения `Δz = xy` меняется при смене квадранта.",
+        "truncated": false,
+        "images": [
+          "surface-saddle-live-1.png"
+        ],
+        "duration_ms": 13303,
+        "steps": [
+          {
+            "duration_ms": 5139,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 3652,
+            "completion_tokens": 602,
+            "calls": [
+              {
+                "name": "math_plot",
+                "arguments": {
+                  "functions": [
+                    "x^2",
+                    "-x^2",
+                    "0"
+                  ],
+                  "x_min": -2,
+                  "x_max": 2
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 7990,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 3903,
+            "completion_tokens": 929,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_plot",
+            "duration_ms": 173,
+            "arguments": {
+              "functions": [
+                "x^2",
+                "-x^2",
+                "0"
+              ],
+              "x_min": -2,
+              "x_max": 2
+            },
+            "output": {
+              "status": "ok",
+              "functions": [
+                {
+                  "expression": "x**2",
+                  "segments": 1,
+                  "discontinuities": []
+                },
+                {
+                  "expression": "-x**2",
+                  "segments": 1,
+                  "discontinuities": []
+                },
+                {
+                  "expression": "0",
+                  "segments": 1,
+                  "discontinuities": []
+                }
+              ],
+              "variable": "x",
+              "x_min": -2.0,
+              "x_max": 2.0,
+              "samples": 2001,
+              "png_bytes": 27650,
+              "detail": "График построен; разрывы и участки вне вещественной области разорваны."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "surface-masked",
+      "direct": {
+        "matched": null,
+        "calls": []
+      },
+      "live": {
+        "decision": "tool",
+        "reason": "plain_response",
+        "answer": "**Коротко:** 3D-рендер мне недоступен — мой инструмент строит только плоские графики вида y=f(x). Поэтому вместо поверхности я дал её осевое сечение (y=0) и точное описание области; высота в нуле равна 1.\n\n**Что происходит с областью определения**\n\nФункция `z = √(1 − x² − y²)` вещественна там, где подкоренное выражение неотрицательно:\n\n`1 − x² − y² ≥ 0  ⟺  x² + y² ≤ 1`\n\nТо есть действительная часть — не весь квадрат [−1.5, 1.5]×[−1.5, 1.5], а вписанный в него **единичный круг** (радиус 1). Четыре угловых области квадрата (например, точка (1.5, 1.5), где под корнем −3.5) дают комплексные значения и должны быть отброшены маской. На границе круга `x² + y² = 1` подкоренное выражение равно 0, поэтому z = 0 — поверхность «садится» на плоскость z=0 по окружности радиуса 1.\n\n**Сечение (построено)**\n\nНа графике выше — профиль `z = √(1 − x²)` при y=0: верхняя полуокружность радиуса 1, обрывающаяся на x = ±1; за этими пределами значений нет. Полная поверхность — верхняя полусфера радиуса 1 (z ≥ 0), «накрытая» круговым диском.\n\n**Высота в нуле**\n\nПодставляем x=0, y=0: `z = √(1 − 0 − 0) = 1`.\n\nЭто же максимум функции на всей области (под корнем не больше 1). Проверка: в точках (±1, 0) и (0, ±1) получаем z = 0, как и должно быть на границе.\n\n**Если нужен сам 3D-рисунок** — вот минимальный скрипт (Python + matplotlib), он маскирует недействительные точки и рисует только настоящую часть:\n\n```python\nimport numpy as np\nimport matplotlib.pyplot as plt\n\nx = np.linspace(-1.5, 1.5, 400)\ny = np.linspace(-1.5, 1.5, 400)\nX, Y = np.meshgrid(x, y)\nR2 = X**2 + Y**2\nZ = np.sqrt(np.where(R2 <= 1, 1 - R2, np.nan))  # NaN скрывает точки вне круга\n\nfig = plt.figure()\nax = fig.add_subplot(111, projection=\"3d\")\nax.plot_surface(X, Y, Z, cmap=\"viridis\", linewidth=0)\nax.set_xlim(-1.5, 1.5); ax.set_ylim(-1.5, 1.5); ax.set_zlim(0, 1.2)\nax.set_xlabel(\"x\"); ax.set_ylabel(\"y\"); ax.set_zlabel(\"z\")\nplt.show()\n```\n\nКлючевой вывод: поверхность определена только в круге `x² + y² ≤ 1` (полусфера радиуса 1), а её значение в начале координат — `z(0,0) = 1`.",
+        "truncated": false,
+        "images": [
+          "surface-masked-live-1.png"
+        ],
+        "duration_ms": 14769,
+        "steps": [
+          {
+            "duration_ms": 7195,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 3674,
+            "completion_tokens": 769,
+            "calls": [
+              {
+                "name": "math_plot",
+                "arguments": {
+                  "functions": [
+                    "sqrt(1-x^2)"
+                  ],
+                  "x_min": -1.5,
+                  "x_max": 1.5
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 7451,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 3896,
+            "completion_tokens": 991,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_plot",
+            "duration_ms": 122,
+            "arguments": {
+              "functions": [
+                "sqrt(1-x^2)"
+              ],
+              "x_min": -1.5,
+              "x_max": 1.5
+            },
+            "output": {
+              "status": "ok",
+              "functions": [
+                {
+                  "expression": "sqrt(1-x**2)",
+                  "segments": 1,
+                  "discontinuities": [
+                    "-0.999",
+                    "0.999"
+                  ]
+                }
+              ],
+              "variable": "x",
+              "x_min": -1.5,
+              "x_max": 1.5,
+              "samples": 2001,
+              "png_bytes": 21436,
+              "detail": "График построен; разрывы и участки вне вещественной области разорваны."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "complex-modulus",
+      "direct": {
+        "matched": null,
+        "calls": []
+      },
+      "live": {
+        "decision": "tool",
+        "reason": "plain_response",
+        "answer": "**Кратко:** 3D-поверхность этим набором инструментов не строится — `math_plot` умеет только плоские графики y=f(x). Поэтому ниже: формула поверхности, её структура, нули (проверены) и готовый код для 3D-графика. Дополнительно инструмент вернул два сечения |f| — по вещественной и по мнимой оси.\n\n**Функция в координатах x = Re z, y = Im z**\n\n`z² − 1 = (x² − y² − 1) + i·(2xy)`, значит\n\n`|f(z)| = sqrt((x² − y² − 1)² + 4x²y²) = sqrt((x² + y²)² − 2(x² − y²) + 1)`\n\nЭквивалентная запись: `|f(z)|² = |z|⁴ − 2·Re(z²) + 1`. Вещественная поверхность: `H(x,y) = |f(x+iy)|`, всегда `H ≥ 0`.\n\n**Нули.** Решение `z² = 1` даёт `z = 1` и `z = −1`; обе точки проверены подстановкой, обе простые (кратность 1). В них `H = 0`, то есть поверхность касается плоскости `H = 0` ровно в двух точках. Вершины там конические, а не гладкие: вблизи нуля `f(z) ≈ 2(z − z₀)`, поэтому `|f| ≈ 2|z − z₀|` — воронка с постоянным наклоном 2 (у аналитической функции модуль в простом нуле ведёт себя как конус).\n\n**Что видно на поверхности**\n- Две воронки в точках `(1, 0)` и `(−1, 0)`.\n- Между ними седловая зона; в начале координат `|f(0)| = 1`, стационарная точка (седло).\n- Максимум на квадрате достигается в четырёх углах `(±2, ±2)`: там `|f| = sqrt(65) ≈ 8.06`. Проверка: на границе `x = ±2` получаем `H² = y⁴ + 10y² + 9`, максимум при `y² = 4`; на `y = ±2` — `H² = x⁴ + 6x² + 25`, максимум при `x² = 4`.\n- Сечения: при `y = 0` имеем `H = |x² − 1|`; при `x = 0` имеем `H = y² + 1`. Это ровно те две кривые, что построены и приложены к ответу.\n\n**Код для 3D-графика** (Python + matplotlib; если нужен C++/C# — скажи, перепишу под QCustomPlot/ILNumerics):\n\n```python\nimport numpy as np\nimport matplotlib.pyplot as plt\n\nx = np.linspace(-2, 2, 400)\ny = np.linspace(-2, 2, 400)\nX, Y = np.meshgrid(x, y)\nH = np.abs((X + 1j * Y) ** 2 - 1)\n\nfig = plt.figure(figsize=(9, 7))\nax = fig.add_subplot(111, projection=\"3d\")\nax.plot_surface(X, Y, H, cmap=\"viridis\", linewidth=0,\n                rstride=8, cstride=8, antialiased=True, alpha=0.95)\nax.scatter([-1, 1], [0, 0], [0, 0], color=\"red\", s=50,\n           depthshade=False, label=\"нули z = ±1\")\nax.set_xlabel(\"Re z\"); ax.set_ylabel(\"Im z\"); ax.set_zlabel(\"|f(z)|\")\nax.set_title(\"|z^2 - 1| на [-2,2] x [-2,2]\")\nax.legend()\nplt.tight_layout()\nplt.show()\n```\n\nПлотность сетки 400×400 достаточна, чтобы конусы в нулях не «сглаживались»; для интерактивного вращения замени `plot_surface` на `plot_trisurf` при меньшем числе точек.\n\n**Ключевой вывод:** поверхность `|z² − 1|` — неотрицательный «рельеф» с двумя коническими нулями в `z = ±1` (кратность 1, наклон 2), седлом в `z = 0` и максимумом `sqrt(65)` в углах квадрата. Точное построение 3D требует внешнего графопостроителя — код выше его даёт.",
+        "truncated": false,
+        "images": [
+          "complex-modulus-live-1.png"
+        ],
+        "duration_ms": 24755,
+        "steps": [
+          {
+            "duration_ms": 6056,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 3655,
+            "completion_tokens": 711,
+            "calls": [
+              {
+                "name": "math_solve",
+                "arguments": {
+                  "equations": [
+                    "z^2 - 1 = 0"
+                  ],
+                  "variables": [
+                    "z"
+                  ],
+                  "real_only": false
+                }
+              },
+              {
+                "name": "math_plot",
+                "arguments": {
+                  "functions": [
+                    "abs(x^2 - 1)",
+                    "x^2 + 1"
+                  ],
+                  "x_min": -2,
+                  "x_max": 2
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 18573,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 4104,
+            "completion_tokens": 2668,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_solve",
+            "duration_ms": 18,
+            "arguments": {
+              "equations": [
+                "z^2 - 1 = 0"
+              ],
+              "variables": [
+                "z"
+              ],
+              "real_only": false
+            },
+            "output": {
+              "status": "solutions",
+              "equations": [
+                "z**2 - 1 = 0"
+              ],
+              "variables": [
+                "z"
+              ],
+              "solutions": [
+                {
+                  "z": "-1"
+                },
+                {
+                  "z": "1"
+                }
+              ],
+              "numeric_solutions": [
+                {
+                  "z": "-1.00000000000000"
+                },
+                {
+                  "z": "1.00000000000000"
+                }
+              ],
+              "discarded": [],
+              "real_only": false,
+              "verified": true,
+              "detail": "Все решения проверены подстановкой в исходные уравнения и по области определения."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_plot",
+            "duration_ms": 107,
+            "arguments": {
+              "functions": [
+                "abs(x^2 - 1)",
+                "x^2 + 1"
+              ],
+              "x_min": -2,
+              "x_max": 2
+            },
+            "output": {
+              "status": "ok",
+              "functions": [
+                {
+                  "expression": "abs(x**2 - 1)",
+                  "segments": 1,
+                  "discontinuities": []
+                },
+                {
+                  "expression": "x**2 + 1",
+                  "segments": 1,
+                  "discontinuities": []
+                }
+              ],
+              "variable": "x",
+              "x_min": -2.0,
+              "x_max": 2.0,
+              "samples": 2001,
+              "png_bytes": 31103,
+              "detail": "График построен; разрывы и участки вне вещественной области разорваны."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "critical-and-plot",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 30,
+            "arguments": {
+              "operation": "diff",
+              "expression": "x^4-2*x^2"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "x**4-2*x**2",
+              "variable": "x",
+              "result": "4*x*(x**2 - 1)",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 1 по переменной x."
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          },
+          {
+            "name": "math_solve",
+            "duration_ms": 14,
+            "arguments": {
+              "equations": [
+                "4*x*(x^2-1)=0"
+              ]
+            },
+            "output": {
+              "status": "solutions",
+              "equations": [
+                "4*x*(x**2-1) = 0"
+              ],
+              "variables": [
+                "x"
+              ],
+              "solutions": [
+                {
+                  "x": "-1"
+                },
+                {
+                  "x": "0"
+                },
+                {
+                  "x": "1"
+                }
+              ],
+              "numeric_solutions": [
+                {
+                  "x": "-1.00000000000000"
+                },
+                {
+                  "x": "0"
+                },
+                {
+                  "x": "1.00000000000000"
+                }
+              ],
+              "discarded": [],
+              "real_only": true,
+              "verified": true,
+              "detail": "Все решения проверены подстановкой в исходные уравнения и по области определения."
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          },
+          {
+            "name": "math_plot",
+            "duration_ms": 141,
+            "arguments": {
+              "functions": [
+                "x^4-2*x^2"
+              ],
+              "x_min": -2,
+              "x_max": 2
+            },
+            "output": {
+              "status": "ok",
+              "functions": [
+                {
+                  "expression": "x**4-2*x**2",
+                  "segments": 1,
+                  "discontinuities": []
+                }
+              ],
+              "variable": "x",
+              "x_min": -2.0,
+              "x_max": 2.0,
+              "samples": 2001,
+              "png_bytes": 20168,
+              "detail": "График построен; разрывы и участки вне вещественной области разорваны."
+            },
+            "error": null,
+            "images": [
+              "critical-and-plot-direct-3-1.png"
+            ],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "reason": "plain_response",
+        "answer": "**Кратко:** f(x) = x⁴ − 2x². Критические точки (f′(x) = 0): x = −1, 0, 1 — это две точки минимума (±1, −1) и точка локального максимума (0, 0).\n\n**Решение**\n\n1. Область определения — вся вещественная ось, функция полином, значит дифференцируема всюду, критических точек с несуществующей производной нет. Ищем только нули производной.\n\nf′(x) = 4x³ − 4x = 4x(x² − 1) = 4x(x−1)(x+1)\n\nУравнение `4x(x-1)(x+1) = 0` даёт x = −1, 0, 1 (проверено подстановкой).\n\n2. Классификация по второй производной:\n\nf″(x) = 12x² − 4\n\n- x = −1: f″(−1) = 12 − 4 = 8 > 0 → точка локального минимума, f(−1) = 1 − 2 = −1\n- x = 0: f″(0) = −4 < 0 → точка локального максимума, f(0) = 0\n- x = 1: f″(1) = 8 > 0 → локальный минимум, f(1) = −1\n\n3. Проверка через замену t = x² ≥ 0: f = t² − 2t = (t−1)² − 1. Это парабола по t с минимумом при t = 1, то есть при x = ±1 со значением −1, и максимумом по t при t = 0 (x = 0) со значением 0. Совпадает с выводом — удобный контроль.\n\n4. На отрезке [−2, 2] нужно сравнить с концами: f(±2) = 16 − 8 = 8. Значит:\n- наибольшее значение на [−2, 2] равно 8 в точках x = ±2 (это концы отрезка, а не критические точки);\n- наименьшее значение −1 в x = ±1;\n- x = 0 — локальный (но не глобальный) максимум, «горбик» между двумя ямами.\n\n**График**\n\nГрафик y = x⁴ − 2x² на [−2, 2] построен (PNG приложен приложением). Как читать картинку: кривая симметрична относительно оси Oy (функция чётная: f(−x) = f(x)); две симметричные ямы на уровне y = −1 при x = ±1, между ними локальный максимум в начале координат, а к краям отрезка x = ±2 функция круто поднимается до y = 8 — ветви уходят вверх, как у x⁴.\n\n**Вывод:** критические точки: x = −1 (min, значение −1), x = 0 (max, значение 0), x = 1 (min, значение −1); на [−2, 2] глобальный максимум 8 достигается на концах отрезка, глобальный минимум −1 — в критических точках ±1.",
+        "truncated": false,
+        "images": [
+          "critical-and-plot-live-1.png"
+        ],
+        "duration_ms": 10276,
+        "steps": [
+          {
+            "duration_ms": 2955,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 3647,
+            "completion_tokens": 393,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "expression": "x^4 - 2*x^2",
+                  "operation": "diff",
+                  "order": 1
+                }
+              },
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "expression": "x^4 - 2*x^2",
+                  "operation": "diff",
+                  "order": 2
+                }
+              },
+              {
+                "name": "math_solve",
+                "arguments": {
+                  "equations": [
+                    "4*x^3 - 4*x = 0"
+                  ],
+                  "variables": [
+                    "x"
+                  ]
+                }
+              },
+              {
+                "name": "math_plot",
+                "arguments": {
+                  "functions": [
+                    "x^4 - 2*x^2"
+                  ],
+                  "x_min": -2,
+                  "x_max": 2
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 7183,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 4382,
+            "completion_tokens": 963,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 10,
+            "arguments": {
+              "expression": "x^4 - 2*x^2",
+              "operation": "diff",
+              "order": 1
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "x**4 - 2*x**2",
+              "variable": "x",
+              "result": "4*x*(x**2 - 1)",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 1 по переменной x."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 15,
+            "arguments": {
+              "expression": "x^4 - 2*x^2",
+              "operation": "diff",
+              "order": 2
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "x**4 - 2*x**2",
+              "variable": "x",
+              "result": "12*x**2 - 4",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 2 по переменной x."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_solve",
+            "duration_ms": 12,
+            "arguments": {
+              "equations": [
+                "4*x^3 - 4*x = 0"
+              ],
+              "variables": [
+                "x"
+              ]
+            },
+            "output": {
+              "status": "solutions",
+              "equations": [
+                "4*x**3 - 4*x = 0"
+              ],
+              "variables": [
+                "x"
+              ],
+              "solutions": [
+                {
+                  "x": "-1"
+                },
+                {
+                  "x": "0"
+                },
+                {
+                  "x": "1"
+                }
+              ],
+              "numeric_solutions": [
+                {
+                  "x": "-1.00000000000000"
+                },
+                {
+                  "x": "0"
+                },
+                {
+                  "x": "1.00000000000000"
+                }
+              ],
+              "discarded": [],
+              "real_only": true,
+              "verified": true,
+              "detail": "Все решения проверены подстановкой в исходные уравнения и по области определения."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_plot",
+            "duration_ms": 100,
+            "arguments": {
+              "functions": [
+                "x^4 - 2*x^2"
+              ],
+              "x_min": -2,
+              "x_max": 2
+            },
+            "output": {
+              "status": "ok",
+              "functions": [
+                {
+                  "expression": "x**4 - 2*x**2",
+                  "segments": 1,
+                  "discontinuities": []
+                }
+              ],
+              "variable": "x",
+              "x_min": -2.0,
+              "x_max": 2.0,
+              "samples": 2001,
+              "png_bytes": 20120,
+              "detail": "График построен; разрывы и участки вне вещественной области разорваны."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "ambiguous-plot",
+      "direct": {
+        "matched": null,
+        "calls": []
+      },
+      "live": {
+        "decision": "clarify",
+        "reason": "clarification",
+        "answer": "Уточни, пожалуйста, саму функцию — в переписке её нет: пришли выражение, например z = x^2 - y^2, и диапазон по x и y.\n\nСразу важное ограничение: доступный мне построитель графиков рисует только плоские кривые y = f(x), трёхмерную поверхность он не выдаёт. Поэтому могу, например:\n1) построить сечения поверхности при фиксированных y (набор кривых z(x) для y = -2, 0, 2);\n2) построить линии уровня z = c;\n3) разобрать поверхность аналитически (тип, критические точки, гессиан) и дать код для трёхмерного графика на Python или C++ (matplotlib / OpenGL), если нужен именно объёмный вид.\n\nСкажи, какой вариант нужен, и приложи выражение.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 5426,
+        "steps": [
+          {
+            "duration_ms": 5425,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 3617,
+            "completion_tokens": 523,
+            "calls": [
+              {
+                "name": "clarification",
+                "arguments": {
+                  "question": "Уточни, пожалуйста, саму функцию — в переписке её нет: пришли выражение, например z = x^2 - y^2, и диапазон по x и y.\n\nСразу важное ограничение: доступный мне построитель графиков рисует только плоские кривые y = f(x), трёхмерную поверхность он не выдаёт. Поэтому могу, например:\n1) построить сечения поверхности при фиксированных y (набор кривых z(x) для y = -2, 0, 2);\n2) построить линии уровня z = c;\n3) разобрать поверхность аналитически (тип, критические точки, гессиан) и дать код для трёхмерного графика на Python или C++ (matplotlib / OpenGL), если нужен именно объёмный вид.\n\nСкажи, какой вариант нужен, и приложи выражение."
+                }
+              }
+            ]
+          }
+        ],
+        "calls": []
+      }
+    }
+  ],
+  "discovery_ms": 1035,
+  "tools": [
+    "math_calculate",
+    "math_plot",
+    "math_solve"
+  ],
+  "queries_sha256": "8c60675dbd57c365ddb76dbb2b52986adb23b2b51bd6dec2ee060e5a64a7f816",
+  "revision": "ff17deb + plan 09 configuration and prompt changes",
+  "catalog": "math"
+}

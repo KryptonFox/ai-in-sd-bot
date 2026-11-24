@@ -286,7 +286,15 @@ def test_deploy_archive_never_contains_env_or_keys(tmp_path):
 
     (tmp_path / "app").mkdir()
     (tmp_path / "app" / "__init__.py").write_text("", encoding="utf-8")
-    for name in ["Dockerfile", ".dockerignore", "pyproject.toml", "uv.lock", ".python-version"]:
+    for name in [
+        "Dockerfile",
+        ".dockerignore",
+        "pyproject.toml",
+        "uv.lock",
+        ".python-version",
+        "config.toml",
+        "compose.config.yaml",
+    ]:
         (tmp_path / name).write_text("test", encoding="utf-8")
     migrations = tmp_path / "app" / "db" / "migrations" / "sql"
     migrations.mkdir(parents=True)
@@ -325,6 +333,8 @@ def test_deploy_archive_never_contains_env_or_keys(tmp_path):
         "pyproject.toml",
         "uv.lock",
         ".python-version",
+        "config.toml",
+        "compose.config.yaml",
         "app/db/migrations/sql/0001_initial_schema.sql",
         "mcp_servers/student_tools/server.py",
         "mcp_servers/student_tools/data/schedule.json",
@@ -438,6 +448,7 @@ def test_deploy_uploads_secrets_only_over_ssh_stdin(
     assert values["POSTGRES_HOST"] == "db"
     assert values["MCP_SHARED_SECRET"] == "m" * 40
     assert values["SCHEDULE_PATH"] == remote_schedule_path
+    assert "MATH_MCP_ENVIRONMENT" not in values
     assert all("m" * 40 not in command for command, _ in calls)
     deployment_command = next(command for command, _ in calls if "tar -xzf" in command)
     assert "config --services" in deployment_command

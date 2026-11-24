@@ -1,0 +1,43 @@
+# Версионируемый профиль приложения. Секреты, токены, пароли и прокси с
+# учётными данными храните только в .env или окружении процесса.
+# Приоритет: значения кода < config.toml < .env < окружение процесса.
+
+[llm]
+model = "openai/gpt-4o-mini"
+base_url = "https://openrouter.ai/api/v1"
+timeout_seconds = 180.0
+max_tokens = 16384
+generation_reserve_tokens = 4096
+streaming = true
+opencode_session = false
+context_provider = "auto"
+
+[agent]
+timeout_seconds = 240.0
+max_tool_calls = 5
+max_llm_steps = 4
+confirmation_ttl_seconds = 300
+tool_result_max_chars = 12000
+user_queue_max_size = 3
+
+[history]
+max_messages = 10
+max_chars = 8000
+default_context_length = 32768
+compaction_threshold_messages = 10
+compaction_keep_recent = 3
+summary_max_chars = 2000
+
+[mcp]
+transport = "stdio"
+server_url = "http://127.0.0.1:8000/mcp/"
+math_server_url = ""
+timeout_seconds = 10.0
+math_request_timeout_seconds = 40.0
+
+[math_mcp]
+startup_timeout_seconds = 30.0
+operation_timeout_seconds = 5.0
+queue_timeout_seconds = 5.0
+memory_limit_mib = 768
+max_png_bytes = 262144

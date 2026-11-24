@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Mapping, Sequence
 from zoneinfo import ZoneInfo
 
@@ -5,6 +6,7 @@ from pydantic import ValidationError
 
 from app.core.budget import ContextBudget
 from app.core.clock import Clock, SystemClock
+from app.core.conversation import complete_unit_indices
 from app.core.schemas.agent import (
     AgentDecision,
     AgentResult,
@@ -24,6 +26,8 @@ from app.core.schemas.tools import ToolFailure
 from app.llm.base import BaseLLMClient
 from app.prompts.agent import agent_rules
 from app.services.tool_execution import READ_RESOURCE_FUNCTION, ToolExecutionService
+
+logger = logging.getLogger("app.services.agent")
 
 CLARIFICATION_TOOL = ToolDefinition(
     name="clarification",
@@ -101,12 +105,16 @@ class AgentService:
         model: str | None = None,
         calls_used: int = 0,
         budget: ContextBudget | None = None,
+        protected_prefix: int = 0,
+        deadline_at: float | None = None,
     ) -> AgentResult:
         state = RunState(
             context=context,
             conversation=list(messages),
             timezone=timezone,
             calls_used=calls_used,
+            protected_prefix=protected_prefix,
+            deadline_at=deadline_at,
         )
         self._append_instructions(state)
         budget = budget or ContextBudget(32768)
@@ -141,7 +149,17 @@ class AgentService:
         definitions = self.definitions
 
         for _ in range(self._max_steps):
-            output_limit = budget.generation_limit(state.conversation, definitions)
+            try:
+                output_limit = budget.generation_limit(state.conversation, definitions)
+            except ToolFailure as error:
+                if error.code != "context_budget":
+                    raise
+
+                if not self._trim_history_for_reserve(state, definitions, budget):
+                    raise
+
+                output_limit = budget.generation_limit(state.conversation, definitions)
+
             response = await self._llm.generate(
                 LLMRequest(
                     messages=state.conversation,
@@ -156,6 +174,50 @@ class AgentService:
                 return outcome
 
         raise ToolFailure("step_budget", "Достигнут лимит шагов модели. Уточните запрос.")
+
+    def _trim_history_for_reserve(
+        self,
+        state: RunState,
+        definitions: Sequence[ToolDefinition],
+        budget: ContextBudget,
+    ) -> bool:
+        conversation = state.conversation
+        last_user = next(
+            (
+                index
+                for index in range(len(conversation) - 1, -1, -1)
+                if conversation[index].role == MessageRole.USER
+            ),
+            None,
+        )
+        protected_prefix = min(state.protected_prefix, len(conversation))
+
+        if last_user is None or last_user <= protected_prefix:
+            return False
+
+        prefix = conversation[:protected_prefix]
+        history = conversation[protected_prefix:last_user]
+        current_turn = conversation[last_user:]
+        units = complete_unit_indices(history)
+        pinned = [message for message in history if message.role == MessageRole.SYSTEM]
+
+        for dropped_units in range(1, len(units) + 1):
+            remaining = [history[index] for unit in units[dropped_units:] for index in unit]
+            candidate = [*prefix, *pinned, *remaining, *current_turn]
+            if not budget.has_generation_reserve(candidate, definitions):
+                continue
+
+            state.conversation = candidate
+            logger.info(
+                "context_history_trim dropped_units=%d remaining_units=%d output=%d reserve=%d",
+                dropped_units,
+                len(units) - dropped_units,
+                budget.generation_limit(candidate, definitions),
+                budget.effective_generation_reserve,
+            )
+            return True
+
+        return False
 
     async def _handle_response(
         self,

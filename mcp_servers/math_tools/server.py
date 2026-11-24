@@ -11,7 +11,13 @@ from mcp import types
 from pydantic import Field, ValidationError
 
 from mcp_servers.math_tools.errors import MathError
-from mcp_servers.math_tools.limits import MAX_EQUATIONS, MAX_EXPRESSION_LENGTH, MAX_FUNCTIONS
+from mcp_servers.math_tools.limits import (
+    MAX_EQUATIONS,
+    MAX_EXPRESSION_LENGTH,
+    MAX_FUNCTIONS,
+    MAX_PLOT_LEVELS,
+    MAX_VARIABLES,
+)
 from mcp_servers.math_tools.schemas import (
     CalculateOperation,
     LimitDirection,
@@ -19,15 +25,28 @@ from mcp_servers.math_tools.schemas import (
     MathPlotResult,
     MathSolveResult,
     PlotOutput,
+    PlotType,
 )
 from mcp_servers.math_tools.service import MathService
 
 CALCULATE_DESCRIPTION = (
     "Математические вычисления с проверкой выражения. "
-    "operation=simplify упрощает, evaluate даёт точное значение, numeric — 15 значащих цифр, "
-    "diff — производную (order 1..5), integrate — неопределённый интеграл или определённый "
-    "при lower и upper, limit — предел в точке point с direction both/left/right. "
-    "Переменная по умолчанию x. Степень записывай через ** или ^, умножение указывай явно (*). "
+    "old operations: simplify, evaluate (точное значение), numeric (15 значащих цифр), "
+    "diff (производная по одной переменной variable, включая частную; order=1..5, "
+    "например вторая производная по x — diff, variable=x, order=2), "
+    "integrate (lower/upper; lower=0, upper=oo — несобственный интеграл), "
+    "limit (point и direction both/left/right). "
+    "new operations: partial_diff (независимые частные производные по РАЗЛИЧНЫМ "
+    "переменным из variables, не последовательное дифференцирование), "
+    "jacobian (functions — список функций, variables — список переменных), "
+    "constrained_extrema (expression — исходная функция, variables — переменные, "
+    "constraints — одно исходное уравнение-ограничение; множитель Лагранжа сервер "
+    "добавляет сам, не записывай lambda в уравнение), "
+    "series (expression, variable=n, lower/upper — границы суммирования, по умолчанию 1..oo). "
+    "Для integrate и series возвращается convergence: convergent/divergent/unknown. "
+    "Примеры: integrate log(1+x^2)/(1+x^2) x=0..oo; limit (x^2-1)/(x-1) в точке 1; "
+    "series 1/n^2 по n; jacobian functions=[x^2*y, x+y], variables=[x,y]. "
+    "Степень записывай через ** или ^, умножение указывай явно (*). "
     "Доступны sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, sqrt, exp, log, ln, abs, "
     "floor, ceil, sign, factorial, gamma, min, max. Выражение до 512 символов и 128 узлов."
 )
@@ -36,14 +55,27 @@ SOLVE_DESCRIPTION = (
     "Решает уравнение или систему до трёх уравнений. "
     "Уравнение можно записать как x^2 = 4 или как выражение, равное нулю. "
     "variables перечисляет все неизвестные; если не указаны, они определяются по уравнениям. "
+    "Имена переменных — идентификаторы без ключевых слов Python; для ручного метода "
+    "Лагранжа используй lam или lmbda, а не lambda. "
     "По умолчанию возвращаются только вещественные решения. Каждое решение проверяется "
     "подстановкой в исходные уравнения и по области определения."
 )
 
 PLOT_DESCRIPTION = (
-    "Строит от одной до четырёх функций y=f(x) на общих осях и возвращает PNG. "
-    "Диапазон по умолчанию от -10 до 10. Кривые разрываются на полюсах, "
-    "вне вещественной области и в известных точках разрыва."
+    "Строит график и возвращает PNG. plot_type=curve (по умолчанию) — до четырёх y=f(x), "
+    "старые аргументы functions/variable/x_min/x_max сохраняются. "
+    "plot_type=parametric — functions=[x(t), y(t)], parameter=t, x_min/x_max задают диапазон t. "
+    "plot_type=contour — функция f(x,y), variable=x, y_variable=y, x/y диапазоны, "
+    "необязательные levels (точные уровни). "
+    "plot_type=surface — 3D z=f(x,y) с маской недопустимых значений. "
+    "plot_type=domain_coloring — комплексная f(z), hue=arg, brightness=normalized |f(z)|, "
+    "маски полюсов и разрезов. "
+    "plot_type=complex_height — 3D |f(z)| над комплексной плоскостью; нули в области "
+    "отмечаются маркерами и возвращаются в zero_markers. "
+    "y_min/y_max по умолчанию равны x-диапазону. "
+    "Примеры: parametric functions=[cos(t), sin(t)], x_min=0, x_max=6.283185307179586; "
+    "surface functions=[x*y], x_min=-2, x_max=2, y_min=-2, y_max=2; "
+    "domain_coloring functions=[1/z], variable=z, x_min=-2, x_max=2, y_min=-2, y_max=2."
 )
 
 ExpressionText = Annotated[
@@ -104,14 +136,54 @@ def build_server(service: MathService | None = None) -> FastMCP:
 
     @server.tool(description=CALCULATE_DESCRIPTION, annotations={"readOnlyHint": True})
     async def math_calculate(
-        expression: ExpressionText,
+        expression: ExpressionText | None = None,
         operation: CalculateOperation = CalculateOperation.SIMPLIFY,
-        variable: Annotated[str, Field(min_length=1, max_length=128)] = "x",
-        order: Annotated[int, Field(ge=1, le=5)] = 1,
+        variable: Annotated[str, Field(min_length=1, max_length=128)] | None = None,
+        order: Annotated[
+            int,
+            Field(
+                ge=1,
+                le=5,
+                description=(
+                    "Порядок производной для operation=diff: 1 — первая, 2 — вторая и т.д., до 5."
+                ),
+            ),
+        ] = 1,
         lower: str | float | int | None = None,
         upper: str | float | int | None = None,
         point: str | float | int | None = None,
         direction: LimitDirection = LimitDirection.BOTH,
+        variables: Annotated[
+            list[str],
+            Field(
+                max_length=MAX_VARIABLES,
+                description=(
+                    "Различные переменные для partial_diff, jacobian и constrained_extrema. "
+                    "Для второй частной производной по одной переменной используйте "
+                    "operation=diff, variable=x, order=2."
+                ),
+            ),
+        ]
+        | None = None,
+        functions: Annotated[
+            list[ExpressionText],
+            Field(
+                max_length=MAX_FUNCTIONS,
+                description="Функции для operation=jacobian.",
+            ),
+        ]
+        | None = None,
+        constraints: Annotated[
+            list[EquationText],
+            Field(
+                max_length=MAX_EQUATIONS,
+                description=(
+                    "Одно исходное уравнение-ограничение для operation=constrained_extrema. "
+                    "Множитель Лагранжа добавляется сервером; не записывай lambda."
+                ),
+            ),
+        ]
+        | None = None,
     ) -> MathCalculateResult:
         with _translate_tool_errors():
             return await math_service.calculate(
@@ -123,12 +195,25 @@ def build_server(service: MathService | None = None) -> FastMCP:
                 upper=upper,
                 point=point,
                 direction=direction,
+                variables=variables,
+                functions=functions,
+                constraints=constraints,
             )
 
     @server.tool(description=SOLVE_DESCRIPTION, annotations={"readOnlyHint": True})
     async def math_solve(
         equations: Annotated[list[EquationText], Field(min_length=1, max_length=MAX_EQUATIONS)],
-        variables: Annotated[list[str], Field(max_length=3)] | None = None,
+        variables: Annotated[
+            list[str],
+            Field(
+                max_length=3,
+                description=(
+                    "Неизвестные — идентификаторы без ключевых слов Python. "
+                    "Для ручного метода Лагранжа используй lam или lmbda, не lambda."
+                ),
+            ),
+        ]
+        | None = None,
         real_only: bool = True,
     ) -> MathSolveResult:
         with _translate_tool_errors():
@@ -148,16 +233,35 @@ def build_server(service: MathService | None = None) -> FastMCP:
             list[ExpressionText],
             Field(min_length=1, max_length=MAX_FUNCTIONS),
         ],
-        variable: Annotated[str, Field(min_length=1, max_length=128)] = "x",
-        x_min: float = -10.0,
-        x_max: float = 10.0,
+        plot_type: PlotType = PlotType.CURVE,
+        variable: Annotated[str, Field(min_length=1, max_length=128)] | None = None,
+        parameter: Annotated[str, Field(min_length=1, max_length=128)] = "t",
+        y_variable: Annotated[str, Field(min_length=1, max_length=128)] = "y",
+        x_min: float | None = None,
+        x_max: float | None = None,
+        y_min: float | None = None,
+        y_max: float | None = None,
+        levels: Annotated[
+            list[float],
+            Field(
+                max_length=MAX_PLOT_LEVELS,
+                description="Точные уровни для plot_type=contour; можно один уровень.",
+            ),
+        ]
+        | None = None,
     ) -> ToolResult:
         with _translate_tool_errors():
             output = await math_service.plot(
                 functions,
+                plot_type=plot_type,
                 variable=variable,
+                parameter=parameter,
+                y_variable=y_variable,
                 x_min=x_min,
                 x_max=x_max,
+                y_min=y_min,
+                y_max=y_max,
+                levels=levels,
             )
             return _plot_tool_result(output)
 

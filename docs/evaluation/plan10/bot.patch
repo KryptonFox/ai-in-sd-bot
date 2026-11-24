@@ -1,0 +1,1307 @@
+--- a/app/config.py
++++ b/app/config.py
+@@ -10,7 +10,14 @@
+ from aiogram.utils.token import TokenValidationError, validate_token
+ from dotenv import dotenv_values
+ 
++from app.core.budget import ContextBudget
+ from app.core.limits import DEFAULT_AGENT_MAX_TOOL_CALLS, POSTGRES_INTEGER_MAX
++from app.core.toml_config import (
++    DEFAULT_CONFIG_FILE,
++    TomlConfigError,
++    load_toml_environment,
++    merge_environment,
++)
+ 
+ 
+ class ConfigError(ValueError):
+@@ -31,12 +38,43 @@
+ 
+ DEFAULT_SCHEDULE_PATH = "mcp_servers/student_tools/data/schedule.json"
+ LEGACY_DEFAULT_SCHEDULE_PATH = "app/data/schedule.json"
++MATH_MCP_ENVIRONMENT_KEYS = frozenset(
++    {
++        "MATH_MCP_CONFIG_FILE",
++        "MATH_MCP_STARTUP_TIMEOUT_SECONDS",
++        "MATH_MCP_OPERATION_TIMEOUT_SECONDS",
++        "MATH_MCP_QUEUE_TIMEOUT_SECONDS",
++        "MATH_MCP_MEMORY_LIMIT_MIB",
++        "MATH_MCP_MAX_PNG_BYTES",
++    }
++)
+ 
+ 
+ def resolve_schedule_path(value: str) -> str:
+     if value == LEGACY_DEFAULT_SCHEDULE_PATH:
+         return DEFAULT_SCHEDULE_PATH
+     return value
++
++
++def public_url(value: str) -> str:
++    if not value:
++        return value
++
++    try:
++        parsed = urlsplit(value)
++        hostname = parsed.hostname
++        port = parsed.port
++    except ValueError:
++        return "<invalid>"
++
++    if not parsed.scheme or not hostname:
++        return "<invalid>"
++
++    host = f"[{hostname}]" if ":" in hostname else hostname
++    if port is not None:
++        host = f"{host}:{port}"
++
++    return f"{parsed.scheme}://{host}"
+ 
+ 
+ def _minimum_integer(key: str, raw_value: str, minimum: int) -> int:
+@@ -56,6 +94,20 @@
+         raise ConfigError(f"{key}: укажите true или false.")
+ 
+     return normalized in {"true", "1"}
++
++
++def _math_mcp_environment(
++    file_values: Mapping[str, str | None],
++    process_values: Mapping[str, str],
++) -> dict[str, str]:
++    overrides: dict[str, str] = {}
++
++    for source in (file_values, process_values):
++        for key, value in source.items():
++            if value and key in MATH_MCP_ENVIRONMENT_KEYS:
++                overrides[key] = value
++
++    return overrides
+ 
+ 
+ @dataclass(frozen=True)
+@@ -76,6 +128,7 @@
+     llm_streaming: bool = True
+     llm_opencode_session: bool = False
+     llm_max_tokens: int = 16384
++    llm_generation_reserve_tokens: int = 4096
+     agent_timeout: float = 240.0
+     summary_max_chars: int = 2000
+     tool_result_max_chars: int = 12000
+@@ -91,20 +144,80 @@
+     math_mcp_server_url: str = ""
+     mcp_shared_secret: str = field(default="", repr=False)
+     mcp_timeout: float = 10.0
++    math_mcp_request_timeout_seconds: float = 40.0
+     agent_max_tool_calls: int = DEFAULT_AGENT_MAX_TOOL_CALLS
+     agent_max_llm_steps: int = 4
+     confirmation_ttl: int = 300
+     schedule_path: str = DEFAULT_SCHEDULE_PATH
+     schedule_timezone: str = "Europe/Moscow"
++    math_mcp_environment: Mapping[str, str] = field(
++        default_factory=dict,
++        repr=False,
++        compare=False,
++    )
++
++    @property
++    def effective_generation_reserve_tokens(self) -> int:
++        fallback = ContextBudget(
++            self.default_context_length,
++            min(self.llm_max_tokens, self.default_context_length // 2),
++            self.llm_generation_reserve_tokens,
++        )
++        return fallback.effective_generation_reserve
++
++    def diagnostics(self) -> dict[str, object]:
++        return {
++            "postgres_host": self.postgres_host,
++            "postgres_port": self.postgres_port,
++            "postgres_db": self.postgres_db,
++            "postgres_user": self.postgres_user,
++            "log_level": self.log_level,
++            "health_port": self.health_port,
++            "llm_model": self.llm_model,
++            "llm_base_url": public_url(self.llm_base_url),
++            "llm_timeout_seconds": self.llm_timeout,
++            "llm_max_tokens": self.llm_max_tokens,
++            "llm_generation_reserve_tokens": self.llm_generation_reserve_tokens,
++            "llm_effective_generation_reserve_tokens": (self.effective_generation_reserve_tokens),
++            "llm_context_provider": self.llm_context_provider.value,
++            "agent_timeout_seconds": self.agent_timeout,
++            "agent_max_tool_calls": self.agent_max_tool_calls,
++            "agent_max_llm_steps": self.agent_max_llm_steps,
++            "confirmation_ttl_seconds": self.confirmation_ttl,
++            "tool_result_max_chars": self.tool_result_max_chars,
++            "history_max_messages": self.history_max_messages,
++            "history_max_chars": self.history_max_chars,
++            "default_context_length": self.default_context_length,
++            "compaction_threshold_messages": self.compaction_threshold_messages,
++            "compaction_keep_recent": self.compaction_keep_recent,
++            "summary_max_chars": self.summary_max_chars,
++            "user_queue_max_size": self.user_queue_max_size,
++            "mcp_transport": self.mcp_transport.value,
++            "mcp_server_url": public_url(self.mcp_server_url),
++            "math_mcp_server_url": public_url(self.math_mcp_server_url),
++            "mcp_timeout_seconds": self.mcp_timeout,
++            "math_mcp_request_timeout_seconds": self.math_mcp_request_timeout_seconds,
++            "schedule_path": self.schedule_path,
++            "schedule_timezone": self.schedule_timezone,
++        }
+ 
+     @classmethod
+     def load(
+-        cls, env_file: Path | str = ".env", *, environ: Mapping[str, str] | None = None
++        cls,
++        env_file: Path | str = ".env",
++        *,
++        environ: Mapping[str, str] | None = None,
++        config_file: Path | str = DEFAULT_CONFIG_FILE,
+     ) -> "Settings":
+-        values = {
+-            **dotenv_values(env_file, interpolate=False),
+-            **(os.environ if environ is None else environ),
+-        }
++        try:
++            toml_values = load_toml_environment(config_file)
++        except TomlConfigError as error:
++            raise ConfigError(str(error)) from None
++
++        file_values = dotenv_values(env_file, interpolate=False)
++        process_values = os.environ if environ is None else environ
++        values = merge_environment(toml_values, file_values, process_values)
++        math_mcp_environment = _math_mcp_environment(file_values, process_values)
+ 
+         def value(key: str, default: str = "") -> str:
+             return values.get(key) or default
+@@ -222,6 +335,21 @@
+                 return number
+             except ValueError:
+                 raise ConfigError(f"{key}: допустимый диапазон {low}..{high}.") from None
++
++        def bounded_float(
++            key: str,
++            default: float,
++            low: float,
++            high: float,
++        ) -> float:
++            try:
++                number = float(value(key, str(default)))
++                if not math.isfinite(number) or not low <= number <= high:
++                    raise ValueError
++
++                return number
++            except ValueError:
++                raise ConfigError(f"{key}: допустимый диапазон {low:g}..{high:g}.") from None
+ 
+         try:
+             ZoneInfo(value("SCHEDULE_TIMEZONE", "Europe/Moscow"))
+@@ -245,7 +373,13 @@
+             llm_streaming=streaming,
+             llm_opencode_session=opencode_session,
+             llm_max_tokens=bounded("LLM_MAX_TOKENS", 16384, 64, 131072),
+-            agent_timeout=bounded("AGENT_TIMEOUT", 240, 1, 1800),
++            llm_generation_reserve_tokens=bounded(
++                "LLM_GENERATION_RESERVE_TOKENS",
++                4096,
++                64,
++                131072,
++            ),
++            agent_timeout=bounded_float("AGENT_TIMEOUT", 240.0, 1, 1800),
+             summary_max_chars=bounded("SUMMARY_MAX_CHARS", 2000, 100, 8000),
+             tool_result_max_chars=bounded(
+                 "TOOL_RESULT_MAX_CHARS",
+@@ -264,7 +398,13 @@
+             mcp_server_url=value("MCP_SERVER_URL", "http://127.0.0.1:8000/mcp/"),
+             math_mcp_server_url=value("MATH_MCP_SERVER_URL").strip(),
+             mcp_shared_secret=value("MCP_SHARED_SECRET"),
+-            mcp_timeout=bounded("MCP_TIMEOUT", 10, 1, 120),
++            mcp_timeout=bounded_float("MCP_TIMEOUT", 10.0, 1, 120),
++            math_mcp_request_timeout_seconds=bounded_float(
++                "MATH_MCP_REQUEST_TIMEOUT_SECONDS",
++                40.0,
++                1,
++                180,
++            ),
+             agent_max_tool_calls=bounded(
+                 "AGENT_MAX_TOOL_CALLS",
+                 DEFAULT_AGENT_MAX_TOOL_CALLS,
+@@ -275,4 +415,5 @@
+             confirmation_ttl=bounded("CONFIRMATION_TTL", 300, 1, 300),
+             schedule_path=resolve_schedule_path(value("SCHEDULE_PATH", DEFAULT_SCHEDULE_PATH)),
+             schedule_timezone=value("SCHEDULE_TIMEZONE", "Europe/Moscow"),
+-        )
++            math_mcp_environment=math_mcp_environment,
++        )
+--- a/app/core/budget.py
++++ b/app/core/budget.py
+@@ -7,12 +7,23 @@
+ from app.core.schemas.tools import ToolFailure
+ 
+ MIN_GENERATION_TOKENS = 64
++DEFAULT_GENERATION_RESERVE_TOKENS = 4096
++GENERATION_RESERVE_WINDOW_DIVISOR = 8
+ 
+ 
+ @dataclass(frozen=True)
+ class ContextBudget:
+     window: int
+     output_tokens: int = 16384
++    generation_reserve: int = DEFAULT_GENERATION_RESERVE_TOKENS
++
++    @property
++    def effective_generation_reserve(self) -> int:
++        window_reserve = max(
++            MIN_GENERATION_TOKENS,
++            self.window // GENERATION_RESERVE_WINDOW_DIVISOR,
++        )
++        return min(self.generation_reserve, self.output_tokens, window_reserve)
+ 
+     @staticmethod
+     def estimate_message(message: ChatMessage) -> int:
+@@ -40,11 +51,29 @@
+         required_space = self.estimate(messages, tools) + self.output_tokens + extra
+         return required_space <= self.window
+ 
++    def remaining_space(
++        self,
++        messages: Sequence[ChatMessage],
++        tools: Sequence[ToolDefinition],
++    ) -> int:
++        return self.window - self.estimate(messages, tools)
++
++    def has_generation_reserve(
++        self,
++        messages: Sequence[ChatMessage],
++        tools: Sequence[ToolDefinition],
++    ) -> bool:
++        return self.remaining_space(messages, tools) >= max(
++            self.effective_generation_reserve,
++            MIN_GENERATION_TOKENS,
++        )
++
+     def generation_limit(
+         self, messages: Sequence[ChatMessage], tools: Sequence[ToolDefinition]
+     ) -> int:
+-        remaining = self.window - self.estimate(messages, tools)
+-        if remaining < MIN_GENERATION_TOKENS:
++        remaining = self.remaining_space(messages, tools)
++        required_reserve = max(self.effective_generation_reserve, MIN_GENERATION_TOKENS)
++        if remaining < required_reserve:
+             raise ToolFailure(
+                 "context_budget",
+                 "Запрос или контекст слишком большой. Сократите запрос или очистите историю.",
+--- /dev/null
++++ b/app/core/conversation.py
+@@ -0,0 +1,34 @@
++from app.core.schemas.message import ChatMessage, MessageRole
++
++
++def complete_unit_indices(messages: list[ChatMessage]) -> list[list[int]]:
++    """Group complete dialog turns without splitting assistant tool calls from results."""
++    units: list[list[int]] = []
++    current: list[int] = []
++
++    for index, message in enumerate(messages):
++        if message.role == MessageRole.SYSTEM:
++            continue
++
++        if message.role == MessageRole.USER:
++            current = [index]
++            continue
++
++        if not current:
++            continue
++
++        if message.role == MessageRole.TOOL:
++            current.append(index)
++            continue
++
++        if message.role == MessageRole.ASSISTANT:
++            current.append(index)
++            if not message.tool_calls:
++                units.append(current)
++                current = []
++
++    return units
++
++
++def complete_pairs(messages: list[ChatMessage]) -> list[list[ChatMessage]]:
++    return [[messages[index] for index in unit] for unit in complete_unit_indices(messages)]
+--- /dev/null
++++ b/app/core/toml_config.py
+@@ -0,0 +1,279 @@
++import math
++import tomllib
++from collections.abc import Mapping
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Literal
++from urllib.parse import urlsplit
++
++from app.core.limits import POSTGRES_INTEGER_MAX
++
++DEFAULT_CONFIG_FILE = "config.toml"
++
++type TomlKind = Literal["string", "integer", "number", "boolean"]
++
++
++class TomlConfigError(ValueError):
++    pass
++
++
++@dataclass(frozen=True)
++class TomlParameter:
++    environment_name: str
++    kind: TomlKind
++    minimum: float | None = None
++    maximum: float | None = None
++    choices: frozenset[str] | None = None
++
++
++TOML_SCHEMA: dict[str, dict[str, TomlParameter]] = {
++    "llm": {
++        "model": TomlParameter("LLM_MODEL", "string"),
++        "base_url": TomlParameter("LLM_BASE_URL", "string"),
++        "timeout_seconds": TomlParameter("LLM_TIMEOUT", "number", 1, 1800),
++        "max_tokens": TomlParameter("LLM_MAX_TOKENS", "integer", 64, 131072),
++        "generation_reserve_tokens": TomlParameter(
++            "LLM_GENERATION_RESERVE_TOKENS",
++            "integer",
++            64,
++            131072,
++        ),
++        "streaming": TomlParameter("LLM_STREAMING", "boolean"),
++        "opencode_session": TomlParameter("LLM_OPENCODE_SESSION", "boolean"),
++        "context_provider": TomlParameter(
++            "LLM_CONTEXT_PROVIDER",
++            "string",
++            choices=frozenset({"auto", "none", "ollama", "models"}),
++        ),
++    },
++    "agent": {
++        "timeout_seconds": TomlParameter("AGENT_TIMEOUT", "number", 1, 1800),
++        "max_tool_calls": TomlParameter(
++            "AGENT_MAX_TOOL_CALLS",
++            "integer",
++            1,
++            POSTGRES_INTEGER_MAX,
++        ),
++        "max_llm_steps": TomlParameter("AGENT_MAX_LLM_STEPS", "integer", 1, 8),
++        "confirmation_ttl_seconds": TomlParameter("CONFIRMATION_TTL", "integer", 1, 300),
++        "tool_result_max_chars": TomlParameter(
++            "TOOL_RESULT_MAX_CHARS",
++            "integer",
++            100,
++            64000,
++        ),
++        "user_queue_max_size": TomlParameter("USER_QUEUE_MAX_SIZE", "integer", 1, 10000),
++    },
++    "history": {
++        "max_messages": TomlParameter("HISTORY_MAX_MESSAGES", "integer", 1, 10000),
++        "max_chars": TomlParameter("HISTORY_MAX_CHARS", "integer", 100, 1_000_000),
++        "default_context_length": TomlParameter(
++            "DEFAULT_CONTEXT_LENGTH",
++            "integer",
++            512,
++            2_097_152,
++        ),
++        "compaction_threshold_messages": TomlParameter(
++            "COMPACTION_THRESHOLD_MESSAGES",
++            "integer",
++            2,
++            10000,
++        ),
++        "compaction_keep_recent": TomlParameter(
++            "COMPACTION_KEEP_RECENT",
++            "integer",
++            1,
++            1000,
++        ),
++        "summary_max_chars": TomlParameter("SUMMARY_MAX_CHARS", "integer", 100, 8000),
++    },
++    "mcp": {
++        "transport": TomlParameter(
++            "MCP_TRANSPORT",
++            "string",
++            choices=frozenset({"stdio", "streamable-http"}),
++        ),
++        "server_url": TomlParameter("MCP_SERVER_URL", "string"),
++        "math_server_url": TomlParameter("MATH_MCP_SERVER_URL", "string"),
++        "timeout_seconds": TomlParameter("MCP_TIMEOUT", "number", 1, 120),
++        "math_request_timeout_seconds": TomlParameter(
++            "MATH_MCP_REQUEST_TIMEOUT_SECONDS",
++            "number",
++            1,
++            180,
++        ),
++    },
++    "math_mcp": {
++        "startup_timeout_seconds": TomlParameter(
++            "MATH_MCP_STARTUP_TIMEOUT_SECONDS",
++            "number",
++            1,
++            120,
++        ),
++        "operation_timeout_seconds": TomlParameter(
++            "MATH_MCP_OPERATION_TIMEOUT_SECONDS",
++            "number",
++            0.1,
++            60,
++        ),
++        "queue_timeout_seconds": TomlParameter(
++            "MATH_MCP_QUEUE_TIMEOUT_SECONDS",
++            "number",
++            0.1,
++            180,
++        ),
++        "memory_limit_mib": TomlParameter("MATH_MCP_MEMORY_LIMIT_MIB", "integer", 128, 4096),
++        "max_png_bytes": TomlParameter(
++            "MATH_MCP_MAX_PNG_BYTES",
++            "integer",
++            1024,
++            256 * 1024,
++        ),
++    },
++}
++
++PUBLIC_URL_ENVIRONMENT_NAMES = frozenset(
++    {
++        "LLM_BASE_URL",
++        "MCP_SERVER_URL",
++        "MATH_MCP_SERVER_URL",
++    }
++)
++
++
++def _parameter_error(section: str, key: str, message: str) -> TomlConfigError:
++    return TomlConfigError(f"config.toml: [{section}].{key}: {message}")
++
++
++def _section_error(section: str, message: str) -> TomlConfigError:
++    return TomlConfigError(f"config.toml: [{section}]: {message}")
++
++
++def _validated_value(
++    section: str,
++    key: str,
++    raw_value: object,
++    parameter: TomlParameter,
++) -> str | int | float | bool:
++    if parameter.kind == "boolean":
++        if not isinstance(raw_value, bool):
++            raise _parameter_error(section, key, "укажите true или false.")
++
++        return raw_value
++
++    if parameter.kind == "integer":
++        if isinstance(raw_value, bool) or not isinstance(raw_value, int):
++            raise _parameter_error(section, key, "значение должно быть целым числом.")
++
++        number: int | float = raw_value
++    elif parameter.kind == "number":
++        if isinstance(raw_value, bool) or not isinstance(raw_value, int | float):
++            raise _parameter_error(section, key, "значение должно быть числом.")
++
++        number = float(raw_value)
++        if not math.isfinite(number):
++            raise _parameter_error(section, key, "значение должно быть конечным числом.")
++    else:
++        if not isinstance(raw_value, str):
++            raise _parameter_error(section, key, "значение должно быть строкой.")
++
++        if parameter.choices is not None and raw_value not in parameter.choices:
++            allowed = ", ".join(sorted(parameter.choices))
++            raise _parameter_error(section, key, f"допустимые значения: {allowed}.")
++
++        if parameter.environment_name in PUBLIC_URL_ENVIRONMENT_NAMES and raw_value:
++            try:
++                parsed = urlsplit(raw_value)
++                username = parsed.username
++                password = parsed.password
++                hostname = parsed.hostname
++            except ValueError:
++                raise _parameter_error(
++                    section,
++                    key,
++                    "укажите корректный URL (http:// или https://).",
++                ) from None
++
++            if username is not None or password is not None:
++                raise _parameter_error(
++                    section,
++                    key,
++                    "не храните учётные данные в config.toml; используйте .env или окружение.",
++                )
++            if parsed.query or parsed.fragment:
++                raise _parameter_error(
++                    section,
++                    key,
++                    "не храните параметры запроса и фрагменты в config.toml.",
++                )
++            if parsed.scheme not in {"http", "https"} or not hostname:
++                raise _parameter_error(
++                    section, key, "укажите корректный URL (http:// или https://)."
++                )
++
++        return raw_value
++
++    if parameter.minimum is not None and number < parameter.minimum:
++        raise _parameter_error(
++            section,
++            key,
++            f"значение должно быть не меньше {parameter.minimum:g}.",
++        )
++    if parameter.maximum is not None and number > parameter.maximum:
++        raise _parameter_error(
++            section,
++            key,
++            f"значение должно быть не больше {parameter.maximum:g}.",
++        )
++
++    return number
++
++
++def _serialized(value: str | int | float | bool) -> str:
++    if isinstance(value, bool):
++        return "true" if value else "false"
++
++    return str(value)
++
++
++def merge_environment(
++    toml_values: Mapping[str, str],
++    file_values: Mapping[str, str | None],
++    process_values: Mapping[str, str],
++) -> dict[str, str | None]:
++    file_overrides = {key: value for key, value in file_values.items() if value}
++    process_overrides = {key: value for key, value in process_values.items() if value}
++
++    return {**toml_values, **file_overrides, **process_overrides}
++
++
++def load_toml_environment(config_file: Path | str = DEFAULT_CONFIG_FILE) -> dict[str, str]:
++    path = Path(config_file)
++    if not path.exists():
++        return {}
++
++    try:
++        with path.open("rb") as stream:
++            document = tomllib.load(stream)
++    except (OSError, tomllib.TOMLDecodeError):
++        raise TomlConfigError("config.toml: не удалось прочитать или разобрать файл.") from None
++
++    environment: dict[str, str] = {}
++
++    for section_name, raw_section in document.items():
++        schema = TOML_SCHEMA.get(section_name)
++        if schema is None:
++            raise _section_error(section_name, "неизвестная секция.")
++
++        if not isinstance(raw_section, dict):
++            raise _section_error(section_name, "секция должна быть таблицей параметров.")
++
++        for key, raw_value in raw_section.items():
++            parameter = schema.get(key)
++            if parameter is None:
++                raise _parameter_error(section_name, key, "неизвестный параметр.")
++
++            value = _validated_value(section_name, key, raw_value, parameter)
++            environment[parameter.environment_name] = _serialized(value)
++
++    return environment
+--- a/app/core/schemas/execution.py
++++ b/app/core/schemas/execution.py
+@@ -19,6 +19,8 @@
+     last_call: ToolCall | None = None
+     resource_uris: list[str] = field(default_factory=list)
+     images: list[ToolImage] = field(default_factory=list)
++    protected_prefix: int = 0
++    deadline_at: float | None = None
+ 
+     def build_result(
+         self,
+--- a/app/core/schemas/tools.py
++++ b/app/core/schemas/tools.py
+@@ -457,6 +457,14 @@
+     "forecast_date_unavailable": "Прогноз доступен на сегодня и следующие 15 дней.",
+     "weather_unavailable": "Сервис погоды сейчас недоступен. Попробуйте позже.",
+     "schedule_unavailable": "Не удалось прочитать расписание. Попробуйте позже.",
++    "timeout": "Вычисление не уложилось в отведённое время.",
++    "queue_timeout": "Вычислитель занят: запрос не дождался свободного исполнителя.",
++    "worker_start_timeout": "Вычислительный процесс не запустился вовремя.",
++    "worker_failed": "Вычислительный процесс завершился аварийно.",
++    "memory_limit": "Вычисление превысило выделенный лимит памяти.",
++    "resource_limit": "Результат превышает допустимый размер или сложность.",
++    "evaluation_failed": "Не удалось вычислить выражение.",
++    "request_deadline": "Общее время обработки запроса истекло.",
+ }
+ 
+ 
+--- a/app/handlers/dialog.py
++++ b/app/handlers/dialog.py
+@@ -5,6 +5,7 @@
+ import uuid
+ from collections.abc import AsyncGenerator, Sequence
+ from contextlib import asynccontextmanager
++from time import monotonic
+ 
+ from aiogram import F, Router
+ from aiogram.enums import ChatAction
+@@ -89,6 +90,7 @@
+     images: Sequence[ToolImage],
+     request_id: str,
+ ) -> None:
++    started = monotonic()
+     failed = 0
+ 
+     for index, image in enumerate(images, start=1):
+@@ -102,6 +104,13 @@
+         except Exception:
+             failed += 1
+ 
++    logger.info(
++        "[%s] photo_delivery count=%d failed=%d duration_ms=%.0f",
++        request_id,
++        len(images),
++        failed,
++        (monotonic() - started) * 1000,
++    )
+     if not failed:
+         return
+ 
+--- a/app/mcp/connection.py
++++ b/app/mcp/connection.py
+@@ -129,6 +129,7 @@
+         env = {
+             key: value for key, value in os.environ.items() if key in MATH_STDIO_ENVIRONMENT_KEYS
+         }
++        env.update(settings.math_mcp_environment)
+         env["MCP_SHARED_SECRET"] = secret
+         transport = StdioTransport(
+             command=sys.executable,
+@@ -144,10 +145,11 @@
+             keep_alive=True,
+         )
+ 
++    math_timeout = settings.math_mcp_request_timeout_seconds
+     sdk = Client(
+         transport,
+         name="study-bot",
+-        timeout=settings.mcp_timeout,
+-        init_timeout=settings.mcp_timeout,
++        timeout=math_timeout,
++        init_timeout=math_timeout,
+     )
+     return MCPClient(sdk, secret=secret)
+--- a/app/modes/definitions.py
++++ b/app/modes/definitions.py
+@@ -8,7 +8,17 @@
+     task=(
+         "Объясняй понятия, методы решения и проектные решения с глубиной по вопросу и уровню "
+         "студента. Для математики поясняй обозначения, предпосылки, ключевые переходы "
+-        "доказательства и проверку результата; не навязывай код. Для алгоритма раскрывай идею "
++        "доказательства и проверку результата; не навязывай код. Если обнаружены математические "
++        "инструменты, используй их для проверки точных вычислений, пределов, сходимости, "
++        "уравнений и экстремумов. Для запроса на построение вызови инструмент графика по его "
++        "обнаруженной схеме и проверь, что он вернул успешный результат. В ответе поясни область "
++        "определения и интерпретацию результата. Если для графика не хватает функции, уточни её. "
++        "Если задача сводится к построению и чтению графика, дай до пяти предложений. Укажи "
++        "координаты, отмеченные точки и запрошенные свойства, опираясь на метаданные построения. "
++        "Формулы, выводимые из исходной функции, сверяй вычислением, если они нужны для ответа. "
++        "Покажи основной ход решения и проверку. Дополнительные методы и оценки "
++        "приводи по запросу. "
++        "Для алгоритма раскрывай идею "
+         "и корректность, оценивай время и память, границы входа, переполнение и особенности языка. "
+         "Код приводи только по задаче и на выбранном языке: не заменяй C++, C# или Java на Python. "
+         "Для примера без языка допустим псевдокод. Для лабораторных помогай понять метод и "
+--- a/app/services/agent_service.py
++++ b/app/services/agent_service.py
+@@ -1,3 +1,4 @@
++import logging
+ from collections.abc import Mapping, Sequence
+ from zoneinfo import ZoneInfo
+ 
+@@ -5,6 +6,7 @@
+ 
+ from app.core.budget import ContextBudget
+ from app.core.clock import Clock, SystemClock
++from app.core.conversation import complete_unit_indices
+ from app.core.schemas.agent import (
+     AgentDecision,
+     AgentResult,
+@@ -24,6 +26,8 @@
+ from app.llm.base import BaseLLMClient
+ from app.prompts.agent import agent_rules
+ from app.services.tool_execution import READ_RESOURCE_FUNCTION, ToolExecutionService
++
++logger = logging.getLogger("app.services.agent")
+ 
+ CLARIFICATION_TOOL = ToolDefinition(
+     name="clarification",
+@@ -101,12 +105,16 @@
+         model: str | None = None,
+         calls_used: int = 0,
+         budget: ContextBudget | None = None,
++        protected_prefix: int = 0,
++        deadline_at: float | None = None,
+     ) -> AgentResult:
+         state = RunState(
+             context=context,
+             conversation=list(messages),
+             timezone=timezone,
+             calls_used=calls_used,
++            protected_prefix=protected_prefix,
++            deadline_at=deadline_at,
+         )
+         self._append_instructions(state)
+         budget = budget or ContextBudget(32768)
+@@ -141,7 +149,17 @@
+         definitions = self.definitions
+ 
+         for _ in range(self._max_steps):
+-            output_limit = budget.generation_limit(state.conversation, definitions)
++            try:
++                output_limit = budget.generation_limit(state.conversation, definitions)
++            except ToolFailure as error:
++                if error.code != "context_budget":
++                    raise
++
++                if not self._trim_history_for_reserve(state, definitions, budget):
++                    raise
++
++                output_limit = budget.generation_limit(state.conversation, definitions)
++
+             response = await self._llm.generate(
+                 LLMRequest(
+                     messages=state.conversation,
+@@ -156,6 +174,50 @@
+                 return outcome
+ 
+         raise ToolFailure("step_budget", "Достигнут лимит шагов модели. Уточните запрос.")
++
++    def _trim_history_for_reserve(
++        self,
++        state: RunState,
++        definitions: Sequence[ToolDefinition],
++        budget: ContextBudget,
++    ) -> bool:
++        conversation = state.conversation
++        last_user = next(
++            (
++                index
++                for index in range(len(conversation) - 1, -1, -1)
++                if conversation[index].role == MessageRole.USER
++            ),
++            None,
++        )
++        protected_prefix = min(state.protected_prefix, len(conversation))
++
++        if last_user is None or last_user <= protected_prefix:
++            return False
++
++        prefix = conversation[:protected_prefix]
++        history = conversation[protected_prefix:last_user]
++        current_turn = conversation[last_user:]
++        units = complete_unit_indices(history)
++        pinned = [message for message in history if message.role == MessageRole.SYSTEM]
++
++        for dropped_units in range(1, len(units) + 1):
++            remaining = [history[index] for unit in units[dropped_units:] for index in unit]
++            candidate = [*prefix, *pinned, *remaining, *current_turn]
++            if not budget.has_generation_reserve(candidate, definitions):
++                continue
++
++            state.conversation = candidate
++            logger.info(
++                "context_history_trim dropped_units=%d remaining_units=%d output=%d reserve=%d",
++                dropped_units,
++                len(units) - dropped_units,
++                budget.generation_limit(candidate, definitions),
++                budget.effective_generation_reserve,
++            )
++            return True
++
++        return False
+ 
+     async def _handle_response(
+         self,
+--- a/app/services/context_builder.py
++++ b/app/services/context_builder.py
+@@ -4,7 +4,12 @@
+ import asyncpg
+ 
+ from app.config import Settings
+-from app.core.budget import MIN_GENERATION_TOKENS, ContextBudget
++from app.core.budget import (
++    GENERATION_RESERVE_WINDOW_DIVISOR,
++    MIN_GENERATION_TOKENS,
++    ContextBudget,
++)
++from app.core.conversation import complete_pairs, complete_unit_indices
+ from app.core.exceptions import LLMError
+ from app.core.schemas.llm import FinishReason, LLMRequest, ToolDefinition
+ from app.core.schemas.message import ChatMessage, MessageRole
+@@ -15,26 +20,29 @@
+ from app.prompts.compaction import compaction_messages, summary_message
+ 
+ logger = logging.getLogger("app.context")
++COMPACTION_MAX_TOKENS = 512
++
++
++def _compaction_token_limit(budget: ContextBudget) -> int:
++    window_limit = max(
++        MIN_GENERATION_TOKENS,
++        budget.window // GENERATION_RESERVE_WINDOW_DIVISOR,
++    )
++    return min(COMPACTION_MAX_TOKENS, budget.output_tokens, window_limit)
+ 
+ 
+ @dataclass(frozen=True)
+ class PreparedContext:
+     messages: list[ChatMessage]
+     budget: ContextBudget
+-
+-
+-def complete_pairs(messages: list[ChatMessage]) -> list[list[ChatMessage]]:
+-    pairs: list[list[ChatMessage]] = []
+-    pending: ChatMessage | None = None
+-
+-    for message in messages:
+-        if message.role == MessageRole.USER:
+-            pending = message
+-        elif message.role == MessageRole.ASSISTANT and pending is not None:
+-            pairs.append([pending, message])
+-            pending = None
+-
+-    return pairs
++    protected_prefix: int = 0
++
++
++def _complete_indexed_units(
++    rows: list[tuple[int, ChatMessage]],
++) -> list[list[tuple[int, ChatMessage]]]:
++    messages = [message for _, message in rows]
++    return [[rows[index] for index in unit] for unit in complete_unit_indices(messages)]
+ 
+ 
+ class ContextBuilder:
+@@ -56,7 +64,11 @@
+         except (LLMError, TypeError, ValueError):
+             window = self._settings.default_context_length
+ 
+-        return ContextBudget(window, min(self._settings.llm_max_tokens, window // 2))
++        return ContextBudget(
++            window,
++            min(self._settings.llm_max_tokens, window // 2),
++            self._settings.llm_generation_reserve_tokens,
++        )
+ 
+     async def build(
+         self,
+@@ -68,26 +80,47 @@
+         action: ChatMessage | None = None,
+     ) -> PreparedContext:
+         budget = await self.budget()
+-        await self.compact(user_id, budget)
+-
+-        summary = await history_repo.get_dialog_summary(self._pool, user_id)
+-        initial = mode.build_initial_messages(text)
+-        if summary:
+-            initial.append(summary_message(summary))
+-
+-        if action:
+-            initial.append(action)
+-
+-        current = ChatMessage(role=MessageRole.USER, content=text)
+         history = await history_repo.get_dialog_history(
+             self._pool,
+             user_id,
+             self._settings.history_max_messages,
+             self._settings.history_max_chars,
+         )
+-
++        mode_messages = mode.build_initial_messages(text)
++        current = ChatMessage(role=MessageRole.USER, content=text)
++        overhead = len(instructions.encode()) + 64
+         pairs = complete_pairs(history)
+-        overhead = len(instructions.encode()) + 64
++        summary = await history_repo.get_dialog_summary(self._pool, user_id)
++        decision_initial = list(mode_messages)
++        if summary:
++            decision_initial.append(summary_message(summary))
++        if action:
++            decision_initial.append(action)
++
++        needs_budget_compaction = self._needs_compaction(
++            decision_initial,
++            current,
++            pairs,
++            tools,
++            overhead,
++            budget,
++        )
++        if await self.compact(user_id, budget, force=needs_budget_compaction):
++            history = await history_repo.get_dialog_history(
++                self._pool,
++                user_id,
++                self._settings.history_max_messages,
++                self._settings.history_max_chars,
++            )
++            pairs = complete_pairs(history)
++            summary = await history_repo.get_dialog_summary(self._pool, user_id)
++
++        initial = list(mode_messages)
++        if summary:
++            initial.append(summary_message(summary))
++        if action:
++            initial.append(action)
++
+         return self._fit_context(
+             initial,
+             current,
+@@ -96,6 +129,23 @@
+             overhead,
+             budget,
+         )
++
++    @staticmethod
++    def _needs_compaction(
++        initial: list[ChatMessage],
++        current: ChatMessage,
++        pairs: list[list[ChatMessage]],
++        tools: list[ToolDefinition],
++        overhead: int,
++        budget: ContextBudget,
++    ) -> bool:
++        required_reserve = max(budget.effective_generation_reserve, MIN_GENERATION_TOKENS)
++        available = budget.window - budget.estimate([*initial, current], tools) - overhead
++        history_size = sum(
++            sum(budget.estimate_message(message) for message in pair) for pair in pairs
++        )
++
++        return history_size > available - required_reserve
+ 
+     @staticmethod
+     def _fit_context(
+@@ -108,29 +158,35 @@
+     ) -> PreparedContext:
+         fixed_size = budget.estimate([*initial, current], tools) + overhead
+         available_context = budget.window - fixed_size
+-        if min(budget.output_tokens, available_context) < MIN_GENERATION_TOKENS:
++        if available_context < MIN_GENERATION_TOKENS:
+             raise ToolFailure(
+                 "context_budget",
+                 "Запрос или контекст слишком большой. Сократите запрос или очистите историю.",
+             )
+ 
+-        history_limit = available_context - MIN_GENERATION_TOKENS
+-        pair_sizes: list[int] = []
+-
+-        for user_message, assistant_message in pairs:
+-            pair_size = budget.estimate_message(user_message)
+-            pair_size += budget.estimate_message(assistant_message)
+-            pair_sizes.append(pair_size)
++        generation_reserve = max(budget.effective_generation_reserve, MIN_GENERATION_TOKENS)
++        history_limit = available_context - generation_reserve
++        pair_sizes = [sum(budget.estimate_message(message) for message in pair) for pair in pairs]
+ 
+         history_size = sum(pair_sizes)
+         first_pair = 0
+ 
+-        while history_size > history_limit:
++        while history_size > history_limit and first_pair < len(pairs):
+             history_size -= pair_sizes[first_pair]
+             first_pair += 1
+ 
+         output_tokens = min(budget.output_tokens, available_context - history_size)
+-        fitted_budget = ContextBudget(budget.window, output_tokens)
++        if output_tokens < generation_reserve:
++            raise ToolFailure(
++                "context_budget",
++                "Запрос или контекст слишком большой. Сократите запрос или очистите историю.",
++            )
++
++        fitted_budget = ContextBudget(
++            budget.window,
++            output_tokens,
++            budget.generation_reserve,
++        )
+         messages = list(initial)
+ 
+         for pair in pairs[first_pair:]:
+@@ -138,16 +194,28 @@
+ 
+         messages.append(current)
+ 
+-        return PreparedContext(messages, fitted_budget)
++        logger.info(
++            "context_fit window=%d fixed=%d dropped_units=%d history=%d output=%d reserve=%d",
++            budget.window,
++            fixed_size,
++            first_pair,
++            history_size,
++            output_tokens,
++            generation_reserve,
++        )
++
++        return PreparedContext(messages, fitted_budget, len(initial))
+ 
+     async def compact(
+         self,
+         user_id: int,
+         budget: ContextBudget | None = None,
++        *,
++        force: bool = False,
+     ) -> bool:
+         budget = budget or await self.budget()
+         rows = await history_repo.get_user_messages_with_ids(self._pool, user_id)
+-        if len(rows) < self._settings.compaction_threshold_messages:
++        if not force and len(rows) < self._settings.compaction_threshold_messages:
+             return False
+ 
+         keep = max(2, self._settings.compaction_keep_recent)
+@@ -165,6 +233,11 @@
+ 
+         summary = await self._summarize(old_summary, selected, budget)
+         if summary is None:
++            logger.info(
++                "context_compaction rows=%d selected_messages=%d result=skipped",
++                len(rows),
++                len(selected),
++            )
+             return False
+ 
+         await history_repo.commit_compaction(
+@@ -173,6 +246,12 @@
+             selected_ids,
+             summary,
+         )
++        logger.info(
++            "context_compaction rows=%d selected_messages=%d summary_chars=%d result=committed",
++            len(rows),
++            len(selected),
++            len(summary),
++        )
+ 
+         return True
+ 
+@@ -180,27 +259,23 @@
+     def _select_compaction_input(
+         rows: list[tuple[int, ChatMessage]], summary: str | None, budget: ContextBudget
+     ) -> tuple[list[int], list[ChatMessage]]:
+-        """Select complete dialog pairs while retaining their original record IDs."""
++        """Select complete dialog units while retaining their original record IDs."""
+         selected_ids: list[int] = []
+         selected_messages: list[ChatMessage] = []
+-        pending: tuple[int, ChatMessage] | None = None
+-
+-        for identifier, message in rows:
+-            if message.role == MessageRole.USER:
+-                pending = identifier, message
+-                continue
+-
+-            if message.role != MessageRole.ASSISTANT or pending is None:
+-                continue
+-
+-            user_message_id, user_message = pending
+-            proposed = compaction_messages(summary, [*selected_messages, user_message, message])
+-            if not budget.fits(proposed, []):
++        summary_budget = ContextBudget(
++            budget.window,
++            _compaction_token_limit(budget),
++            0,
++        )
++
++        for unit in _complete_indexed_units(rows):
++            unit_messages = [message for _, message in unit]
++            proposed = compaction_messages(summary, [*selected_messages, *unit_messages])
++            if not summary_budget.fits(proposed, []):
+                 break
+ 
+-            selected_ids.extend((user_message_id, identifier))
+-            selected_messages.extend((user_message, message))
+-            pending = None
++            selected_ids.extend(identifier for identifier, _ in unit)
++            selected_messages.extend(unit_messages)
+ 
+         return selected_ids, selected_messages
+ 
+@@ -216,7 +291,7 @@
+                     messages=compaction_messages(old_summary, selected),
+                     temperature=0.2,
+                     model=self._settings.llm_model,
+-                    max_tokens=min(512, budget.output_tokens),
++                    max_tokens=_compaction_token_limit(budget),
+                 )
+             )
+         except LLMError:
+--- a/app/services/dialog_service.py
++++ b/app/services/dialog_service.py
+@@ -103,7 +103,8 @@
+ 
+         async with self._queue.acquire(user_id):
+             started = time.monotonic()
+-            deadline = asyncio.timeout(self._settings.agent_timeout)
++            deadline_at = asyncio.get_running_loop().time() + self._settings.agent_timeout
++            deadline = asyncio.timeout_at(deadline_at)
+ 
+             try:
+                 async with deadline:
+@@ -126,6 +127,7 @@
+                         user_text,
+                         claim.calls_used,
+                         started,
++                        deadline_at,
+                     )
+             except BaseException as error:
+                 reason = error.code if isinstance(error, LLMError) else type(error).__name__
+@@ -147,6 +149,7 @@
+         text: str,
+         calls_used: int,
+         started: float,
++        deadline_at: float,
+     ) -> AgentResult:
+         existing = None
+         if self._confirmations is not None:
+@@ -154,7 +157,7 @@
+         if existing is not None:
+             result = existing
+         else:
+-            result = await self._run_agent(context, text, calls_used)
++            result = await self._run_agent(context, text, calls_used, deadline_at)
+ 
+         user_message = ChatMessage(role=MessageRole.USER, content=text)
+         assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=reply_text(result))
+@@ -175,6 +178,7 @@
+         context: EventContext,
+         text: str,
+         calls_used: int,
++        deadline_at: float,
+     ) -> AgentResult:
+         try:
+             user = await get_or_create_user(self._pool, context.user_id)
+@@ -201,6 +205,8 @@
+                 model=self.model_name,
+                 calls_used=calls_used,
+                 budget=prepared.budget,
++                protected_prefix=prepared.protected_prefix,
++                deadline_at=deadline_at,
+             )
+         except ToolFailure as error:
+             return AgentResult(
+--- a/app/services/tool_execution.py
++++ b/app/services/tool_execution.py
+@@ -1,3 +1,4 @@
++import asyncio
+ import base64
+ import json
+ import logging
+@@ -179,18 +180,58 @@
+ 
+         state.images.extend(images)
+ 
++    @staticmethod
++    def _remaining_timeout(state: RunState) -> float | None:
++        if state.deadline_at is None:
++            return None
++
++        remaining = state.deadline_at - asyncio.get_running_loop().time()
++        if remaining <= 0:
++            raise ToolFailure(
++                "request_deadline",
++                "Общее время обработки запроса истекло.",
++            )
++
++        return remaining
++
++    async def _call_with_timeout(
++        self,
++        call: ToolCall,
++        client: ToolClient,
++        call_timeout: float | None,
++    ) -> dict[str, object] | PhotoToolResult:
++        if call_timeout is None:
++            return await client.call_tool(call.name, call.arguments)
++
++        try:
++            async with asyncio.timeout(call_timeout):
++                return await client.call_tool(call.name, call.arguments)
++        except TimeoutError:
++            raise ToolFailure(
++                "request_deadline",
++                "Общее время обработки запроса истекло.",
++            ) from None
++
+     async def _read(self, state: RunState, call: ToolCall) -> None:
+         client = self._client()
++        code = "ok"
++        timeout = self._remaining_timeout(state)
+         await self._reserve(state)
+         started = time.monotonic()
+-        outcome = await client.call_tool(call.name, call.arguments)
+-
+-        logger.info(
+-            "tool_complete request=%s tool=%s duration_ms=%.0f",
+-            state.context.request_id,
+-            call.name,
+-            (time.monotonic() - started) * 1000,
+-        )
++        try:
++            outcome = await self._call_with_timeout(call, client, timeout)
++        except ToolFailure as error:
++            code = error.code
++            raise
++        finally:
++            logger.info(
++                "tool_complete request=%s tool=%s duration_ms=%.0f code=%s",
++                state.context.request_id,
++                call.name,
++                (time.monotonic() - started) * 1000,
++                code,
++            )
++
+         if isinstance(outcome, PhotoToolResult):
+             payload = outcome.payload
+             images = outcome.images
+@@ -215,22 +256,38 @@
+ 
+     async def _read_resource_call(self, state: RunState, call: ToolCall, uri: str) -> None:
+         client = self._client()
++        timeout = self._remaining_timeout(state)
++        code = "ok"
+         await self._reserve(state)
+         started = time.monotonic()
+         payload: dict[str, object] = {"source": "mcp_resource", "uri": uri}
+         try:
+-            resource = await client.read_resource(uri)
++            if timeout is None:
++                resource = await client.read_resource(uri)
++            else:
++                async with asyncio.timeout(timeout):
++                    resource = await client.read_resource(uri)
+             if len(resource.text) > self._max_output_chars:
+                 raise ToolFailure("tool_output_budget", "Результат ресурса слишком большой.")
+             payload.update(mime_type=resource.mime_type, content=resource.text)
+             state.resource_uris.append(resource.uri)
++        except TimeoutError:
++            code = "request_deadline"
++            raise ToolFailure(
++                "request_deadline",
++                "Общее время обработки запроса истекло.",
++            ) from None
+         except ToolFailure as error:
++            code = error.code
++            if error.code == "request_deadline":
++                raise
+             payload["error"] = {"code": error.code, "message": error.message}
+ 
+         logger.info(
+-            "resource_complete request=%s duration_ms=%.0f",
++            "resource_complete request=%s duration_ms=%.0f code=%s",
+             state.context.request_id,
+             (time.monotonic() - started) * 1000,
++            code,
+         )
+         state.conversation.append(
+             ChatMessage(

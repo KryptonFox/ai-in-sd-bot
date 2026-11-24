@@ -78,6 +78,7 @@ def test_extracts_and_validates_variables() -> None:
     assert validate_variable(" t ") == "t"
     assert error_code(validate_variable, "pi") == "invalid_variable"
     assert error_code(validate_variable, "sin") == "invalid_variable"
+    assert error_code(validate_variable, "lambda") == "invalid_variable"
     assert error_code(validate_variable, "2x") == "invalid_variable"
     assert error_code(validate_variable, "__x") == "invalid_variable"
 

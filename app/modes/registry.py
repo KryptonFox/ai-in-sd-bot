@@ -1,5 +1,5 @@
 from app.modes.base import BotMode
-from app.modes.definitions import REVIEW_MODE, STUDY_MODE, TRANSLATE_MODE
+from app.modes.definitions import EVERYDAY_MODE, REVIEW_MODE, STUDY_MODE, TRANSLATE_MODE
 
 
 class ModeRegistry:
@@ -45,3 +45,4 @@ registry = ModeRegistry(default_id="study")
 registry.register(STUDY_MODE)
 registry.register(TRANSLATE_MODE)
 registry.register(REVIEW_MODE)
+registry.register(EVERYDAY_MODE)

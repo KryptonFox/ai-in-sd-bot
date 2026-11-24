@@ -129,6 +129,7 @@ def create_math_tools_client(settings: Settings) -> MCPClient | None:
         env = {
             key: value for key, value in os.environ.items() if key in MATH_STDIO_ENVIRONMENT_KEYS
         }
+        env.update(settings.math_mcp_environment)
         env["MCP_SHARED_SECRET"] = secret
         transport = StdioTransport(
             command=sys.executable,
@@ -144,10 +145,11 @@ def create_math_tools_client(settings: Settings) -> MCPClient | None:
             keep_alive=True,
         )
 
+    math_timeout = settings.math_mcp_request_timeout_seconds
     sdk = Client(
         transport,
         name="study-bot",
-        timeout=settings.mcp_timeout,
-        init_timeout=settings.mcp_timeout,
+        timeout=math_timeout,
+        init_timeout=math_timeout,
     )
     return MCPClient(sdk, secret=secret)

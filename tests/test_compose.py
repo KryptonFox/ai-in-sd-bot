@@ -25,8 +25,9 @@ def test_local_and_cloud_compose_ports_credentials_and_healthchecks(tmp_path):
     environ = {
         key: value
         for key, value in os.environ.items()
-        if not key.startswith(("POSTGRES_", "BOT_TOKEN", "COMPOSE_"))
+        if not key.startswith(("POSTGRES_", "BOT_TOKEN", "COMPOSE_", "MATH_MCP_"))
     }
+    environ["MATH_MCP_OPERATION_TIMEOUT_SECONDS"] = "2.5"
 
     command = compose_command(root)
     command[command.index("--env-file") + 1] = str(env_file)
@@ -109,6 +110,13 @@ def test_local_and_cloud_compose_ports_credentials_and_healthchecks(tmp_path):
     )
     assert all(not key.startswith("POSTGRES_") for key in math_environment)
     assert math_environment["MCP_PORT"] == "8000"
+    assert math_environment["MATH_MCP_OPERATION_TIMEOUT_SECONDS"] == "2.5"
+    assert math_environment["MATH_MCP_STARTUP_TIMEOUT_SECONDS"] is None
+    assert math_environment["MATH_MCP_QUEUE_TIMEOUT_SECONDS"] is None
+    assert math_environment["MATH_MCP_MEMORY_LIMIT_MIB"] is None
+    assert math_environment["MATH_MCP_MAX_PNG_BYTES"] is None
+    assert "volumes" not in cloud["bot"]
+    assert "volumes" not in cloud["math-tools-mcp"]
     schedule_mount = cloud["student-tools-mcp"]["volumes"][0]
     assert schedule_mount["type"] == "bind"
     assert schedule_mount["target"] == "/app/mcp_servers/student_tools/data/schedule.json"
@@ -120,6 +128,59 @@ def test_local_and_cloud_compose_ports_credentials_and_healthchecks(tmp_path):
     assert "app.healthcheck" in cloud["bot"]["healthcheck"]["test"]
     assert cloud["bot"]["healthcheck"]["timeout"] == "20s"
     assert cloud["bot"]["depends_on"]["db"]["condition"] == "service_healthy"
+
+
+@pytest.mark.skipif(not shutil.which("docker"), reason="Docker CLI не установлен")
+def test_optional_compose_profile_mounts_separate_configs(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "BOT_TOKEN=test\nPOSTGRES_PASSWORD=test\n",
+        encoding="utf-8",
+    )
+    bot_config = tmp_path / "bot.toml"
+    math_config = tmp_path / "math.toml"
+    bot_config.write_text("[llm]\n", encoding="utf-8")
+    math_config.write_text("[math_mcp]\n", encoding="utf-8")
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("POSTGRES_", "BOT_TOKEN", "COMPOSE_", "MATH_MCP_"))
+    }
+    environment.update(
+        BOT_CONFIG_FILE=str(bot_config),
+        MATH_MCP_CONFIG_FILE=str(math_config),
+    )
+
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--env-file",
+            str(env_file),
+            "-f",
+            str(root / "compose.yaml"),
+            "-f",
+            str(root / "compose.config.yaml"),
+            "--profile",
+            "cloud",
+            "config",
+            "--format",
+            "json",
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+    )
+
+    assert result.returncode == 0, "Docker Compose не смог разобрать профиль отдельных конфигов"
+    services = json.loads(result.stdout)["services"]
+    assert services["bot"]["configs"] == [{"source": "bot-config", "target": "/app/config.toml"}]
+    assert services["math-tools-mcp"]["configs"] == [
+        {"source": "math-config", "target": "/app/config.toml"}
+    ]
 
 
 def test_server_settings_loads_without_bot_token(tmp_path):

@@ -5,6 +5,7 @@ import math
 import uuid
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
+from time import monotonic
 
 from aiogram import F, Router
 from aiogram.enums import ChatAction
@@ -89,6 +90,7 @@ async def _send_result_photos(
     images: Sequence[ToolImage],
     request_id: str,
 ) -> None:
+    started = monotonic()
     failed = 0
 
     for index, image in enumerate(images, start=1):
@@ -102,6 +104,13 @@ async def _send_result_photos(
         except Exception:
             failed += 1
 
+    logger.info(
+        "[%s] photo_delivery count=%d failed=%d duration_ms=%.0f",
+        request_id,
+        len(images),
+        failed,
+        (monotonic() - started) * 1000,
+    )
     if not failed:
         return
 

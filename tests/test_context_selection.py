@@ -56,7 +56,7 @@ def builder(monkeypatch: pytest.MonkeyPatch, llm: MagicMock) -> ContextBuilder:
     return ContextBuilder(MagicMock(spec=asyncpg.Pool), settings, llm)
 
 
-def test_complete_pairs_skip_orphans_and_keep_latest_pending_user() -> None:
+def test_complete_pairs_preserve_tool_results_and_skip_orphans() -> None:
     orphan = ChatMessage(role=MessageRole.ASSISTANT, content="Без вопроса")
     replaced = ChatMessage(role=MessageRole.USER, content="Первый вопрос")
     user = ChatMessage(role=MessageRole.USER, content="Второй вопрос")
@@ -68,7 +68,7 @@ def test_complete_pairs_skip_orphans_and_keep_latest_pending_user() -> None:
     assistant = ChatMessage(role=MessageRole.ASSISTANT, content="Ответ")
     trailing = ChatMessage(role=MessageRole.USER, content="Без ответа")
     assert complete_pairs([orphan, replaced, user, tool, assistant, trailing]) == [
-        [user, assistant]
+        [user, tool, assistant]
     ]
 
 
@@ -93,9 +93,9 @@ async def test_context_keeps_only_complete_recent_pairs_at_budget_boundary(
         )
     ]
     overhead = len("Инструкции".encode()) + 64
-    estimate = ContextBudget(0, 128).estimate([*initial, *history[2:], current], tools)
+    estimate = ContextBudget(0, 128, 64).estimate([*initial, *history[2:], current], tools)
     window = estimate + overhead + 128 + available_extra
-    budget = ContextBudget(window, 128)
+    budget = ContextBudget(window, 128, 64)
     monkeypatch.setattr(builder, "budget", AsyncMock(return_value=budget))
     monkeypatch.setattr(
         history_repo,
@@ -156,7 +156,7 @@ async def test_recent_history_takes_priority_over_maximum_output_reserve(
     instructions = "Инструкции"
     overhead = len(instructions.encode()) + 64
     input_size = ContextBudget(0).estimate([*initial, *history, current], []) + overhead
-    budget = ContextBudget(input_size + remaining_for_answer, 16384)
+    budget = ContextBudget(input_size + remaining_for_answer, 16384, 64)
     monkeypatch.setattr(builder, "budget", AsyncMock(return_value=budget))
     monkeypatch.setattr(history_repo, "get_dialog_history", AsyncMock(return_value=history))
 
@@ -179,7 +179,7 @@ async def test_context_reduces_output_reserve_when_base_prompt_fits(
     instructions = "Инструкции"
     fixed_size = ContextBudget(0).estimate([*initial, current], [])
     fixed_size += len(instructions.encode()) + 64
-    budget = ContextBudget(fixed_size + available_output, 128)
+    budget = ContextBudget(fixed_size + available_output, 128, 64)
     monkeypatch.setattr(builder, "budget", AsyncMock(return_value=budget))
 
     prepared = await builder.build(1, current.content, MODE, [], instructions)
@@ -208,6 +208,57 @@ async def test_context_rejects_prompt_without_minimum_generation_space(
         await builder.build(1, current.content, MODE, [], "Инструкции")
 
     assert failure.value.code == "context_budget"
+
+
+def test_compaction_selection_uses_summary_budget_instead_of_answer_limit() -> None:
+    user = ChatMessage(role=MessageRole.USER, content="Вопрос " * 50)
+    assistant = ChatMessage(role=MessageRole.ASSISTANT, content="Ответ " * 50)
+    rows = [(1, user), (2, assistant)]
+    budget = ContextBudget(6000, 16_384, 4096)
+
+    selected_ids, selected = ContextBuilder._select_compaction_input(rows, None, budget)
+
+    assert selected_ids == [1, 2]
+    assert selected == [user, assistant]
+
+
+async def test_build_forces_compaction_below_message_threshold_when_window_requires(
+    builder: ContextBuilder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    builder._settings = replace(
+        builder._settings,
+        compaction_threshold_messages=10,
+        compaction_keep_recent=2,
+    )
+    history = [
+        ChatMessage(
+            role=MessageRole.USER if index % 2 == 0 else MessageRole.ASSISTANT,
+            content=f"Большое сообщение {index} " * 100,
+        )
+        for index in range(6)
+    ]
+    current = ChatMessage(role=MessageRole.USER, content="Продолжим")
+    initial = MODE.build_initial_messages(current.content)
+    overhead = len("Инструкции".encode()) + 64
+    tools: list[ToolDefinition] = []
+    reserve = 512
+    fixed = ContextBudget(0, 512, reserve).estimate([*initial, current], tools) + overhead
+    budget = ContextBudget(fixed + reserve + 100, 512, reserve)
+    compact = AsyncMock(return_value=False)
+    monkeypatch.setattr(builder, "budget", AsyncMock(return_value=budget))
+    monkeypatch.setattr(builder, "compact", compact)
+    monkeypatch.setattr(
+        history_repo,
+        "get_dialog_history",
+        AsyncMock(return_value=history),
+    )
+
+    prepared = await builder.build(1, current.content, MODE, tools, "Инструкции")
+
+    assert compact.await_args is not None
+    assert compact.await_args.kwargs == {"force": True}
+    assert prepared.budget.fits(prepared.messages, tools, overhead)
 
 
 async def test_compaction_preserves_ids_when_records_share_a_message_object(

@@ -364,7 +364,11 @@ async def test_resource_content_that_exceeds_context_budget_stops_before_next_ll
     initial = [ChatMessage(role=MessageRole.SYSTEM, content=agent.instructions(None)), *messages()]
     window = ContextBudget(32768).estimate(initial, agent.definitions) + 512
 
-    result = await agent.run(messages(), CONTEXT, budget=ContextBudget(window))
+    result = await agent.run(
+        messages(),
+        CONTEXT,
+        budget=ContextBudget(window, generation_reserve=64),
+    )
 
     assert result.decision == AgentDecision.ERROR
     assert result.reason == "context_budget"

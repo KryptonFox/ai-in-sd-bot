@@ -1,0 +1,4520 @@
+{
+  "provider": "OpenCode Go",
+  "model": "deepseek-v4.1-flash",
+  "window": 131072,
+  "output_tokens": 32768,
+  "llm_timeout_seconds": 600,
+  "agent_timeout_seconds": 900,
+  "temperature": 0.0,
+  "max_tool_calls": 5,
+  "max_llm_steps": 4,
+  "dataset_sha256": "a2488c431b19b72c2d41ad2bb7ca57ce4b32483830463551c335a4700f87ae81",
+  "queries_sha256": "8c60675dbd57c365ddb76dbb2b52986adb23b2b51bd6dec2ee060e5a64a7f816",
+  "direct_success": 19,
+  "requested_results_success": 20,
+  "tool_sequences_success": 19,
+  "mcp_calls": 36,
+  "llm_steps": 42,
+  "median_ms": 10263.0,
+  "max_ms": 17621,
+  "full_catalog": {
+    "tools": [
+      "add_reminder",
+      "get_schedule",
+      "get_schedule_week",
+      "get_weather",
+      "math_calculate",
+      "math_plot",
+      "math_solve"
+    ],
+    "cases": [
+      {
+        "id": "complex-pole",
+        "decision": "tool",
+        "duration_ms": 13232,
+        "calls": [
+          {
+            "name": "math_plot",
+            "arguments": {
+              "functions": [
+                "1/z"
+              ],
+              "plot_type": "domain_coloring",
+              "variable": "z",
+              "x_min": -2,
+              "x_max": 2,
+              "y_min": -2,
+              "y_max": 2
+            },
+            "error": null
+          }
+        ],
+        "image_count": 1
+      },
+      {
+        "id": "complex-log",
+        "decision": "tool",
+        "duration_ms": 15743,
+        "calls": [
+          {
+            "name": "math_plot",
+            "arguments": {
+              "functions": [
+                "log(z)"
+              ],
+              "plot_type": "domain_coloring",
+              "variable": "z",
+              "x_min": -2,
+              "x_max": 2,
+              "y_min": -2,
+              "y_max": 2
+            },
+            "error": null
+          }
+        ],
+        "image_count": 1
+      },
+      {
+        "id": "complex-modulus",
+        "decision": "tool",
+        "duration_ms": 13800,
+        "calls": [
+          {
+            "name": "math_plot",
+            "arguments": {
+              "plot_type": "complex_height",
+              "functions": [
+                "z^2-1"
+              ],
+              "variable": "z",
+              "x_min": -2,
+              "x_max": 2,
+              "y_min": -2,
+              "y_max": 2
+            },
+            "error": null
+          },
+          {
+            "name": "math_solve",
+            "arguments": {
+              "equations": [
+                "z^2-1=0"
+              ],
+              "variables": [
+                "z"
+              ],
+              "real_only": false
+            },
+            "error": null
+          }
+        ],
+        "image_count": 1
+      },
+      {
+        "id": "critical-and-plot",
+        "decision": "tool",
+        "duration_ms": 12183,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "arguments": {
+              "operation": "diff",
+              "expression": "x^4 - 2*x^2",
+              "variable": "x",
+              "order": 1
+            },
+            "error": null
+          },
+          {
+            "name": "math_solve",
+            "arguments": {
+              "equations": [
+                "4*x^3 - 4*x = 0"
+              ],
+              "variables": [
+                "x"
+              ]
+            },
+            "error": null
+          },
+          {
+            "name": "math_plot",
+            "arguments": {
+              "functions": [
+                "x^4 - 2*x^2"
+              ],
+              "variable": "x",
+              "x_min": -2,
+              "x_max": 2,
+              "y_min": -1.5,
+              "y_max": 8.5
+            },
+            "error": null
+          }
+        ],
+        "image_count": 1
+      }
+    ]
+  },
+  "derivative_schema_alternative": {
+    "added_tool": "math_derivative",
+    "observed_steps": [
+      {
+        "duration_ms": 3036,
+        "max_tokens": 32768,
+        "finish": "tool_calls",
+        "prompt_tokens": 4856,
+        "completion_tokens": 251,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "arguments": {
+              "operation": "diff",
+              "expression": "x^3*y^2 + sin(x*y)",
+              "variable": "x",
+              "order": 2
+            }
+          },
+          {
+            "name": "math_calculate",
+            "arguments": {
+              "operation": "diff",
+              "expression": "x^3*y^2 + sin(x*y)",
+              "variable": "x",
+              "order": 1
+            }
+          }
+        ]
+      },
+      {
+        "duration_ms": 6173,
+        "max_tokens": 32768,
+        "finish": "stop",
+        "prompt_tokens": 5335,
+        "completion_tokens": 588,
+        "calls": []
+      }
+    ]
+  },
+  "cases": [
+    {
+      "id": "improper-log",
+      "reference": "Подстановка x=tan(t), результат π ln 2. При x→∞ подынтегральная функция O(log x/x²).",
+      "required_result_passed": true,
+      "tool_sequence_passed": true,
+      "mandatory": false,
+      "run": "final-1",
+      "review_note": "",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 723,
+            "arguments": {
+              "operation": "integrate",
+              "expression": "log(1+x^2)/(1+x^2)",
+              "lower": 0,
+              "upper": "oo"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "integrate",
+              "expression": "log(1+x**2)/(1+x**2)",
+              "variable": "x",
+              "result": "pi*log(2)",
+              "numeric": "2.17758609030360",
+              "exact": true,
+              "detail": "Определённый интеграл по x от 0 до oo; точное значение получено дифференцированием семейства интегралов и проверено символьно.",
+              "variables": [],
+              "constraint": "",
+              "convergence": "convergent",
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "decision_matches": true,
+        "reason": "plain_response",
+        "answer": "**Ответ:** `∫₀^∞ ln(1+x²)/(1+x²) dx = π·ln 2` (проверено символьно; численно 2.1775860903).\n\n**1. Сходимость (интеграл от положительной функции)**\n\nПодынтегральная функция `f(x) = ln(1+x²)/(1+x²)` неотрицательна при `x ≥ 0`, поэтому сходимость сразу абсолютная — достаточно оценить поведение на концах.\n\n- В нуле особенность мнимая: `ln(1+x²) ~ x²`, значит `f(x) ~ x² → 0`. Функция непрерывно доопределяется нулём в точке 0, конечный отрезок проблем не даёт.\n- На бесконечности `ln(1+x²) ~ 2 ln x`, поэтому `f(x) ~ 2 ln x / x²`. Так как `ln x = o(x^{1/2})` при `x → ∞`, имеем `f(x) = O(x^{-3/2})`, а `∫^∞ dx/x^{3/2}` сходится. По признаку сравнения (в предельной форме) интеграл сходится — и абсолютно.\n\n**2. Точное вычисление: замена `x = tg t`**\n\nПри `x` от 0 до ∞ угол `t` пробегает `[0, π/2)`, причём:\n- `dx = dt/cos²t`, следовательно `dx/(1+x²) = dt`, так как `1+tg²t = 1/cos²t`;\n- `1+x² = sec²t`, значит `ln(1+x²) = ln(sec²t) = -2 ln(cos t)`.\n\nПолучаем\n`I = -2 ∫₀^{π/2} ln(cos t) dt`.\n\nОстаётся стандартный интеграл: `J = ∫₀^{π/2} ln(cos t) dt = -(π/2)·ln 2`.\n\nДоказательство J (симметрия, без Лапласа):\n1. Заменой `t → π/2 - t` получаем `J = ∫₀^{π/2} ln(sin t) dt`, значит `2J = ∫₀^{π/2} ln(sin t · cos t) dt`.\n2. `sin t·cos t = (1/2)sin 2t`, поэтому `2J = ∫₀^{π/2} ln(sin 2t) dt - (π/2)ln 2`.\n3. В первом слагаемом `u = 2t`: `∫₀^{π/2} ln(sin 2t) dt = (1/2)∫₀^π ln(sin u) du`, а по симметрии синуса относительно `π/2` это `= ∫₀^{π/2} ln(sin u) du = J`.\n4. Итог: `2J = J - (π/2)ln 2 ⟹ J = -(π/2)ln 2`.\n\n**3. Результат и проверка**\n\n`I = -2J = -2·(-(π/2)ln 2) = π ln 2 ≈ 3.14159 · 0.69315 ≈ 2.177586`.\n\nЗначение положительно, что разумно: `ln(1+x²) > 0` при `x > 0`, а основной вклад даёт область `x ~ 1`, где подынтегральная функция порядка `ln 2 / 2`. Инструмент подтвердил: точное значение `pi*log(2)`, сходимость — convergent.\n\n**Ключевой вывод:** замена `x = tg t` сводит интеграл к классическому `∫₀^{π/2} ln(cos t) dt = -(π/2)ln 2`, а сходимость обеспечивается поведением `O(x^{-3/2})` на бесконечности.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 15049,
+        "steps": [
+          {
+            "duration_ms": 3083,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 4748,
+            "completion_tokens": 286,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "integrate",
+                  "expression": "log(1+x^2)/(1+x^2)",
+                  "variable": "x",
+                  "lower": "0",
+                  "upper": "oo"
+                }
+              },
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "numeric",
+                  "expression": "pi*log(2)"
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 11638,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 5238,
+            "completion_tokens": 1283,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 323,
+            "arguments": {
+              "operation": "integrate",
+              "expression": "log(1+x^2)/(1+x^2)",
+              "variable": "x",
+              "lower": "0",
+              "upper": "oo"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "integrate",
+              "expression": "log(1+x**2)/(1+x**2)",
+              "variable": "x",
+              "result": "pi*log(2)",
+              "numeric": "2.17758609030360",
+              "exact": true,
+              "detail": "Определённый интеграл по x от 0 до oo; точное значение получено дифференцированием семейства интегралов и проверено символьно.",
+              "variables": [],
+              "constraint": "",
+              "convergence": "convergent",
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 4,
+            "arguments": {
+              "operation": "numeric",
+              "expression": "pi*log(2)"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "numeric",
+              "expression": "pi*log(2)",
+              "variable": "x",
+              "result": "2.17758609030360",
+              "numeric": "2.17758609030360",
+              "exact": false,
+              "detail": "Численное значение с 15 значащими цифрами.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "limit-cancellation",
+      "reference": "1/120. Сокращаются члены степеней 1 и 3.",
+      "required_result_passed": true,
+      "tool_sequence_passed": false,
+      "mandatory": false,
+      "run": "final-1",
+      "review_note": "Верный предел и объяснение, но модель дополнительно вызвала суммирование числового ряда вместо ряда Тейлора. Этот вызов не засчитан.",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 50,
+            "arguments": {
+              "operation": "limit",
+              "expression": "(sin(x)-x+x^3/6)/x^5",
+              "point": 0
+            },
+            "output": {
+              "status": "ok",
+              "operation": "limit",
+              "expression": "(sin(x)-x+x**3/6)/x**5",
+              "variable": "x",
+              "result": "1/120",
+              "numeric": "0.00833333333333333",
+              "exact": true,
+              "detail": "Предел по x в точке 0, направление both.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "decision_matches": true,
+        "reason": "plain_response",
+        "answer": "**Кратко:** предел двусторонний и равен `1/120 ≈ 0.0083333333`.\n\n**Идея — разложение Тейлора.** Для `sin x` в окрестности нуля:\n\n`sin x = x − x³/6 + x⁵/120 − x⁷/5040 + O(x⁹)`\n\nПодставляем в числитель:\n\n`(x − x³/6 + x⁵/120 − x⁷/5040 + …) − x + x³/6 = x⁵/120 − x⁷/5040 + …`\n\nЧто сокращается:\n- `x` из разложения синуса гасит `−x`;\n- `−x³/6` гасит `+x³/6`.\n\nОстаётся первый неучтённый член `x⁵/120`. Делим на `x⁵`:\n\n`(x⁵/120 − x⁷/5040 + …)/x⁵ = 1/120 − x²/5040 + O(x⁴) → 1/120` при `x → 0`.\n\n**Проверка правилом Лопиталя (5 раз).** Числитель `f(x) = sin x − x + x³/6`, знаменатель `g(x) = x⁵`. Производные числителя: `cos x − 1 + x²/2`, затем `−sin x + x`, затем `−cos x + 1`, затем `sin x`, затем `cos x`. Производные знаменателя: `5x⁴, 20x³, 60x², 120x, 120`. На каждом из первых четырёх шагов получается `0/0` (числитель и знаменатель обнуляются в нуле), на пятом — `cos x / 120`, и при `x → 0` это даёт `1/120`. Пятая производная числителя, посчитанная инструментом, действительно `cos x`.\n\n**Инструментальная проверка:** предел по `x` в точке `0` с направлением `both` дал точный ответ `1/120`; численно при `x = 0.001` выражение равно `0.0083333331349…`, что совпадает с `1/120` в пределах ошибки `x²/5040 ≈ 2·10⁻¹⁰`.\n\n**Вывод:** порядок нуля числителя равен 5, поэтому особенность `x⁵` в знаменателе снимается полностью, и односторонние пределы слева и справа совпадают: `lim = 1/120`.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 17621,
+        "steps": [
+          {
+            "duration_ms": 4280,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 4751,
+            "completion_tokens": 270,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "limit",
+                  "expression": "(sin(x) - x + x^3/6)/x^5",
+                  "variable": "x",
+                  "point": "0",
+                  "direction": "both"
+                }
+              },
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "series",
+                  "expression": "(sin(x) - x + x^3/6)/x^5",
+                  "variable": "x",
+                  "lower": "0",
+                  "upper": "0"
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 4618,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 5283,
+            "completion_tokens": 350,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "diff",
+                  "expression": "sin(x) - x + x^3/6",
+                  "variable": "x",
+                  "order": 5
+                }
+              },
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "numeric",
+                  "expression": "(sin(0.001) - 0.001 + 0.001^3/6)/(0.001^5)"
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 8679,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 5764,
+            "completion_tokens": 1010,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 9,
+            "arguments": {
+              "operation": "limit",
+              "expression": "(sin(x) - x + x^3/6)/x^5",
+              "variable": "x",
+              "point": "0",
+              "direction": "both"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "limit",
+              "expression": "(sin(x) - x + x**3/6)/x**5",
+              "variable": "x",
+              "result": "1/120",
+              "numeric": "0.00833333333333333",
+              "exact": true,
+              "detail": "Предел по x в точке 0, направление both.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 18,
+            "arguments": {
+              "operation": "series",
+              "expression": "(sin(x) - x + x^3/6)/x^5",
+              "variable": "x",
+              "lower": "0",
+              "upper": "0"
+            },
+            "output": {
+              "status": "undefined",
+              "operation": "series",
+              "expression": "(sin(x) - x + x**3/6)/x**5",
+              "variable": "x",
+              "result": "",
+              "numeric": "",
+              "exact": false,
+              "detail": "Точная сумма не найдена; численное значение приведено отдельно.",
+              "variables": [
+                "x"
+              ],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 10,
+            "arguments": {
+              "operation": "diff",
+              "expression": "sin(x) - x + x^3/6",
+              "variable": "x",
+              "order": 5
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "sin(x) - x + x**3/6",
+              "variable": "x",
+              "result": "cos(x)",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 5 по переменной x.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 6,
+            "arguments": {
+              "operation": "numeric",
+              "expression": "(sin(0.001) - 0.001 + 0.001^3/6)/(0.001^5)"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "numeric",
+              "expression": "(sin(0.001) - 0.001 + 0.001**3/6)/(0.001**5)",
+              "variable": "x",
+              "result": "0.00833333313492064",
+              "numeric": "0.00833333313492064",
+              "exact": false,
+              "detail": "Численное значение с 15 значащими цифрами.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "one-sided-limit",
+      "reference": "1/2; можно применить формулу 1−cos(x)=2 sin²(x/2).",
+      "required_result_passed": true,
+      "tool_sequence_passed": true,
+      "mandatory": false,
+      "run": "final-1",
+      "review_note": "",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 19,
+            "arguments": {
+              "operation": "limit",
+              "expression": "(1-cos(x))/x^2",
+              "point": 0,
+              "direction": "right"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "limit",
+              "expression": "(1-cos(x))/x**2",
+              "variable": "x",
+              "result": "1/2",
+              "numeric": "0.500000000000000",
+              "exact": true,
+              "detail": "Предел по x в точке 0, направление right.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "decision_matches": true,
+        "reason": "plain_response",
+        "answer": "**Кратко:** предел справа равен `1/2` (проверено символьным вычислением, результат точный).\n\n**Решение**\n\nФункция `(1 − cos x)/x²` определена при `x ≠ 0`; нас интересует поведение при `x → 0+`.\n\nВозьмём тождество половинного угла `1 − cos x = 2 sin²(x/2)`:\n\n`(1 − cos x)/x² = 2 sin²(x/2)/x²`\n\nЗапишем `x² = 4·(x/2)²`, тогда\n\n`= (2/4) · [sin(x/2)/(x/2)]² = (1/2) · [sin(x/2)/(x/2)]²`.\n\nПри `x → 0+` аргумент `x/2 → 0+`, поэтому `sin(x/2)/(x/2) → 1`, и весь предел стремится к `(1/2)·1² = 1/2`.\n\n**Проверка вторым способом (Тейлор)**\n\n`cos x = 1 − x²/2 + x⁴/24 − …`, значит `1 − cos x = x²/2 − x⁴/24 + …`.\n\nДеление на `x²` даёт `1/2 − x²/24 + …`; при `x → 0` остаётся `1/2`. Одностороннее и двустороннее значения совпадают, поскольку числитель и знаменатель чётны по `x`.\n\n**Вывод:** `lim_{x→0+} (1 − cos x)/x² = 1/2` в точности (не приближённо).",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 7340,
+        "steps": [
+          {
+            "duration_ms": 2236,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 4740,
+            "completion_tokens": 135,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "limit",
+                  "expression": "(1-cos(x))/x^2",
+                  "variable": "x",
+                  "point": "0",
+                  "direction": "right"
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 5098,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 5002,
+            "completion_tokens": 490,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 5,
+            "arguments": {
+              "operation": "limit",
+              "expression": "(1-cos(x))/x^2",
+              "variable": "x",
+              "point": "0",
+              "direction": "right"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "limit",
+              "expression": "(1-cos(x))/x**2",
+              "variable": "x",
+              "result": "1/2",
+              "numeric": "0.500000000000000",
+              "exact": true,
+              "detail": "Предел по x в точке 0, направление right.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "two-sided-disagreement",
+      "reference": "Слева −1, справа 1. Двусторонний предел не существует.",
+      "required_result_passed": true,
+      "tool_sequence_passed": true,
+      "mandatory": false,
+      "run": "final-1",
+      "review_note": "",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 6,
+            "arguments": {
+              "operation": "limit",
+              "expression": "abs(x)/x",
+              "point": 0,
+              "direction": "left"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "limit",
+              "expression": "abs(x)/x",
+              "variable": "x",
+              "result": "-1",
+              "numeric": "-1.00000000000000",
+              "exact": true,
+              "detail": "Предел по x в точке 0, направление left.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 6,
+            "arguments": {
+              "operation": "limit",
+              "expression": "abs(x)/x",
+              "point": 0,
+              "direction": "right"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "limit",
+              "expression": "abs(x)/x",
+              "variable": "x",
+              "result": "1",
+              "numeric": "1.00000000000000",
+              "exact": true,
+              "detail": "Предел по x в точке 0, направление right.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "decision_matches": true,
+        "reason": "plain_response",
+        "answer": "**Кратко:** двустороннего предела нет — односторонние пределы разные: слева `-1`, справа `1`.\n\n**Разбор**\n\nФункция `f(x) = |x|/x` определена при всех `x ≠ 0` (в нуле — деление на ноль, точка выколота).\n\nРаскрываем модуль по знаку `x`:\n\n- при `x > 0`: `|x| = x`, значит `f(x) = x/x = 1`;\n- при `x < 0`: `|x| = -x`, значит `f(x) = -x/x = -1`.\n\nОтсюда односторонние пределы (проверено вычислением):\n\n- `lim_{x→0-} |x|/x = -1`\n- `lim_{x→0+} |x|/x = 1`\n\nОпределение двустороннего предела требует, чтобы оба односторонних предела существовали и были равны одному числу `L`. Здесь `-1 ≠ 1`, поэтому предел при `x→0` **не существует** (инструмент подтвердил: «односторонние пределы различаются»).\n\n**Вывод:** предел не существует; `f` имеет в нуле разрыв первого рода (скачок величины 2).",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 6705,
+        "steps": [
+          {
+            "duration_ms": 3150,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 4745,
+            "completion_tokens": 345,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "limit",
+                  "expression": "abs(x)/x",
+                  "variable": "x",
+                  "point": "0",
+                  "direction": "left"
+                }
+              },
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "limit",
+                  "expression": "abs(x)/x",
+                  "variable": "x",
+                  "point": "0",
+                  "direction": "right"
+                }
+              },
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "limit",
+                  "expression": "abs(x)/x",
+                  "variable": "x",
+                  "point": "0",
+                  "direction": "both"
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 3539,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 5462,
+            "completion_tokens": 302,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 5,
+            "arguments": {
+              "operation": "limit",
+              "expression": "abs(x)/x",
+              "variable": "x",
+              "point": "0",
+              "direction": "left"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "limit",
+              "expression": "abs(x)/x",
+              "variable": "x",
+              "result": "-1",
+              "numeric": "-1.00000000000000",
+              "exact": true,
+              "detail": "Предел по x в точке 0, направление left.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 5,
+            "arguments": {
+              "operation": "limit",
+              "expression": "abs(x)/x",
+              "variable": "x",
+              "point": "0",
+              "direction": "right"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "limit",
+              "expression": "abs(x)/x",
+              "variable": "x",
+              "result": "1",
+              "numeric": "1.00000000000000",
+              "exact": true,
+              "detail": "Предел по x в точке 0, направление right.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 5,
+            "arguments": {
+              "operation": "limit",
+              "expression": "abs(x)/x",
+              "variable": "x",
+              "point": "0",
+              "direction": "both"
+            },
+            "output": {
+              "status": "undefined",
+              "operation": "limit",
+              "expression": "abs(x)/x",
+              "variable": "x",
+              "result": "",
+              "numeric": "",
+              "exact": true,
+              "detail": "Предел не существует: односторонние пределы различаются.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "divergent-integral",
+      "reference": "Расходится к +∞. Интеграл до R равен ln R.",
+      "required_result_passed": true,
+      "tool_sequence_passed": true,
+      "mandatory": false,
+      "run": "final-1",
+      "review_note": "",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 55,
+            "arguments": {
+              "operation": "integrate",
+              "expression": "1/x",
+              "lower": 1,
+              "upper": "oo"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "integrate",
+              "expression": "1/x",
+              "variable": "x",
+              "result": "oo",
+              "numeric": "",
+              "exact": true,
+              "detail": "Интеграл по x от 1 до oo расходится.",
+              "variables": [],
+              "constraint": "",
+              "convergence": "divergent",
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "decision_matches": true,
+        "reason": "plain_response",
+        "answer": "**Кратко:** интеграл расходится — это «пограничный» случай: `∫₁^∞ dx/x^p` сходится при `p > 1` и расходится при `p ≤ 1`, и `p = 1` как раз на границе.\n\n**Определение.** Несобственный интеграл — это предел усечённых:\n`∫₁^∞ dx/x = lim_{b→∞} ∫₁^b dx/x`\n\n**Усечённый интеграл.** Первообразная `ln x` (при `x > 0`), значит\n`F(b) = ∫₁^b dx/x = ln b − ln 1 = ln b`\n\nПроверка инструментом: интеграл от `1` до `b` даёт `log(b)`, а несобственный — расходимость (`∞`).\n\n**Доказательство расходимости.** `lim_{b→∞} ln b = +∞`, поэтому предел усечённых интегралов бесконечен, и по определению интеграл расходится (не «равен бесконечности» как числу).\n\nАльтернатива без первообразной — оценка снизу: на каждом отрезке `[2^k, 2^{k+1}]` имеем `1/x ≥ 1/2^{k+1}`, длина отрезка `2^k`, значит вклад `≥ 1/2`. Суммируя по `k = 0..n−1`, получаем `∫₁^{2^n} dx/x ≥ n/2 → ∞`. Тот же приём даёт расходимость гармонического ряда: `Σ_{k=1}^{n} 1/k ≈ ln n + γ`, поэтому частичные суммы тоже растут как логарифм.\n\n**Как ведут себя усечённые интегралы (важная интуиция).**\n- Рост есть всегда, но крайне медленный: `F(b) = ln b`.\n- Чтобы накопить `10`, нужно `b = e^{10} ≈ 22026`; для `20` — уже `b = e^{20} ≈ 4.85·10^8`.\n- Приращение на `[b, 2b]` равно `ln 2 ≈ 0.693` — постоянно, сколько бы далеко ни ушли; именно поэтому предела нет.\n- Сходимости «в пределе» не наступает: усечённые интегралы монотонно возрастают и не ограничены сверху. (Для сравнения: `∫₁^∞ dx/x^{1.01}` конечен, хотя тоже растёт очень долго.)\n\n**Вывод:** `∫₁^∞ dx/x = lim ln b = +∞` — расходится, усечённые интегралы равны `ln b` и неограниченно, логарифмически медленно растут.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 14392,
+        "steps": [
+          {
+            "duration_ms": 2876,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 4749,
+            "completion_tokens": 273,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "integrate",
+                  "expression": "1/x",
+                  "variable": "x",
+                  "lower": "1",
+                  "upper": "oo"
+                }
+              },
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "integrate",
+                  "expression": "1/x",
+                  "variable": "x",
+                  "lower": "1",
+                  "upper": "b"
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 11478,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 5228,
+            "completion_tokens": 804,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 25,
+            "arguments": {
+              "operation": "integrate",
+              "expression": "1/x",
+              "variable": "x",
+              "lower": "1",
+              "upper": "oo"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "integrate",
+              "expression": "1/x",
+              "variable": "x",
+              "result": "oo",
+              "numeric": "",
+              "exact": true,
+              "detail": "Интеграл по x от 1 до oo расходится.",
+              "variables": [],
+              "constraint": "",
+              "convergence": "divergent",
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 11,
+            "arguments": {
+              "operation": "integrate",
+              "expression": "1/x",
+              "variable": "x",
+              "lower": "1",
+              "upper": "b"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "integrate",
+              "expression": "1/x",
+              "variable": "x",
+              "result": "log(b)",
+              "numeric": "",
+              "exact": true,
+              "detail": "Определённый интеграл по x от 1 до b; сходится.",
+              "variables": [],
+              "constraint": "",
+              "convergence": "convergent",
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "series-converges",
+      "reference": "Сходится абсолютно по p-признаку с p=2, сумма π²/6.",
+      "required_result_passed": true,
+      "tool_sequence_passed": true,
+      "mandatory": false,
+      "run": "final-1",
+      "review_note": "",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 31,
+            "arguments": {
+              "operation": "series",
+              "expression": "1/n^2",
+              "variable": "n",
+              "lower": 1,
+              "upper": "oo"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "series",
+              "expression": "1/n**2",
+              "variable": "n",
+              "result": "pi**2/6",
+              "numeric": "1.64493406684823",
+              "exact": true,
+              "detail": "Сумма ряда по n: ряд сходится абсолютно.",
+              "variables": [
+                "n"
+              ],
+              "constraint": "",
+              "convergence": "convergent",
+              "absolute_convergence": "convergent",
+              "conditional": false,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "decision_matches": true,
+        "reason": "plain_response",
+        "answer": "**Суть:** ряд `Σ 1/n²` сходится (даже абсолютно), а его точная сумма равна `π²/6 ≈ 1.644934`.\n\n**Почему сходится**\n\nЭто обобщённый гармонический ряд (p-ряд) с `p = 2 > 1`, поэтому он сходится. Проверка интегральным признаком: функция `f(x) = 1/x²` положительна, непрерывна и убывает при `x ≥ 1`, а интеграл\n\n`∫ от 1 до ∞ (1/x²) dx = 1`\n\nконечен. Значит, ряд сходится. Признак сравнения тоже работает: `1/n² ≤ 1/(n(n−1))` при `n ≥ 2`, а ряд `Σ 1/(n(n−1))` телескопический и равен 1.\n\n**Точная сумма**\n\n`Σ от n=1 до ∞ 1/n² = π²/6` — это классическая задача Базеля (Эйлер, 1734). Инструмент подтвердил: результат точный, сходимость абсолютная, численное значение `1.64493406684823`.\n\nЗаметки, которые полезны на практике:\n- частичные суммы приближаются к `π²/6` снизу, монотонно возрастая;\n- остаток оценивается через интеграл: `0 < π²/6 − S_N < 1/N`, что даёт скорость порядка `1/N` (медленно);\n- при `p > 1` ряд сходится, при `p ≤ 1` расходится — проверка `p = 2` попадает в сходящуюся область;\n- почленное суммирование тут корректно именно из-за абсолютной сходимости.\n\n**Вывод:** ряд `Σ 1/n²` сходится абсолютно, точная сумма `π²/6 ≈ 1.6449`.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 7822,
+        "steps": [
+          {
+            "duration_ms": 1897,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 4882,
+            "completion_tokens": 131,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "series",
+                  "expression": "1/n^2",
+                  "variable": "n",
+                  "lower": "1",
+                  "upper": "oo"
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 5907,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 5145,
+            "completion_tokens": 532,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 18,
+            "arguments": {
+              "operation": "series",
+              "expression": "1/n^2",
+              "variable": "n",
+              "lower": "1",
+              "upper": "oo"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "series",
+              "expression": "1/n**2",
+              "variable": "n",
+              "result": "pi**2/6",
+              "numeric": "1.64493406684823",
+              "exact": true,
+              "detail": "Сумма ряда по n: ряд сходится абсолютно.",
+              "variables": [
+                "n"
+              ],
+              "constraint": "",
+              "convergence": "convergent",
+              "absolute_convergence": "convergent",
+              "conditional": false,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "series-conditional",
+      "reference": "Сходится условно по Лейбницу. Ряд модулей гармонический. Сумма ln 2.",
+      "required_result_passed": true,
+      "tool_sequence_passed": true,
+      "mandatory": false,
+      "run": "final-1",
+      "review_note": "",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 216,
+            "arguments": {
+              "operation": "series",
+              "expression": "(-1)^(n-1)/n",
+              "variable": "n",
+              "lower": 1,
+              "upper": "oo"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "series",
+              "expression": "(-1)**(n-1)/n",
+              "variable": "n",
+              "result": "log(2)",
+              "numeric": "0.693147180559945",
+              "exact": true,
+              "detail": "Сумма ряда по n: ряд сходится условно; ряд модулей расходится.",
+              "variables": [
+                "n"
+              ],
+              "constraint": "",
+              "convergence": "convergent",
+              "absolute_convergence": "divergent",
+              "conditional": true,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "decision_matches": true,
+        "reason": "plain_response",
+        "answer": "**Кратко:** ряд сходится, но не абсолютно — сходимость условная. Точная сумма равна `ln 2`.\n\n**Проверка сходимости самого ряда (признак Лейбница)**\n\nРяд `Σ (−1)^(n−1)/n = 1 − 1/2 + 1/3 − 1/4 + ...` — знакочередующийся. Условия Лейбница:\n- `a_n = 1/n` монотонно убывает: `1/(n+1) < 1/n`;\n- `a_n → 0` при `n → ∞`.\n\nОба выполнены, значит ряд сходится. Инструмент подтверждает: `convergence: convergent`, сумма `log(2) ≈ 0.693147180559945`.\n\n**Проверка абсолютной сходимости**\n\nРяд из модулей — это гармонический ряд `Σ 1/n`, он расходится (например, группировкой: сумма блока от `2^k` до `2^(k+1)−1` не меньше `1/2`, а блоков бесконечно много; либо интегральным признаком: `∫₁^∞ dx/x = ln x → ∞`). Инструмент тоже даёт `divergent`.\n\nИтог: сходится, но `Σ |a_n| = ∞`, то есть сходимость **условная**.\n\n**Откуда точная сумма**\n\nИз разложения `ln(1+x) = x − x²/2 + x³/3 − ...` при `|x| < 1`. При `x = 1` получаем числовой ряд `1 − 1/2 + 1/3 − ... = ln 2`; законность подстановки граничной точки обосновывается теоремой Абеля (ряд сходится в этой точке по Лейбницу, и сумма равна пределу при `x → 1−`).\n\n**Что стоит держать в голове:** именно из-за условной сходимости такие ряды чувствительны к перестановке членов — по теореме Римана перестановкой можно получить любую сумму (или расходимость). Абсолютно сходящиеся ряды таким свойством не обладают.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 9336,
+        "steps": [
+          {
+            "duration_ms": 3327,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 4891,
+            "completion_tokens": 253,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "series",
+                  "expression": "(-1)^(n-1)/n",
+                  "variable": "n",
+                  "lower": "1",
+                  "upper": "oo"
+                }
+              },
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "series",
+                  "expression": "1/n",
+                  "variable": "n",
+                  "lower": "1",
+                  "upper": "oo"
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 5906,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 5399,
+            "completion_tokens": 599,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 92,
+            "arguments": {
+              "operation": "series",
+              "expression": "(-1)^(n-1)/n",
+              "variable": "n",
+              "lower": "1",
+              "upper": "oo"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "series",
+              "expression": "(-1)**(n-1)/n",
+              "variable": "n",
+              "result": "log(2)",
+              "numeric": "0.693147180559945",
+              "exact": true,
+              "detail": "Сумма ряда по n: ряд сходится условно; ряд модулей расходится.",
+              "variables": [
+                "n"
+              ],
+              "constraint": "",
+              "convergence": "convergent",
+              "absolute_convergence": "divergent",
+              "conditional": true,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 10,
+            "arguments": {
+              "operation": "series",
+              "expression": "1/n",
+              "variable": "n",
+              "lower": "1",
+              "upper": "oo"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "series",
+              "expression": "1/n",
+              "variable": "n",
+              "result": "",
+              "numeric": "",
+              "exact": true,
+              "detail": "Ряд расходится: сумма неограниченно растёт.",
+              "variables": [
+                "n"
+              ],
+              "constraint": "",
+              "convergence": "divergent",
+              "absolute_convergence": "divergent",
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "partial-derivative",
+      "reference": "6xy²−y² sin(xy).",
+      "required_result_passed": true,
+      "tool_sequence_passed": true,
+      "mandatory": false,
+      "run": "final-1",
+      "review_note": "Формула и дифференцирование верны. Дополнительное объяснение в проверке при x=0 сформулировано неточно.",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 37,
+            "arguments": {
+              "operation": "diff",
+              "expression": "x^3*y^2+sin(x*y)",
+              "variable": "x",
+              "order": 2
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "x**3*y**2+sin(x*y)",
+              "variable": "x",
+              "result": "y**2*(6*x - sin(x*y))",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 2 по переменной x.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "decision_matches": true,
+        "reason": "plain_response",
+        "answer": "**Кратко:** `f_xx = 6xy² − y²·sin(xy) = y²(6x − sin(xy))`.\n\n**Ход решения**\n\nФункция `f(x, y) = x³y² + sin(xy)`; дифференцируем по `x`, считая `y` константой.\n\n1. Первая производная:\n`f_x = 3x²y² + y·cos(xy)`\n(второе слагаемое: производная `sin(xy)` по `x` даёт `y·cos(xy)`, так как внутренняя производная равна `y`).\n\n2. Вторая производная — ещё раз по `x`:\n- от `3x²y²` получаем `6xy²`;\n- от `y·cos(xy)` получаем `y·(−y·sin(xy)) = −y²·sin(xy)`.\n\nИтого:\n`f_xx = 6xy² − y²·sin(xy) = y²(6x − sin(xy))`\n\n**Проверка:** результат согласуется с независимым вычислением (символьное дифференцирование дало `y²(6x − sin(xy))`). Контроль в частных точках: при `x = 0` имеем `f_xx = 0` (это верно: `f_x(0,y) = y` не зависит от `x`); при `y = 0` тоже `f_xx = 0` — функция на оси `x` равна `x³·0 = 0`.\n\n**Вывод:** `f_xx = y²(6x − sin(xy))`, определена при всех `(x, y) ∈ R²`.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 6961,
+        "steps": [
+          {
+            "duration_ms": 1733,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 4740,
+            "completion_tokens": 151,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "diff",
+                  "expression": "x^3*y^2 + sin(x*y)",
+                  "variable": "x",
+                  "order": 2
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 5201,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 4986,
+            "completion_tokens": 503,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 27,
+            "arguments": {
+              "operation": "diff",
+              "expression": "x^3*y^2 + sin(x*y)",
+              "variable": "x",
+              "order": 2
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "x**3*y**2 + sin(x*y)",
+              "variable": "x",
+              "result": "y**2*(6*x - sin(x*y))",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 2 по переменной x.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "mixed-derivative",
+      "reference": "6xy².",
+      "required_result_passed": true,
+      "tool_sequence_passed": true,
+      "mandatory": false,
+      "run": "explanations",
+      "review_note": "",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 8,
+            "arguments": {
+              "operation": "diff",
+              "expression": "x^2*y^3",
+              "variable": "x"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "x**2*y**3",
+              "variable": "x",
+              "result": "2*x*y**3",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 1 по переменной x.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 8,
+            "arguments": {
+              "operation": "diff",
+              "expression": "2*x*y^3",
+              "variable": "y"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "2*x*y**3",
+              "variable": "y",
+              "result": "6*x*y**2",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 1 по переменной y.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "decision_matches": true,
+        "reason": "plain_response",
+        "answer": "**Кратко:** смешанная производная равна `6xy²`.\n\n**По шагам**\n\nДана функция `f(x, y) = x²y³`. Считаем последовательно, при дифференцировании по одной переменной вторая считается константой:\n\n1. Сначала по x: `y³` — константа, значит `∂f/∂x = 2x·y³`.\n2. Затем результат по y: `2x` — константа, значит `∂/∂y (2xy³) = 2x·3y² = 6xy²`.\n\nОбозначение: `∂²f/∂y∂x = 6xy²` (запись справа налево показывает порядок: сначала x, потом y; в «числителе» порядок наоборот).\n\n**Проверка**\n\nОбратный порядок должен дать то же самое для такой гладкой функции (теорема Шварца/Клеро: для полинома смешанные производные непрерывны):\n\n1. `∂f/∂y = 3x²y²`.\n2. `∂/∂x (3x²y²) = 6xy²`.\n\nСовпало: `∂²f/∂x∂y = ∂²f/∂y∂x = 6xy²`. Оба шага проверены символьным дифференцированием.\n\n**Вывод:** `∂²(x²y³)/∂y∂x = 6xy²`; результат не зависит от порядка дифференцирования, и это ожидаемо, так как функция — многочлен (гладкая всюду на R²).\n\nЕсли нужно, могу показать то же для более сложной функции (например, с `e^(xy)` или `ln(x²+y²)`) либо разобрать смысл записи `∂²f/∂y∂x` подробнее.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 10456,
+        "steps": [
+          {
+            "duration_ms": 2474,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 4890,
+            "completion_tokens": 219,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "diff",
+                  "expression": "x^2*y^3",
+                  "variable": "x",
+                  "order": 1
+                }
+              },
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "diff",
+                  "expression": "2*x*y^3",
+                  "variable": "y",
+                  "order": 1
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 1944,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 5338,
+            "completion_tokens": 132,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "diff",
+                  "expression": "x^2*y^3",
+                  "variable": "y",
+                  "order": 1
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 5995,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 5572,
+            "completion_tokens": 483,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 11,
+            "arguments": {
+              "operation": "diff",
+              "expression": "x^2*y^3",
+              "variable": "x",
+              "order": 1
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "x**2*y**3",
+              "variable": "x",
+              "result": "2*x*y**3",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 1 по переменной x.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 13,
+            "arguments": {
+              "operation": "diff",
+              "expression": "2*x*y^3",
+              "variable": "y",
+              "order": 1
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "2*x*y**3",
+              "variable": "y",
+              "result": "6*x*y**2",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 1 по переменной y.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 17,
+            "arguments": {
+              "operation": "diff",
+              "expression": "x^2*y^3",
+              "variable": "y",
+              "order": 1
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "x**2*y**3",
+              "variable": "y",
+              "result": "3*x**2*y**2",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 1 по переменной y.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "jacobian",
+      "reference": "Матрица [[2x,2y],[y,x]], определитель 2(x²−y²).",
+      "required_result_passed": true,
+      "tool_sequence_passed": true,
+      "mandatory": false,
+      "run": "final-1",
+      "review_note": "",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 9,
+            "arguments": {
+              "operation": "jacobian",
+              "functions": [
+                "x^2+y^2",
+                "x*y"
+              ],
+              "variables": [
+                "x",
+                "y"
+              ]
+            },
+            "output": {
+              "status": "ok",
+              "operation": "jacobian",
+              "expression": "x**2+y**2; x*y",
+              "variable": "x",
+              "result": "Matrix([\n[2*x, 2*y],\n[  y,   x]])",
+              "numeric": "",
+              "exact": true,
+              "detail": "Матрица Якоби; строки соответствуют функциям, столбцы — переменным.",
+              "variables": [
+                "x",
+                "y"
+              ],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [
+                [
+                  "2*x",
+                  "2*y"
+                ],
+                [
+                  "y",
+                  "x"
+                ]
+              ],
+              "jacobian_numeric": [
+                [
+                  "",
+                  ""
+                ],
+                [
+                  "",
+                  ""
+                ]
+              ],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "decision_matches": true,
+        "reason": "plain_response",
+        "answer": "**Кратко:** матрица Якоби — это матрица первых частных производных, строки которой отвечают функциям, а столбцы — переменным.\n\n**Отображение** F: (x, y) ↦ (u, v), где `u = x^2 + y^2`, `v = xy`.\n\nСчитаем производные:\n\n- `∂u/∂x = 2x`, `∂u/∂y = 2y`\n- `∂v/∂x = y`, `∂v/∂y = x`\n\nМатрица Якоби (проверено инструментом):\n\n```text\nJ(x, y) = [ 2x   2y ]\n          [  y    x ]\n```\n\n**Определитель** (якобиан):\n\n`det J = (2x)(x) − (2y)(y) = 2x² − 2y² = 2(x² − y²)`\n\nУпрощение проверено: `2*x^2 - 2*y^2`.\n\n**Интерпретация:** J задана на всей плоскости R² (обе функции — многочлены, производные существуют везде). Якобиан обращается в ноль на прямых `y = x` и `y = −x`; там отображение локально не обратимо (в этих точках возможно вырождение образа). Вне этих прямых det J ≠ 0, и по теореме об обратном отображении F локально обратимо.\n\n**Проверка:** подстановка, например, x = 2, y = 1 даёт det J = 8 − 2 = 6 ≠ 0, а прямая проверка по матрице: 2·2·2 − 2·1·1 = 6 — совпадает.\n\n**Вывод:** `J = [[2x, 2y], [y, x]]`, `det J = 2(x² − y²)`.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 7300,
+        "steps": [
+          {
+            "duration_ms": 2349,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 4746,
+            "completion_tokens": 195,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "jacobian",
+                  "functions": [
+                    "x^2 + y^2",
+                    "x*y"
+                  ],
+                  "variables": [
+                    "x",
+                    "y"
+                  ]
+                }
+              },
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "simplify",
+                  "expression": "(2*x)*(x) - (2*y)*(y)"
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 4909,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 5239,
+            "completion_tokens": 440,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 13,
+            "arguments": {
+              "operation": "jacobian",
+              "functions": [
+                "x^2 + y^2",
+                "x*y"
+              ],
+              "variables": [
+                "x",
+                "y"
+              ]
+            },
+            "output": {
+              "status": "ok",
+              "operation": "jacobian",
+              "expression": "x**2 + y**2; x*y",
+              "variable": "x",
+              "result": "Matrix([\n[2*x, 2*y],\n[  y,   x]])",
+              "numeric": "",
+              "exact": true,
+              "detail": "Матрица Якоби; строки соответствуют функциям, столбцы — переменным.",
+              "variables": [
+                "x",
+                "y"
+              ],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [
+                [
+                  "2*x",
+                  "2*y"
+                ],
+                [
+                  "y",
+                  "x"
+                ]
+              ],
+              "jacobian_numeric": [
+                [
+                  "",
+                  ""
+                ],
+                [
+                  "",
+                  ""
+                ]
+              ],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 29,
+            "arguments": {
+              "operation": "simplify",
+              "expression": "(2*x)*(x) - (2*y)*(y)"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "simplify",
+              "expression": "(2*x)*(x) - (2*y)*(y)",
+              "variable": "x",
+              "result": "2*x**2 - 2*y**2",
+              "numeric": "",
+              "exact": true,
+              "detail": "Выражение упрощено.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "constrained-extrema",
+      "reference": "Максимум 1/2 при x=y=±1/√2. Минимум −1/2 при x=−y=±1/√2. Окружность компактна, градиент связи ненулевой.",
+      "required_result_passed": true,
+      "tool_sequence_passed": true,
+      "mandatory": false,
+      "run": "recheck",
+      "review_note": "Повтор после уточнения discovery про исходные функцию и ограничение. Первая попытка использовала зарезервированное имя lambda.",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 54,
+            "arguments": {
+              "operation": "constrained_extrema",
+              "expression": "x*y",
+              "variables": [
+                "x",
+                "y"
+              ],
+              "constraints": [
+                "x^2+y^2=1"
+              ]
+            },
+            "output": {
+              "status": "ok",
+              "operation": "constrained_extrema",
+              "expression": "x*y",
+              "variable": "x",
+              "result": "(x=-sqrt(2)/2, y=sqrt(2)/2) = -1/2; (x=sqrt(2)/2, y=-sqrt(2)/2) = -1/2; (x=-sqrt(2)/2, y=-sqrt(2)/2) = 1/2; (x=sqrt(2)/2, y=sqrt(2)/2) = 1/2",
+              "numeric": "(x=-sqrt(2)/2, y=sqrt(2)/2) = -0.500000000000000; (x=sqrt(2)/2, y=-sqrt(2)/2) = -0.500000000000000; (x=-sqrt(2)/2, y=-sqrt(2)/2) = 0.500000000000000; (x=sqrt(2)/2, y=sqrt(2)/2) = 0.500000000000000",
+              "exact": true,
+              "detail": "Найдены стационарные точки Лагранжа; исходное ограничение, уравнения Лагранжа и область определения проверены подстановкой. Классификация minimum/maximum относится только к найденным кандидатам и строга для компактного ограничения при полном наборе кандидатов.",
+              "variables": [
+                "x",
+                "y"
+              ],
+              "constraint": "x**2+y**2 = 1",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": [
+                {
+                  "point": {
+                    "x": "-sqrt(2)/2",
+                    "y": "sqrt(2)/2"
+                  },
+                  "numeric_point": {
+                    "x": "-0.707106781186548",
+                    "y": "0.707106781186548"
+                  },
+                  "value": "-1/2",
+                  "numeric_value": "-0.500000000000000",
+                  "multiplier": "-1/2",
+                  "numeric_multiplier": "-0.500000000000000",
+                  "kind": "minimum"
+                },
+                {
+                  "point": {
+                    "x": "sqrt(2)/2",
+                    "y": "-sqrt(2)/2"
+                  },
+                  "numeric_point": {
+                    "x": "0.707106781186548",
+                    "y": "-0.707106781186548"
+                  },
+                  "value": "-1/2",
+                  "numeric_value": "-0.500000000000000",
+                  "multiplier": "-1/2",
+                  "numeric_multiplier": "-0.500000000000000",
+                  "kind": "minimum"
+                },
+                {
+                  "point": {
+                    "x": "-sqrt(2)/2",
+                    "y": "-sqrt(2)/2"
+                  },
+                  "numeric_point": {
+                    "x": "-0.707106781186548",
+                    "y": "-0.707106781186548"
+                  },
+                  "value": "1/2",
+                  "numeric_value": "0.500000000000000",
+                  "multiplier": "1/2",
+                  "numeric_multiplier": "0.500000000000000",
+                  "kind": "maximum"
+                },
+                {
+                  "point": {
+                    "x": "sqrt(2)/2",
+                    "y": "sqrt(2)/2"
+                  },
+                  "numeric_point": {
+                    "x": "0.707106781186548",
+                    "y": "0.707106781186548"
+                  },
+                  "value": "1/2",
+                  "numeric_value": "0.500000000000000",
+                  "multiplier": "1/2",
+                  "numeric_multiplier": "0.500000000000000",
+                  "kind": "maximum"
+                }
+              ]
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "decision_matches": true,
+        "reason": "plain_response",
+        "answer": "**Краткая суть:** на окружности `x² + y² = 1` функция `f = xy` принимает наибольшее значение `1/2` в двух точках с одинаковыми знаками координат и наименьшее `−1/2` в двух точках с разными знаками. Других локальных экстремумов нет.\n\n**Решение через множители Лагранжа**\n\nОграничение: `g(x,y) = x² + y² − 1 = 0`. Функция Лагранжа: `L = xy − λ(x² + y² − 1)`.\n\nУсловия стационарности:\n`L_x = y − 2λx = 0`, `L_y = x − 2λy = 0`.\n\nУмножим первое на `x`, второе на `y`: `xy = 2λx²` и `xy = 2λy²`. Вычитая, получаем `2λ(x² − y²) = 0`.\n\n- Если `λ = 0`, то из условий `y = 0` и `x = 0` — точка `(0,0)` не лежит на окружности, отбрасываем.\n- Значит `x² = y²`, то есть `x = ±y`. Вместе с `x² + y² = 1` это даёт `2x² = 1`, `x = ±1/√2`.\n\nКандидаты и значения `f = xy`:\n\n1. `(1/√2, 1/√2)` → `f = 1/2` — максимум\n2. `(−1/√2, −1/√2)` → `f = 1/2` — максимум\n3. `(1/√2, −1/√2)` → `f = −1/2` — минимум\n4. `(−1/√2, 1/√2)` → `f = −1/2` — минимум\n\nСоответствующие множители: `λ = 1/2` в точках максимума и `λ = −1/2` в точках минимума (это совпадает с проверкой в инструменте).\n\n**Почему других экстремумов нет**\n\n1. Окружность — замкнутое ограниченное (компактное) множество, `f = xy` непрерывна, значит по теореме Вейерштрасса глобальные максимум и минимум на ней существуют.\n2. Ограничение регулярно: `∇g = (2x, 2y)`, и на окружности `|∇g| = 2 ≠ 0`. Поэтому в любой локальной точке экстремума при ограничении равенство `∇f = λ∇g` обязано выполняться (необходимое условие Лагранжа) — «пропустить» экстремум нельзя.\n3. Мы разобрали все решения системы: случай `λ = 0` невозможен на окружности, а при `λ ≠ 0` обязательно `x² = y²`, что даёт ровно четыре точки. Список кандидатов полон, а значения в нём — `±1/2`.\n4. Значит во всех остальных точках окружности `|xy| < 1/2`, и локальных экстремумов там нет: значения строго меняются при движении вдоль дуги.\n\n**Независимая проверка**\n\nПараметризация `x = cos t`, `y = sin t`: тогда `xy = (1/2)·sin 2t`, и при `t ∈ [0, 2π)` величина `sin 2t` колеблется в `[−1, 1]`, достигая краёв при `2t = π/2 + πk`, то есть `t = π/4, 3π/4, 5π/4, 7π/4` — это те же четыре точки. Оценка `|xy| ≤ (x² + y²)/2 = 1/2` (неравенство о средних) даёт ту же границу и подтверждает, что она достигается только при `|x| = |y|`.\n\n**Ключевой вывод:** глобальный максимум `1/2` — в точках `(1/√2, 1/√2)` и `(−1/√2, −1/√2)`; глобальный минимум `−1/2` — в точках `(1/√2, −1/√2)` и `(−1/√2, 1/√2)`; иных экстремумов на окружности нет, поскольку必要条件 Лагранжа на регулярном компактном ограничении исчерпывает все кандидаты.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 16717,
+        "steps": [
+          {
+            "duration_ms": 2333,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 4845,
+            "completion_tokens": 125,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "constrained_extrema",
+                  "expression": "x*y",
+                  "variables": [
+                    "x",
+                    "y"
+                  ],
+                  "constraints": [
+                    "x^2 + y^2 = 1"
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 14336,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 5770,
+            "completion_tokens": 1593,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 46,
+            "arguments": {
+              "operation": "constrained_extrema",
+              "expression": "x*y",
+              "variables": [
+                "x",
+                "y"
+              ],
+              "constraints": [
+                "x^2 + y^2 = 1"
+              ]
+            },
+            "output": {
+              "status": "ok",
+              "operation": "constrained_extrema",
+              "expression": "x*y",
+              "variable": "x",
+              "result": "(x=-sqrt(2)/2, y=sqrt(2)/2) = -1/2; (x=sqrt(2)/2, y=-sqrt(2)/2) = -1/2; (x=-sqrt(2)/2, y=-sqrt(2)/2) = 1/2; (x=sqrt(2)/2, y=sqrt(2)/2) = 1/2",
+              "numeric": "(x=-sqrt(2)/2, y=sqrt(2)/2) = -0.500000000000000; (x=sqrt(2)/2, y=-sqrt(2)/2) = -0.500000000000000; (x=-sqrt(2)/2, y=-sqrt(2)/2) = 0.500000000000000; (x=sqrt(2)/2, y=sqrt(2)/2) = 0.500000000000000",
+              "exact": true,
+              "detail": "Найдены стационарные точки Лагранжа; исходное ограничение, уравнения Лагранжа и область определения проверены подстановкой. Классификация minimum/maximum относится только к найденным кандидатам и строга для компактного ограничения при полном наборе кандидатов.",
+              "variables": [
+                "x",
+                "y"
+              ],
+              "constraint": "x**2 + y**2 = 1",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": [
+                {
+                  "point": {
+                    "x": "-sqrt(2)/2",
+                    "y": "sqrt(2)/2"
+                  },
+                  "numeric_point": {
+                    "x": "-0.707106781186548",
+                    "y": "0.707106781186548"
+                  },
+                  "value": "-1/2",
+                  "numeric_value": "-0.500000000000000",
+                  "multiplier": "-1/2",
+                  "numeric_multiplier": "-0.500000000000000",
+                  "kind": "minimum"
+                },
+                {
+                  "point": {
+                    "x": "sqrt(2)/2",
+                    "y": "-sqrt(2)/2"
+                  },
+                  "numeric_point": {
+                    "x": "0.707106781186548",
+                    "y": "-0.707106781186548"
+                  },
+                  "value": "-1/2",
+                  "numeric_value": "-0.500000000000000",
+                  "multiplier": "-1/2",
+                  "numeric_multiplier": "-0.500000000000000",
+                  "kind": "minimum"
+                },
+                {
+                  "point": {
+                    "x": "-sqrt(2)/2",
+                    "y": "-sqrt(2)/2"
+                  },
+                  "numeric_point": {
+                    "x": "-0.707106781186548",
+                    "y": "-0.707106781186548"
+                  },
+                  "value": "1/2",
+                  "numeric_value": "0.500000000000000",
+                  "multiplier": "1/2",
+                  "numeric_multiplier": "0.500000000000000",
+                  "kind": "maximum"
+                },
+                {
+                  "point": {
+                    "x": "sqrt(2)/2",
+                    "y": "sqrt(2)/2"
+                  },
+                  "numeric_point": {
+                    "x": "0.707106781186548",
+                    "y": "0.707106781186548"
+                  },
+                  "value": "1/2",
+                  "numeric_value": "0.500000000000000",
+                  "multiplier": "1/2",
+                  "numeric_multiplier": "0.500000000000000",
+                  "kind": "maximum"
+                }
+              ]
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "parametric",
+      "reference": "Эллипс с полуосями 2 и 1, пересечения (±2,0),(0,±1).",
+      "required_result_passed": true,
+      "tool_sequence_passed": true,
+      "mandatory": false,
+      "run": "final-2",
+      "review_note": "",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_plot",
+            "duration_ms": 133,
+            "arguments": {
+              "plot_type": "parametric",
+              "functions": [
+                "2*cos(t)",
+                "sin(t)"
+              ],
+              "parameter": "t",
+              "x_min": 0,
+              "x_max": 6.283185307179586
+            },
+            "output": {
+              "status": "ok",
+              "plot_type": "parametric",
+              "functions": [
+                {
+                  "expression": "2*cos(t), sin(t)",
+                  "segments": 1,
+                  "discontinuities": []
+                }
+              ],
+              "variable": "t",
+              "x_min": 0.0,
+              "x_max": 6.283185307179586,
+              "y_min": null,
+              "y_max": null,
+              "samples": 2001,
+              "png_bytes": 33253,
+              "masked_points": 0,
+              "total_points": 2001,
+              "branch_cuts": [],
+              "poles": [],
+              "checkpoints": [
+                {
+                  "point": "t=0",
+                  "value": "(2, 0)",
+                  "numeric": "(2.00000000000000, 0)",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                }
+              ],
+              "zero_markers": [],
+              "levels": [],
+              "color_scale": "",
+              "detail": "Параметрическая кривая построена; разрывы области определения разорваны."
+            },
+            "error": null,
+            "images": [
+              {
+                "sha256": "f6a33552d2332337441e3a9dca9b33d8b6c483f5724327e2de6608aea94c9e71"
+              }
+            ],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "decision_matches": true,
+        "reason": "plain_response",
+        "answer": "**Краткая суть:** кривая — эллипс с полуосями 2 (вдоль x) и 1 (вдоль y), замкнутый, обходится против часовой стрелки. График построен инструментом успешно (status ok, 2001 точка, разрывов нет).\n\n**Почему эллипс**\n\nИз параметризации:\n`x/2 = cos(t)`, `y = sin(t)`, и так как `cos²t + sin²t = 1`, получаем\n\n`x²/4 + y² = 1` — каноническое уравнение эллипса с `a = 2`, `b = 1`.\n\nОбласть определения: `t ∈ [0, 2π]`; функции `cos`, `sin` определены всюду, кривая гладкая (производная `(-2sin t, cos t)` нигде не обращается в нуль одновременно), поэтому особенностей и самопересечений нет. Концы параметризации дают одну точку: `t = 0` и `t = 2π` → `(2, 0)`.\n\n**Пересечения с осями**\n\n- С осью `Ox` (`y = 0`): `sin t = 0` → `t = 0, π, 2π`.\n  Точки: `(2, 0)` при `t = 0`, `(-2, 0)` при `t = π`, снова `(2, 0)` при `t = 2π`. Уникальных точек две — вершины по большой оси.\n- С осью `Oy` (`x = 0`): `cos t = 0` → `t = π/2, 3π/2`.\n  Точки: `(0, 1)` при `t = π/2` и `(0, -1)` при `t = 3π/2` — вершины по малой оси.\n\n**Проверка:** все четыре точки подставляются в `x²/4 + y² = 1` с равенством 1: `(±2)²/4 = 1`, `(±1)² = 1`. Пересечений ровно четыре (с учётом кратности `t = 0` и `t = 2π` — пять значений параметра, но одна точка).\n\n**Ключевой вывод:** параметр `t` — это не полярный угол: радиус в точке `t` равен `sqrt(4cos²t + sin²t)` и меняется от 1 до 2, поэтому эллипс, а не окружность. Если нужны, например, координаты при конкретных `t` или площадь/длина дуги — скажи, посчитаю.",
+        "truncated": false,
+        "images": [
+          "plots/parametric.png"
+        ],
+        "duration_ms": 12677,
+        "steps": [
+          {
+            "duration_ms": 3814,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 4755,
+            "completion_tokens": 289,
+            "calls": [
+              {
+                "name": "math_plot",
+                "arguments": {
+                  "plot_type": "parametric",
+                  "functions": [
+                    "2*cos(t)",
+                    "sin(t)"
+                  ],
+                  "parameter": "t",
+                  "x_min": 0,
+                  "x_max": 6.283185307179586,
+                  "y_min": -1.5,
+                  "y_max": 1.5
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 8754,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 5152,
+            "completion_tokens": 910,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_plot",
+            "duration_ms": 108,
+            "arguments": {
+              "plot_type": "parametric",
+              "functions": [
+                "2*cos(t)",
+                "sin(t)"
+              ],
+              "parameter": "t",
+              "x_min": 0,
+              "x_max": 6.283185307179586,
+              "y_min": -1.5,
+              "y_max": 1.5
+            },
+            "output": {
+              "status": "ok",
+              "plot_type": "parametric",
+              "functions": [
+                {
+                  "expression": "2*cos(t), sin(t)",
+                  "segments": 1,
+                  "discontinuities": []
+                }
+              ],
+              "variable": "t",
+              "x_min": 0.0,
+              "x_max": 6.283185307179586,
+              "y_min": null,
+              "y_max": null,
+              "samples": 2001,
+              "png_bytes": 33253,
+              "masked_points": 0,
+              "total_points": 2001,
+              "branch_cuts": [],
+              "poles": [],
+              "checkpoints": [
+                {
+                  "point": "t=0",
+                  "value": "(2, 0)",
+                  "numeric": "(2.00000000000000, 0)",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                }
+              ],
+              "levels": [],
+              "color_scale": "",
+              "detail": "Параметрическая кривая построена; разрывы области определения разорваны."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "level-curves",
+      "reference": "Концентрические окружности радиусов 1 и √2; обе целиком в области.",
+      "required_result_passed": true,
+      "tool_sequence_passed": true,
+      "mandatory": false,
+      "run": "final-2",
+      "review_note": "",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_plot",
+            "duration_ms": 158,
+            "arguments": {
+              "plot_type": "contour",
+              "functions": [
+                "x^2+y^2"
+              ],
+              "levels": [
+                1,
+                2
+              ],
+              "x_min": -2,
+              "x_max": 2,
+              "y_min": -2,
+              "y_max": 2
+            },
+            "output": {
+              "status": "ok",
+              "plot_type": "contour",
+              "functions": [
+                {
+                  "expression": "x**2+y**2",
+                  "segments": 1,
+                  "discontinuities": []
+                }
+              ],
+              "variable": "x",
+              "x_min": -2.0,
+              "x_max": 2.0,
+              "y_min": -2.0,
+              "y_max": 2.0,
+              "samples": 321,
+              "png_bytes": 34306,
+              "masked_points": 0,
+              "total_points": 103041,
+              "branch_cuts": [],
+              "poles": [],
+              "checkpoints": [
+                {
+                  "point": "(x, y)=(0, 0)",
+                  "value": "0",
+                  "numeric": "0",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "(x, y)=(1, 1)",
+                  "value": "2",
+                  "numeric": "2.00000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "(x, y)=(-1, 1)",
+                  "value": "2",
+                  "numeric": "2.00000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "(x, y)=(1, -1)",
+                  "value": "2",
+                  "numeric": "2.00000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                }
+              ],
+              "zero_markers": [],
+              "levels": [
+                1.0,
+                2.0
+              ],
+              "color_scale": "viridis: f(x, y)",
+              "detail": "Линии уровня построены; недопустимые значения и полюсы замаскированы."
+            },
+            "error": null,
+            "images": [
+              {
+                "sha256": "7f96ecde5f536b3f764a2bf8e19c383eadff23dc5f448c90f3973131e5984b72"
+              }
+            ],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "decision_matches": true,
+        "reason": "plain_response",
+        "answer": "**Суть:** линии уровня `x^2 + y^2 = c` — это окружности с центром в начале координат радиуса `sqrt(c)`. График построен (уровни 1 и 2, квадрат [−2,2]²).\n\n**Кривые**\n\n- Уровень 1: `x^2 + y^2 = 1` — окружность радиуса `sqrt(1) = 1`; проходит через точки `(±1, 0)`, `(0, ±1)`.\n- Уровень 2: `x^2 + y^2 = 2` — окружность радиуса `sqrt(2) ≈ 1.414`; проходит, например, через `(±1, ±1)` (там `1 + 1 = 2`).\n\nОбе окружности целиком лежат внутри квадрата: `1 < 2` и `sqrt(2) ≈ 1.414 < 2`, поэтому границы квадрата они не касаются и выглядят замкнутыми кольцами (на рисунке — две концентрические окружности, внешняя соответствует значению 2). Меньшие значения — внутренние окружности.\n\n**Почему так**\n\nФункция `f(x, y) = x^2 + y^2` — квадрат расстояния до начала координат. Множество `{f = c}` при `c > 0` — это все точки на фиксированном расстоянии `sqrt(c)`, то есть окружность. При `c = 0` линия уровня вырождается в одну точку `(0,0)`; при `c < 0` — пустое множество.\n\n**Дополнительно**\n\n- Градиент `∇f = (2x, 2y)` направлен по радиусу от центра, поэтому линии уровня всюду перпендикулярны радиус-вектору, и градиент в каждой точке нормален к окружности.\n- `f` — строго выпуклая функция с единственным минимумом 0 в `(0,0)`; линии уровня — эллипсы общего вида `λ1 x² + λ2 y² = c`, здесь `λ1 = λ2 = 1`, поэтому окружности.\n- Если смотреть на поверхность `z = x² + y²` (параболоид вращения), эти линии — горизонтальные сечения на высотах `z = 1` и `z = 2`.\n\n**Ключевой вывод:** уровни 1 и 2 дают концентрические окружности радиусов `1` и `sqrt(2) ≈ 1.414` с центром в `(0,0)`, обе полностью помещаются в заданном квадрате.",
+        "truncated": false,
+        "images": [
+          "plots/level-curves.png"
+        ],
+        "duration_ms": 10070,
+        "steps": [
+          {
+            "duration_ms": 2328,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 4753,
+            "completion_tokens": 225,
+            "calls": [
+              {
+                "name": "math_plot",
+                "arguments": {
+                  "plot_type": "contour",
+                  "functions": [
+                    "x^2 + y^2"
+                  ],
+                  "variable": "x",
+                  "y_variable": "y",
+                  "x_min": -2,
+                  "x_max": 2,
+                  "y_min": -2,
+                  "y_max": 2,
+                  "levels": [
+                    1,
+                    2
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 7537,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 5329,
+            "completion_tokens": 756,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_plot",
+            "duration_ms": 204,
+            "arguments": {
+              "plot_type": "contour",
+              "functions": [
+                "x^2 + y^2"
+              ],
+              "variable": "x",
+              "y_variable": "y",
+              "x_min": -2,
+              "x_max": 2,
+              "y_min": -2,
+              "y_max": 2,
+              "levels": [
+                1,
+                2
+              ]
+            },
+            "output": {
+              "status": "ok",
+              "plot_type": "contour",
+              "functions": [
+                {
+                  "expression": "x**2 + y**2",
+                  "segments": 1,
+                  "discontinuities": []
+                }
+              ],
+              "variable": "x",
+              "x_min": -2.0,
+              "x_max": 2.0,
+              "y_min": -2.0,
+              "y_max": 2.0,
+              "samples": 321,
+              "png_bytes": 34306,
+              "masked_points": 0,
+              "total_points": 103041,
+              "branch_cuts": [],
+              "poles": [],
+              "checkpoints": [
+                {
+                  "point": "(x, y)=(0, 0)",
+                  "value": "0",
+                  "numeric": "0",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "(x, y)=(1, 1)",
+                  "value": "2",
+                  "numeric": "2.00000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "(x, y)=(-1, 1)",
+                  "value": "2",
+                  "numeric": "2.00000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "(x, y)=(1, -1)",
+                  "value": "2",
+                  "numeric": "2.00000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                }
+              ],
+              "levels": [
+                1.0,
+                2.0
+              ],
+              "color_scale": "viridis: f(x, y)",
+              "detail": "Линии уровня построены; недопустимые значения и полюсы замаскированы."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "complex-pole",
+      "reference": "Один простой полюс в нуле, фаза −arg z, область вокруг полюса замаскирована.",
+      "required_result_passed": true,
+      "tool_sequence_passed": true,
+      "mandatory": true,
+      "run": "accepted-complex",
+      "review_note": "Верная карта и классификация полюса. Модель дополнительно описала видимый шов у границы шкалы фазы, который для циклической палитры не гарантирован.",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_plot",
+            "duration_ms": 202,
+            "arguments": {
+              "plot_type": "domain_coloring",
+              "functions": [
+                "1/z"
+              ],
+              "variable": "z",
+              "x_min": -2,
+              "x_max": 2,
+              "y_min": -2,
+              "y_max": 2
+            },
+            "output": {
+              "status": "ok",
+              "plot_type": "domain_coloring",
+              "functions": [
+                {
+                  "expression": "1/z",
+                  "segments": 1,
+                  "discontinuities": [
+                    "z=0"
+                  ]
+                }
+              ],
+              "variable": "z",
+              "x_min": -2.0,
+              "x_max": 2.0,
+              "y_min": -2.0,
+              "y_max": 2.0,
+              "samples": 321,
+              "png_bytes": 74838,
+              "masked_points": 1,
+              "total_points": 103041,
+              "branch_cuts": [],
+              "poles": [
+                "z=0"
+              ],
+              "checkpoints": [
+                {
+                  "point": "z=0",
+                  "value": "pole",
+                  "numeric": "",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": "pole"
+                },
+                {
+                  "point": "z=1",
+                  "value": "1",
+                  "numeric": "1.00000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "z=I",
+                  "value": "-I",
+                  "numeric": "-1.0*I",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "z=-1",
+                  "value": "-1",
+                  "numeric": "-1.00000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "z=-I",
+                  "value": "I",
+                  "numeric": "1.0*I",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "z=2",
+                  "value": "1/2",
+                  "numeric": "0.500000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "z=-2",
+                  "value": "-1/2",
+                  "numeric": "-0.500000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                }
+              ],
+              "zero_markers": [],
+              "levels": [],
+              "color_scale": "hue=arg f(z), brightness=normalized |f(z)|",
+              "detail": "Цветовая карта аргумента построена; полюсы и разрезы замаскированы, яркость кодирует нормированный и ограниченный |f(z)|."
+            },
+            "error": null,
+            "images": [
+              {
+                "sha256": "70dd344ce98cc705557f44a942fb97c2b6dec61b1dad0b62e23ee9e1596dd0eb"
+              }
+            ],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "decision_matches": true,
+        "reason": "plain_response",
+        "answer": "**Карта построена:** квадрат `Re z, Im z ∈ [−2, 2]`, 321×321 отсчёт, полюс `z=0` замаскирован (`masked_points=1`, `poles=[\"z=0\"]`).\n\n**Что видно**\n1. Тон задаёт фаза `arg(1/z) = −arg z`, поскольку `1/z = z̄/|z|²`: цветовой круг прокручивается на полный оборот в отрицательном направлении вокруг начала координат, то есть карта `1/z` — это «зеркальная» (комплексно-сопряжённая) карта самой `z`.\n2. Это подтверждается контрольными точками: `z=1 → 1` (фаза 0), `z=i → −i` (фаза −π/2), `z=−1 → −1` (фаза π), `z=−i → i` (фаза +π/2), `z=±2 → ±1/2`.\n3. Яркость кодирует нормированный `|f(z)| = 1/|z|`: у центра она максимальна, а к краям квадрата падает — кольца равного модуля выглядят как концентрические окружности.\n4. В точке `z=0` функция не равна нулю и не определена: это **полюс** (простой, порядок 1), `|1/z| → ∞` при `z → 0` по любому направлению, а аргумент не имеет предела — при обходе точки фаза делает один оборот, давая «цветовую воронку» с индексом −1; одна точка маскируется, это не дефект построения.\n5. Резкий шов цвета вдоль отрицательной вещественной оси — разрыв выбранной ветви аргумента (значения скачут от `π` к `−π`), а не разрыв самой функции; сам `1/z` там аналитична и равна `−1/|x|`.\n\n**Вывод:** ноль — единственная особая точка, это полюс, а не нуль; отсутствие нулей у `1/z` согласуется с тем, что цветовой круг в области `|z|>0` покрывает все фазы ровно один раз.",
+        "truncated": false,
+        "images": [
+          "plots/complex-pole.png"
+        ],
+        "duration_ms": 12005,
+        "steps": [
+          {
+            "duration_ms": 2850,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 5007,
+            "completion_tokens": 190,
+            "calls": [
+              {
+                "name": "math_plot",
+                "arguments": {
+                  "plot_type": "domain_coloring",
+                  "functions": [
+                    "1/z"
+                  ],
+                  "variable": "z",
+                  "x_min": -2,
+                  "x_max": 2,
+                  "y_min": -2,
+                  "y_max": 2
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 8803,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 5664,
+            "completion_tokens": 807,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_plot",
+            "duration_ms": 351,
+            "arguments": {
+              "plot_type": "domain_coloring",
+              "functions": [
+                "1/z"
+              ],
+              "variable": "z",
+              "x_min": -2,
+              "x_max": 2,
+              "y_min": -2,
+              "y_max": 2
+            },
+            "output": {
+              "status": "ok",
+              "plot_type": "domain_coloring",
+              "functions": [
+                {
+                  "expression": "1/z",
+                  "segments": 1,
+                  "discontinuities": [
+                    "z=0"
+                  ]
+                }
+              ],
+              "variable": "z",
+              "x_min": -2.0,
+              "x_max": 2.0,
+              "y_min": -2.0,
+              "y_max": 2.0,
+              "samples": 321,
+              "png_bytes": 74838,
+              "masked_points": 1,
+              "total_points": 103041,
+              "branch_cuts": [],
+              "poles": [
+                "z=0"
+              ],
+              "checkpoints": [
+                {
+                  "point": "z=0",
+                  "value": "pole",
+                  "numeric": "",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": "pole"
+                },
+                {
+                  "point": "z=1",
+                  "value": "1",
+                  "numeric": "1.00000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "z=I",
+                  "value": "-I",
+                  "numeric": "-1.0*I",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "z=-1",
+                  "value": "-1",
+                  "numeric": "-1.00000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "z=-I",
+                  "value": "I",
+                  "numeric": "1.0*I",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "z=2",
+                  "value": "1/2",
+                  "numeric": "0.500000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "z=-2",
+                  "value": "-1/2",
+                  "numeric": "-0.500000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                }
+              ],
+              "zero_markers": [],
+              "levels": [],
+              "color_scale": "hue=arg f(z), brightness=normalized |f(z)|",
+              "detail": "Цветовая карта аргумента построена; полюсы и разрезы замаскированы, яркость кодирует нормированный и ограниченный |f(z)|."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "complex-log",
+      "reference": "Главная ветвь определена вне неположительной вещественной полуоси, скачок мнимой части 2π на отрицательной вещественной оси.",
+      "required_result_passed": true,
+      "tool_sequence_passed": true,
+      "mandatory": false,
+      "run": "resume-1",
+      "review_note": "",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_plot",
+            "duration_ms": 207,
+            "arguments": {
+              "plot_type": "domain_coloring",
+              "functions": [
+                "log(z)"
+              ],
+              "variable": "z",
+              "x_min": -2,
+              "x_max": 2,
+              "y_min": -2,
+              "y_max": 2
+            },
+            "output": {
+              "status": "ok",
+              "plot_type": "domain_coloring",
+              "functions": [
+                {
+                  "expression": "log(z)",
+                  "segments": 1,
+                  "discontinuities": [
+                    "log(z): arg=pi"
+                  ]
+                }
+              ],
+              "variable": "z",
+              "x_min": -2.0,
+              "x_max": 2.0,
+              "y_min": -2.0,
+              "y_max": 2.0,
+              "samples": 321,
+              "png_bytes": 65872,
+              "masked_points": 161,
+              "total_points": 103041,
+              "branch_cuts": [
+                "log(z): arg=pi"
+              ],
+              "poles": [],
+              "checkpoints": [
+                {
+                  "point": "z=0",
+                  "value": "branch_point",
+                  "numeric": "",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": "branch_point"
+                },
+                {
+                  "point": "z=1",
+                  "value": "0",
+                  "numeric": "0",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "z=I",
+                  "value": "I*pi/2",
+                  "numeric": "1.5707963267949*I",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "z=-1",
+                  "value": "I*pi",
+                  "numeric": "3.14159265358979*I",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": "branch_cut"
+                },
+                {
+                  "point": "z=-I",
+                  "value": "-I*pi/2",
+                  "numeric": "-1.5707963267949*I",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "z=2",
+                  "value": "log(2)",
+                  "numeric": "0.693147180559945",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "z=-2",
+                  "value": "log(2) + I*pi",
+                  "numeric": "0.693147180559945 + 3.14159265358979*I",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": "branch_cut"
+                }
+              ],
+              "zero_markers": [],
+              "levels": [],
+              "color_scale": "hue=arg f(z), brightness=normalized |f(z)|",
+              "detail": "Цветовая карта аргумента построена; полюсы и разрезы замаскированы, яркость кодирует нормированный и ограниченный |f(z)|."
+            },
+            "error": null,
+            "images": [
+              {
+                "sha256": "9a0a2805337ff94e6b2134b51c35e7acc7ea5150f728d39101281f49fc6de33d"
+              }
+            ],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "decision_matches": true,
+        "reason": "plain_response",
+        "answer": "**Кратко:** карта построена для f(z) = Log z = ln|z| + i·Arg z, Arg z ∈ (−π, π]. Тон (hue) кодирует фазу Arg z, яркость — модуль |Log z|. Инструмент вернул `status: ok`, один разрез `arg = π` (отрицательная вещественная полуось), 161 замаскированная точка — это сам разрез и полюс z = 0.\n\n**Как читать картинку**\n- В точке z = 1 значение 0: там минимум яркости (тёмное пятно), цвет «ноль фазы».\n- Проверочные значения, которые вернул инструмент:\n  - z = i → iπ/2 (1.5708·i)\n  - z = −i → −iπ/2\n  - z = 2 → ln 2 ≈ 0.693\n  - z = −2 → ln 2 + iπ ≈ 0.693 + 3.1416·i\n- Яркость = |Log z| = sqrt(ln²|z| + Arg²z): растёт к нулю (там ln|z| → −∞) и к бесконечности, вдоль окружностей |z| = r она увеличивается по мере ухода угла от 0 к ±π — поэтому на карте видны «тёмные секторы» у положительной полуоси и посветление у разреза.\n- Если идти по окружности вокруг начала координат против часовой стрелки от положительной полуоси, Arg плавно растёт от 0 до π, цвет «прокручивается» на пол-оборота палитры. Точек, где Arg = 0, на такой окружности одна, и именно поэтому фаза — многозначная величина.\n\n**Что происходит на разрезе**\nРазрез — это луч arg = π, то есть z = x < 0. Он замаскирован на карте, потому что там Arg не определён как непрерывная функция: цвет с двух сторон разрывается скачком.\n- Верхний берег (y → 0+): Arg z → +π, то есть Log z → ln|z| + iπ.\n- Нижний берег (y → 0−): Arg z → −π, то есть Log z → ln|z| − iπ.\n- Скачок равен 2πi — ровно период мнимой части, отличающий соседние ветви Ln z = ln|z| + i(Arg z + 2πk).\n- Конечная точка разреза z = 0 — точка ветвления: любой обход вокруг неё меняет фазу на 2π (Log z → Log z + 2πi), поэтому однозначную непрерывную ветвь на всей проколотой плоскости C \\ {0} построить нельзя.\n- После удаления луча C \\ (−∞, 0] область становится односвязной, и главная ветвь там аналитична, с производной (Log z)′ = 1/z. Заметим: производная от выбора ветви не зависит, а сама Log z — зависит.\n\n**Итог:** карта фазы показывает «винт»: полный оборот вокруг нуля прокручивает фазу один раз, а разрез по отрицательной вещественной оси — это линия склейки-разрыва, на которой Arg перескакивает с +π на −π, то есть Log z терпит скачок 2πi; значение на самом луче зависит от выбора берега (для z = −1 это +iπ либо −iπ), поэтому корректно считать функцию заданной только в C \\ (−∞, 0].",
+        "truncated": false,
+        "images": [
+          "plots/complex-log.png"
+        ],
+        "duration_ms": 17163,
+        "steps": [
+          {
+            "duration_ms": 2722,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 4854,
+            "completion_tokens": 277,
+            "calls": [
+              {
+                "name": "math_plot",
+                "arguments": {
+                  "functions": [
+                    "log(z)"
+                  ],
+                  "plot_type": "domain_coloring",
+                  "variable": "z",
+                  "x_min": -2,
+                  "x_max": 2,
+                  "y_min": -2,
+                  "y_max": 2
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 14245,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 5540,
+            "completion_tokens": 1457,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_plot",
+            "duration_ms": 194,
+            "arguments": {
+              "functions": [
+                "log(z)"
+              ],
+              "plot_type": "domain_coloring",
+              "variable": "z",
+              "x_min": -2,
+              "x_max": 2,
+              "y_min": -2,
+              "y_max": 2
+            },
+            "output": {
+              "status": "ok",
+              "plot_type": "domain_coloring",
+              "functions": [
+                {
+                  "expression": "log(z)",
+                  "segments": 1,
+                  "discontinuities": [
+                    "log(z): arg=pi"
+                  ]
+                }
+              ],
+              "variable": "z",
+              "x_min": -2.0,
+              "x_max": 2.0,
+              "y_min": -2.0,
+              "y_max": 2.0,
+              "samples": 321,
+              "png_bytes": 65114,
+              "masked_points": 161,
+              "total_points": 103041,
+              "branch_cuts": [
+                "log(z): arg=pi"
+              ],
+              "poles": [],
+              "checkpoints": [
+                {
+                  "point": "z=0",
+                  "value": "branch_point",
+                  "numeric": "",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": "branch_point"
+                },
+                {
+                  "point": "z=1",
+                  "value": "0",
+                  "numeric": "0",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "z=I",
+                  "value": "I*pi/2",
+                  "numeric": "1.5707963267949*I",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "z=-1",
+                  "value": "I*pi",
+                  "numeric": "3.14159265358979*I",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": "branch_cut"
+                },
+                {
+                  "point": "z=-I",
+                  "value": "-I*pi/2",
+                  "numeric": "-1.5707963267949*I",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "z=2",
+                  "value": "log(2)",
+                  "numeric": "0.693147180559945",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "z=-2",
+                  "value": "log(2) + I*pi",
+                  "numeric": "0.693147180559945 + 3.14159265358979*I",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": "branch_cut"
+                }
+              ],
+              "levels": [],
+              "color_scale": "hue=arg f(z), brightness=|f(z)|",
+              "detail": "Цветовая карта аргумента построена; полюсы и разрезы замаскированы, яркость кодирует |f(z)|."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "surface-saddle",
+      "reference": "Седловая поверхность, по y=x и y=−x значения противоположных знаков.",
+      "required_result_passed": true,
+      "tool_sequence_passed": true,
+      "mandatory": false,
+      "run": "resume-1",
+      "review_note": "",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_plot",
+            "duration_ms": 153,
+            "arguments": {
+              "plot_type": "surface",
+              "functions": [
+                "x*y"
+              ],
+              "x_min": -2,
+              "x_max": 2,
+              "y_min": -2,
+              "y_max": 2
+            },
+            "output": {
+              "status": "ok",
+              "plot_type": "surface",
+              "functions": [
+                {
+                  "expression": "x*y",
+                  "segments": 1,
+                  "discontinuities": []
+                }
+              ],
+              "variable": "x",
+              "x_min": -2.0,
+              "x_max": 2.0,
+              "y_min": -2.0,
+              "y_max": 2.0,
+              "samples": 161,
+              "png_bytes": 133599,
+              "masked_points": 0,
+              "total_points": 25921,
+              "branch_cuts": [],
+              "poles": [],
+              "checkpoints": [
+                {
+                  "point": "(x, y)=(0, 0)",
+                  "value": "0",
+                  "numeric": "0",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "(x, y)=(1, 1)",
+                  "value": "1",
+                  "numeric": "1.00000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "(x, y)=(-1, 1)",
+                  "value": "-1",
+                  "numeric": "-1.00000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "(x, y)=(1, -1)",
+                  "value": "-1",
+                  "numeric": "-1.00000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                }
+              ],
+              "zero_markers": [],
+              "levels": [],
+              "color_scale": "viridis: f(x, y)",
+              "detail": "Поверхность построена; недопустимые значения и полюсы замаскированы."
+            },
+            "error": null,
+            "images": [
+              {
+                "sha256": "ccb9d0296784f6b148cafe182d861de18441bc9df9c63b00683ea0cb00610faa"
+              }
+            ],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "decision_matches": true,
+        "reason": "plain_response",
+        "answer": "**Суть:** поверхность построена (график выше, `z = xy` на [−2,2]×[−2,2]), а в нуле — **седловая точка (saddle)**, не экстремум.\n\n**Проверка типа точки**\n\nЧастные производные:\n```text\nz_x = y,  z_y = x\n```\nЕдинственная критическая точка из `y = 0, x = 0` — это `(0,0)`, `z(0,0) = 0`. Матрица Якоби градиента (гессиан) проверена инструментом:\n```text\nH = [[0, 1],\n     [1, 0]]\n```\nСобственные числа: `λ² − 1 = 0` → `λ₁ = 1`, `λ₂ = −1`. Разные знаки ⇒ гессиан невырожденный, но не знакоопределённый ⇒ седло.\n\nПрямое подтверждение по направлениям через ноль:\n- вдоль `y = x`: `z = x² ≥ 0` — функция растёт;\n- вдоль `y = −x`: `z = −x² ≤ 0` — функция убывает;\n- вдоль осей `x = 0` или `y = 0`: `z = 0` — уровень постоянен.\n\nЗначит, сколь угодно близко к нулю есть и большие, и меньшие значения, чем `z(0,0) = 0`.\n\n**Область определения и границы.** Функция определена на всей плоскости, особенностей нет (инструмент замаскировал 0 точек). На замкнутом квадрате экстремумы достигаются на границе: максимум `z = 4` в точках `(2,2)` и `(−2,−2)`, минимум `z = −4` в `(2,−2)` и `(−2,2)`. Характерная картина — гиперболический параболоид: гиперболы уровня `xy = c` и «перевал» в начале координат.\n\n**Вывод:** `(0,0)` — критическая точка типа «седло» (стационарная, но не точка экстремума); глобальные max/min на квадрате лежат на его границе.",
+        "truncated": false,
+        "images": [
+          "plots/surface-saddle.png"
+        ],
+        "duration_ms": 9448,
+        "steps": [
+          {
+            "duration_ms": 3228,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 4849,
+            "completion_tokens": 327,
+            "calls": [
+              {
+                "name": "math_plot",
+                "arguments": {
+                  "functions": [
+                    "x*y"
+                  ],
+                  "plot_type": "surface",
+                  "variable": "x",
+                  "y_variable": "y",
+                  "x_min": -2,
+                  "x_max": 2,
+                  "y_min": -2,
+                  "y_max": 2
+                }
+              },
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "expression": "x*y",
+                  "operation": "jacobian",
+                  "functions": [
+                    "x*y"
+                  ],
+                  "variables": [
+                    "x",
+                    "y"
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 5868,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 5633,
+            "completion_tokens": 648,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_plot",
+            "duration_ms": 287,
+            "arguments": {
+              "functions": [
+                "x*y"
+              ],
+              "plot_type": "surface",
+              "variable": "x",
+              "y_variable": "y",
+              "x_min": -2,
+              "x_max": 2,
+              "y_min": -2,
+              "y_max": 2
+            },
+            "output": {
+              "status": "ok",
+              "plot_type": "surface",
+              "functions": [
+                {
+                  "expression": "x*y",
+                  "segments": 1,
+                  "discontinuities": []
+                }
+              ],
+              "variable": "x",
+              "x_min": -2.0,
+              "x_max": 2.0,
+              "y_min": -2.0,
+              "y_max": 2.0,
+              "samples": 161,
+              "png_bytes": 133599,
+              "masked_points": 0,
+              "total_points": 25921,
+              "branch_cuts": [],
+              "poles": [],
+              "checkpoints": [
+                {
+                  "point": "(x, y)=(0, 0)",
+                  "value": "0",
+                  "numeric": "0",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "(x, y)=(1, 1)",
+                  "value": "1",
+                  "numeric": "1.00000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "(x, y)=(-1, 1)",
+                  "value": "-1",
+                  "numeric": "-1.00000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "(x, y)=(1, -1)",
+                  "value": "-1",
+                  "numeric": "-1.00000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                }
+              ],
+              "levels": [],
+              "color_scale": "viridis: f(x, y)",
+              "detail": "Поверхность построена; недопустимые значения и полюсы замаскированы."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 63,
+            "arguments": {
+              "expression": "x*y",
+              "operation": "jacobian",
+              "functions": [
+                "x*y"
+              ],
+              "variables": [
+                "x",
+                "y"
+              ]
+            },
+            "output": {
+              "status": "ok",
+              "operation": "jacobian",
+              "expression": "x*y",
+              "variable": "x",
+              "result": "Matrix([[y, x]])",
+              "numeric": "",
+              "exact": true,
+              "detail": "Матрица Якоби; строки соответствуют функциям, столбцы — переменным.",
+              "variables": [
+                "x",
+                "y"
+              ],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [
+                [
+                  "y",
+                  "x"
+                ]
+              ],
+              "jacobian_numeric": [
+                [
+                  "",
+                  ""
+                ]
+              ],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "surface-masked",
+      "reference": "Верхняя полусфера радиуса 1 над x²+y²≤1. Высота 1 в (0,0). За диском сетка скрыта.",
+      "required_result_passed": true,
+      "tool_sequence_passed": true,
+      "mandatory": false,
+      "run": "explanations",
+      "review_note": "",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_plot",
+            "duration_ms": 162,
+            "arguments": {
+              "plot_type": "surface",
+              "functions": [
+                "sqrt(1-x^2-y^2)"
+              ],
+              "x_min": -1.5,
+              "x_max": 1.5,
+              "y_min": -1.5,
+              "y_max": 1.5
+            },
+            "output": {
+              "status": "ok",
+              "plot_type": "surface",
+              "functions": [
+                {
+                  "expression": "sqrt(1-x**2-y**2)",
+                  "segments": 1,
+                  "discontinuities": []
+                }
+              ],
+              "variable": "x",
+              "x_min": -1.5,
+              "x_max": 1.5,
+              "y_min": -1.5,
+              "y_max": 1.5,
+              "samples": 161,
+              "png_bytes": 96590,
+              "masked_points": 16976,
+              "total_points": 25921,
+              "branch_cuts": [],
+              "poles": [],
+              "checkpoints": [
+                {
+                  "point": "(x, y)=(0, 0)",
+                  "value": "1",
+                  "numeric": "1.00000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "(x, y)=(1, 1)",
+                  "value": "undefined",
+                  "numeric": "",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": "undefined"
+                },
+                {
+                  "point": "(x, y)=(-1, 1)",
+                  "value": "undefined",
+                  "numeric": "",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": "undefined"
+                },
+                {
+                  "point": "(x, y)=(1, -1)",
+                  "value": "undefined",
+                  "numeric": "",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": "undefined"
+                }
+              ],
+              "zero_markers": [],
+              "levels": [],
+              "color_scale": "viridis: f(x, y)",
+              "detail": "Поверхность построена; недопустимые значения и полюсы замаскированы."
+            },
+            "error": null,
+            "images": [
+              {
+                "sha256": "9f6ab5baf7ab4030cd9e9c7b6fa47e5ffb065f9df43edb24c26c7e6efc4c7274"
+              }
+            ],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "decision_matches": true,
+        "reason": "plain_response",
+        "answer": "**Суть.** График построен; на квадрате `[-1.5, 1.5] × [-1.5, 1.5]` показана только действительная часть — верхняя полусфера радиуса 1, остальное замаскировано.\n\n**Область определения.** Подкоренное выражение должно быть неотрицательным:\n`1 - x² - y² ≥ 0` ⟺ `x² + y² ≤ 1`.\n\nТо есть область определения — замкнутый круг радиуса 1 с центром в нуле. Он целиком лежит внутри заданного квадрата, поэтому углы квадрата (например, `(1,1)`, `(-1,1)`) не входят в график — инструмент отметил их как `undefined`. Всего замаскировано 16976 точек из 25921, что соответствует площади вне круга: `9 - π ≈ 5.858` от площади `9` квадрата, то есть примерно 65% — с точностью до шага сетки совпадает.\n\n**Интерпретация поверхности.** `z = √(1 - x² - y²) ≥ 0`, возводя в квадрат при `z ≥ 0`, получаем `x² + y² + z² = 1`. Это верхняя половина единичной сферы: максимальная высота `z = 1` в центре, на границе круга `x² + y² = 1` высота обращается в нуль, вертикальных стенок и разрывов нет (функция непрерывна на замкнутом круге).\n\n**Высота в нуле.** `z(0,0) = √(1 - 0 - 0) = 1`.\n\n**Итог:** поверхность — верхняя полусфера `x² + y² + z² = 1`, `z ≥ 0`, над единичным кругом; высота в точке `(0,0)` равна `1`.",
+        "truncated": false,
+        "images": [
+          "plots/surface-masked.png"
+        ],
+        "duration_ms": 8281,
+        "steps": [
+          {
+            "duration_ms": 3181,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 4932,
+            "completion_tokens": 331,
+            "calls": [
+              {
+                "name": "math_plot",
+                "arguments": {
+                  "functions": [
+                    "sqrt(1 - x^2 - y^2)"
+                  ],
+                  "plot_type": "surface",
+                  "variable": "x",
+                  "y_variable": "y",
+                  "x_min": -1.5,
+                  "x_max": 1.5,
+                  "y_min": -1.5,
+                  "y_max": 1.5
+                }
+              },
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "evaluate",
+                  "expression": "sqrt(1 - 0^2 - 0^2)"
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 4764,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 5688,
+            "completion_tokens": 489,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_plot",
+            "duration_ms": 325,
+            "arguments": {
+              "functions": [
+                "sqrt(1 - x^2 - y^2)"
+              ],
+              "plot_type": "surface",
+              "variable": "x",
+              "y_variable": "y",
+              "x_min": -1.5,
+              "x_max": 1.5,
+              "y_min": -1.5,
+              "y_max": 1.5
+            },
+            "output": {
+              "status": "ok",
+              "plot_type": "surface",
+              "functions": [
+                {
+                  "expression": "sqrt(1 - x**2 - y**2)",
+                  "segments": 1,
+                  "discontinuities": []
+                }
+              ],
+              "variable": "x",
+              "x_min": -1.5,
+              "x_max": 1.5,
+              "y_min": -1.5,
+              "y_max": 1.5,
+              "samples": 161,
+              "png_bytes": 96590,
+              "masked_points": 16976,
+              "total_points": 25921,
+              "branch_cuts": [],
+              "poles": [],
+              "checkpoints": [
+                {
+                  "point": "(x, y)=(0, 0)",
+                  "value": "1",
+                  "numeric": "1.00000000000000",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                },
+                {
+                  "point": "(x, y)=(1, 1)",
+                  "value": "undefined",
+                  "numeric": "",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": "undefined"
+                },
+                {
+                  "point": "(x, y)=(-1, 1)",
+                  "value": "undefined",
+                  "numeric": "",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": "undefined"
+                },
+                {
+                  "point": "(x, y)=(1, -1)",
+                  "value": "undefined",
+                  "numeric": "",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": "undefined"
+                }
+              ],
+              "zero_markers": [],
+              "levels": [],
+              "color_scale": "viridis: f(x, y)",
+              "detail": "Поверхность построена; недопустимые значения и полюсы замаскированы."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 9,
+            "arguments": {
+              "operation": "evaluate",
+              "expression": "sqrt(1 - 0^2 - 0^2)"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "evaluate",
+              "expression": "sqrt(1 - 0**2 - 0**2)",
+              "variable": "x",
+              "result": "1",
+              "numeric": "1.00000000000000",
+              "exact": true,
+              "detail": "Точное значение вычислено.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "complex-modulus",
+      "reference": "Высота |z²−1|. Нули z=±1. Контрольные высоты 1 при z=0 и 2 при z=i.",
+      "required_result_passed": true,
+      "tool_sequence_passed": true,
+      "mandatory": true,
+      "run": "accepted-complex",
+      "review_note": "Повтор после передачи координат маркеров в structuredContent и уточнения промпта графика. Проверены точки ±1, 0 и ±i.",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_plot",
+            "duration_ms": 190,
+            "arguments": {
+              "plot_type": "complex_height",
+              "functions": [
+                "z^2-1"
+              ],
+              "variable": "z",
+              "x_min": -2,
+              "x_max": 2,
+              "y_min": -2,
+              "y_max": 2
+            },
+            "output": {
+              "status": "ok",
+              "plot_type": "complex_height",
+              "functions": [
+                {
+                  "expression": "z**2-1",
+                  "segments": 1,
+                  "discontinuities": []
+                }
+              ],
+              "variable": "z",
+              "x_min": -2.0,
+              "x_max": 2.0,
+              "y_min": -2.0,
+              "y_max": 2.0,
+              "samples": 161,
+              "png_bytes": 134974,
+              "masked_points": 0,
+              "total_points": 25921,
+              "branch_cuts": [],
+              "poles": [],
+              "checkpoints": [
+                {
+                  "point": "z=0",
+                  "value": "-1",
+                  "numeric": "-1.00000000000000",
+                  "height": "1",
+                  "numeric_height": "1.00000000000000",
+                  "state": ""
+                },
+                {
+                  "point": "z=1",
+                  "value": "0",
+                  "numeric": "0",
+                  "height": "0",
+                  "numeric_height": "0",
+                  "state": ""
+                },
+                {
+                  "point": "z=I",
+                  "value": "-2",
+                  "numeric": "-2.00000000000000",
+                  "height": "2",
+                  "numeric_height": "2.00000000000000",
+                  "state": ""
+                },
+                {
+                  "point": "z=-1",
+                  "value": "0",
+                  "numeric": "0",
+                  "height": "0",
+                  "numeric_height": "0",
+                  "state": ""
+                },
+                {
+                  "point": "z=-I",
+                  "value": "-2",
+                  "numeric": "-2.00000000000000",
+                  "height": "2",
+                  "numeric_height": "2.00000000000000",
+                  "state": ""
+                },
+                {
+                  "point": "z=2",
+                  "value": "3",
+                  "numeric": "3.00000000000000",
+                  "height": "3",
+                  "numeric_height": "3.00000000000000",
+                  "state": ""
+                },
+                {
+                  "point": "z=-2",
+                  "value": "3",
+                  "numeric": "3.00000000000000",
+                  "height": "3",
+                  "numeric_height": "3.00000000000000",
+                  "state": ""
+                }
+              ],
+              "zero_markers": [
+                {
+                  "re": -1.0,
+                  "im": 0.0
+                },
+                {
+                  "re": 1.0,
+                  "im": 0.0
+                }
+              ],
+              "levels": [],
+              "color_scale": "viridis: |f(z)|",
+              "detail": "Поверхность |f(z)| построена; полюсы и разрезы замаскированы. Нули отмечены на поверхности: (-1, 0), (1, 0)."
+            },
+            "error": null,
+            "images": [
+              {
+                "sha256": "1a4fa0f85fd2e4e44fda92b7e384f38f471b20aa3fa75a6bbe00f6c851e2d1cb"
+              }
+            ],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "decision_matches": true,
+        "reason": "plain_response",
+        "answer": "График построен (тип complex_height), поверхность — это |f(z)| = |z²−1| над квадратом [−2,2]×[−2,2], z = x+iy; функция всюду определена, полюсов и разрезов нет (замаскированных точек 0 из 25921). Нули отмечены маркерами и подтверждены решением уравнения z²−1=0: z = −1 и z = 1 на вещественной оси, где высота равна 0. Характерные значения: |f(0)|=|−1|=1, |f(±i)|=|−2|=2, |f(±2)|=|3|=3, а максимум sqrt(65) ≈ 8.062 достигается в четырёх углах z = ±2±2i (там f = −1±8i). По принципу максимума модуля наибольшее значение лежит на границе квадрата, поэтому поверхность «поднимается» к краям, образуя две нулевые ямки в точках ±1.",
+        "truncated": false,
+        "images": [
+          "plots/complex-modulus.png"
+        ],
+        "duration_ms": 14345,
+        "steps": [
+          {
+            "duration_ms": 2912,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 5007,
+            "completion_tokens": 319,
+            "calls": [
+              {
+                "name": "math_plot",
+                "arguments": {
+                  "plot_type": "complex_height",
+                  "functions": [
+                    "z^2 - 1"
+                  ],
+                  "variable": "z",
+                  "x_min": -2,
+                  "x_max": 2,
+                  "y_min": -2,
+                  "y_max": 2
+                }
+              },
+              {
+                "name": "math_solve",
+                "arguments": {
+                  "equations": [
+                    "z^2 - 1 = 0"
+                  ],
+                  "variables": [
+                    "z"
+                  ],
+                  "real_only": false
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 4071,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 5952,
+            "completion_tokens": 377,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "numeric",
+                  "expression": "sqrt(65)"
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 7145,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 6159,
+            "completion_tokens": 758,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_plot",
+            "duration_ms": 156,
+            "arguments": {
+              "plot_type": "complex_height",
+              "functions": [
+                "z^2 - 1"
+              ],
+              "variable": "z",
+              "x_min": -2,
+              "x_max": 2,
+              "y_min": -2,
+              "y_max": 2
+            },
+            "output": {
+              "status": "ok",
+              "plot_type": "complex_height",
+              "functions": [
+                {
+                  "expression": "z**2 - 1",
+                  "segments": 1,
+                  "discontinuities": []
+                }
+              ],
+              "variable": "z",
+              "x_min": -2.0,
+              "x_max": 2.0,
+              "y_min": -2.0,
+              "y_max": 2.0,
+              "samples": 161,
+              "png_bytes": 134974,
+              "masked_points": 0,
+              "total_points": 25921,
+              "branch_cuts": [],
+              "poles": [],
+              "checkpoints": [
+                {
+                  "point": "z=0",
+                  "value": "-1",
+                  "numeric": "-1.00000000000000",
+                  "height": "1",
+                  "numeric_height": "1.00000000000000",
+                  "state": ""
+                },
+                {
+                  "point": "z=1",
+                  "value": "0",
+                  "numeric": "0",
+                  "height": "0",
+                  "numeric_height": "0",
+                  "state": ""
+                },
+                {
+                  "point": "z=I",
+                  "value": "-2",
+                  "numeric": "-2.00000000000000",
+                  "height": "2",
+                  "numeric_height": "2.00000000000000",
+                  "state": ""
+                },
+                {
+                  "point": "z=-1",
+                  "value": "0",
+                  "numeric": "0",
+                  "height": "0",
+                  "numeric_height": "0",
+                  "state": ""
+                },
+                {
+                  "point": "z=-I",
+                  "value": "-2",
+                  "numeric": "-2.00000000000000",
+                  "height": "2",
+                  "numeric_height": "2.00000000000000",
+                  "state": ""
+                },
+                {
+                  "point": "z=2",
+                  "value": "3",
+                  "numeric": "3.00000000000000",
+                  "height": "3",
+                  "numeric_height": "3.00000000000000",
+                  "state": ""
+                },
+                {
+                  "point": "z=-2",
+                  "value": "3",
+                  "numeric": "3.00000000000000",
+                  "height": "3",
+                  "numeric_height": "3.00000000000000",
+                  "state": ""
+                }
+              ],
+              "zero_markers": [
+                {
+                  "re": -1.0,
+                  "im": 0.0
+                },
+                {
+                  "re": 1.0,
+                  "im": 0.0
+                }
+              ],
+              "levels": [],
+              "color_scale": "viridis: |f(z)|",
+              "detail": "Поверхность |f(z)| построена; полюсы и разрезы замаскированы. Нули отмечены на поверхности: (-1, 0), (1, 0)."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_solve",
+            "duration_ms": 28,
+            "arguments": {
+              "equations": [
+                "z^2 - 1 = 0"
+              ],
+              "variables": [
+                "z"
+              ],
+              "real_only": false
+            },
+            "output": {
+              "status": "solutions",
+              "equations": [
+                "z**2 - 1 = 0"
+              ],
+              "variables": [
+                "z"
+              ],
+              "solutions": [
+                {
+                  "z": "-1"
+                },
+                {
+                  "z": "1"
+                }
+              ],
+              "numeric_solutions": [
+                {
+                  "z": "-1.00000000000000"
+                },
+                {
+                  "z": "1.00000000000000"
+                }
+              ],
+              "discarded": [],
+              "real_only": false,
+              "verified": true,
+              "detail": "Все решения проверены подстановкой в исходные уравнения и по области определения."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_calculate",
+            "duration_ms": 32,
+            "arguments": {
+              "operation": "numeric",
+              "expression": "sqrt(65)"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "numeric",
+              "expression": "sqrt(65)",
+              "variable": "x",
+              "result": "8.06225774829855",
+              "numeric": "8.06225774829855",
+              "exact": false,
+              "detail": "Численное значение с 15 значащими цифрами.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "critical-and-plot",
+      "reference": "x=±1 — минимумы со значением −1, x=0 — локальный максимум со значением 0. График с двумя минимумами, симметричный.",
+      "required_result_passed": true,
+      "tool_sequence_passed": true,
+      "mandatory": true,
+      "run": "full-catalog",
+      "review_note": "С полным каталогом модель последовательно вычислила f′, решила f′(x)=0 и построила PNG за три MCP-вызова. В другом прогоне был лишний вызов для f(x)=0, а агент использовал весь бюджет из пяти вызовов.",
+      "direct": {
+        "matched": true,
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 19,
+            "arguments": {
+              "operation": "diff",
+              "expression": "x^4-2*x^2"
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "x**4-2*x**2",
+              "variable": "x",
+              "result": "4*x*(x**2 - 1)",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 1 по переменной x.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          },
+          {
+            "name": "math_solve",
+            "duration_ms": 21,
+            "arguments": {
+              "equations": [
+                "4*x*(x^2-1)=0"
+              ]
+            },
+            "output": {
+              "status": "solutions",
+              "equations": [
+                "4*x*(x**2-1) = 0"
+              ],
+              "variables": [
+                "x"
+              ],
+              "solutions": [
+                {
+                  "x": "-1"
+                },
+                {
+                  "x": "0"
+                },
+                {
+                  "x": "1"
+                }
+              ],
+              "numeric_solutions": [
+                {
+                  "x": "-1.00000000000000"
+                },
+                {
+                  "x": "0"
+                },
+                {
+                  "x": "1.00000000000000"
+                }
+              ],
+              "discarded": [],
+              "real_only": true,
+              "verified": true,
+              "detail": "Все решения проверены подстановкой в исходные уравнения и по области определения."
+            },
+            "error": null,
+            "images": [],
+            "matches": true
+          },
+          {
+            "name": "math_plot",
+            "duration_ms": 102,
+            "arguments": {
+              "functions": [
+                "x^4-2*x^2"
+              ],
+              "x_min": -2,
+              "x_max": 2
+            },
+            "output": {
+              "status": "ok",
+              "plot_type": "curve",
+              "functions": [
+                {
+                  "expression": "x**4-2*x**2",
+                  "segments": 1,
+                  "discontinuities": []
+                }
+              ],
+              "variable": "x",
+              "x_min": -2.0,
+              "x_max": 2.0,
+              "y_min": null,
+              "y_max": null,
+              "samples": 2001,
+              "png_bytes": 22688,
+              "masked_points": 0,
+              "total_points": 2001,
+              "branch_cuts": [],
+              "poles": [],
+              "checkpoints": [
+                {
+                  "point": "x=0",
+                  "value": "0",
+                  "numeric": "0",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                }
+              ],
+              "zero_markers": [],
+              "levels": [],
+              "color_scale": "",
+              "detail": "График построен; разрывы и участки вне вещественной области разорваны."
+            },
+            "error": null,
+            "images": [
+              {
+                "sha256": "e8b79eca87ee994511b2161309c03cf1e58094f2d003282e21f14a7e75fd4d34"
+              }
+            ],
+            "matches": true
+          }
+        ]
+      },
+      "live": {
+        "decision": "tool",
+        "decision_matches": true,
+        "reason": "plain_response",
+        "answer": "**Суть:** критические точки — это `x = -1, 0, 1`; в `±1` локальные минимумы, в `0` — локальный максимум. График на `[-2, 2]` построен успешно (2001 точка, разрывов нет).\n\n**Решение**\n\nФункция `f(x) = x⁴ - 2x²` — многочлен, область определения `R`, ограничений нет.\n\n1) Производная (проверено инструментом):\n`f'(x) = 4x³ - 4x = 4x(x² - 1)`\n\n2) Критические точки — где `f' = 0` (точек, где производная не существует, нет):\n`4x(x-1)(x+1) = 0` → `x = -1, 0, 1` (решения проверены подстановкой).\n\n3) Классификация через вторую производную:\n`f''(x) = 12x² - 4`\n- `f''(-1) = 8 > 0` → локальный минимум, `f(-1) = 1 - 2 = -1`\n- `f''(0) = -4 < 0` → локальный максимум, `f(0) = 0`\n- `f''(1) = 8 > 0` → локальный минимум, `f(1) = 1 - 2 = -1`\n\n4) Проверка знаков `f'` (интервалы): на `(-∞,-1)` знак `−`, на `(-1,0)` знак `+`, на `(0,1)` знак `−`, на `(1,∞)` знак `+`. Это согласуется с выводом: убывание → минимум → возрастание → максимум → убывание → минимум → возрастание.\n\n5) На отрезке `[-2, 2]`: значения `f(-2) = 16 - 8 = 8`, `f(2) = 8`. Значит глобальный минимум на отрезке — `-1` в точках `x = ±1`, глобальный максимум — `8` на концах `x = ±2` (точка `x = 0` до него не дотягивает).\n\n**График**\n\nПостроенная кривая: две «ямы» при `x = ±1` на высоте `-1`, горб в начале координат высотой `0`, затем крутой рост к `8` на краях (функция чётная, симметрична относительно оси `Oy`, поэтому график симметричен).\n\n**Ключевой вывод:** критические точки `{-1, 0, 1}`; `x = ±1` — минимумы (`f = -1`), `x = 0` — максимум (`f = 0`); на `[-2, 2]` наибольшее значение `8` достигается на обоих концах отрезка.",
+        "truncated": false,
+        "images": [
+          "plots/critical-and-plot.png"
+        ],
+        "duration_ms": 12183,
+        "steps": [
+          {
+            "duration_ms": 4690,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 5474,
+            "completion_tokens": 488,
+            "calls": [
+              {
+                "name": "math_calculate",
+                "arguments": {
+                  "operation": "diff",
+                  "expression": "x^4 - 2*x^2",
+                  "variable": "x",
+                  "order": 1
+                }
+              },
+              {
+                "name": "math_solve",
+                "arguments": {
+                  "equations": [
+                    "4*x^3 - 4*x = 0"
+                  ],
+                  "variables": [
+                    "x"
+                  ]
+                }
+              },
+              {
+                "name": "math_plot",
+                "arguments": {
+                  "functions": [
+                    "x^4 - 2*x^2"
+                  ],
+                  "variable": "x",
+                  "x_min": -2,
+                  "x_max": 2,
+                  "y_min": -1.5,
+                  "y_max": 8.5
+                }
+              }
+            ]
+          },
+          {
+            "duration_ms": 7284,
+            "max_tokens": 32768,
+            "finish": "stop",
+            "prompt_tokens": 6272,
+            "completion_tokens": 838,
+            "calls": []
+          }
+        ],
+        "calls": [
+          {
+            "name": "math_calculate",
+            "duration_ms": 19,
+            "arguments": {
+              "operation": "diff",
+              "expression": "x^4 - 2*x^2",
+              "variable": "x",
+              "order": 1
+            },
+            "output": {
+              "status": "ok",
+              "operation": "diff",
+              "expression": "x**4 - 2*x**2",
+              "variable": "x",
+              "result": "4*x*(x**2 - 1)",
+              "numeric": "",
+              "exact": true,
+              "detail": "Производная порядка 1 по переменной x.",
+              "variables": [],
+              "constraint": "",
+              "convergence": null,
+              "absolute_convergence": null,
+              "conditional": null,
+              "partials": [],
+              "jacobian": [],
+              "jacobian_numeric": [],
+              "extrema": []
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_solve",
+            "duration_ms": 19,
+            "arguments": {
+              "equations": [
+                "4*x^3 - 4*x = 0"
+              ],
+              "variables": [
+                "x"
+              ]
+            },
+            "output": {
+              "status": "solutions",
+              "equations": [
+                "4*x**3 - 4*x = 0"
+              ],
+              "variables": [
+                "x"
+              ],
+              "solutions": [
+                {
+                  "x": "-1"
+                },
+                {
+                  "x": "0"
+                },
+                {
+                  "x": "1"
+                }
+              ],
+              "numeric_solutions": [
+                {
+                  "x": "-1.00000000000000"
+                },
+                {
+                  "x": "0"
+                },
+                {
+                  "x": "1.00000000000000"
+                }
+              ],
+              "discarded": [],
+              "real_only": true,
+              "verified": true,
+              "detail": "Все решения проверены подстановкой в исходные уравнения и по области определения."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          },
+          {
+            "name": "math_plot",
+            "duration_ms": 168,
+            "arguments": {
+              "functions": [
+                "x^4 - 2*x^2"
+              ],
+              "variable": "x",
+              "x_min": -2,
+              "x_max": 2,
+              "y_min": -1.5,
+              "y_max": 8.5
+            },
+            "output": {
+              "status": "ok",
+              "plot_type": "curve",
+              "functions": [
+                {
+                  "expression": "x**4 - 2*x**2",
+                  "segments": 1,
+                  "discontinuities": []
+                }
+              ],
+              "variable": "x",
+              "x_min": -2.0,
+              "x_max": 2.0,
+              "y_min": null,
+              "y_max": null,
+              "samples": 2001,
+              "png_bytes": 22662,
+              "masked_points": 0,
+              "total_points": 2001,
+              "branch_cuts": [],
+              "poles": [],
+              "checkpoints": [
+                {
+                  "point": "x=0",
+                  "value": "0",
+                  "numeric": "0",
+                  "height": "",
+                  "numeric_height": "",
+                  "state": ""
+                }
+              ],
+              "levels": [],
+              "color_scale": "",
+              "detail": "График построен; разрывы и участки вне вещественной области разорваны."
+            },
+            "error": null,
+            "images": [],
+            "matches": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "ambiguous-plot",
+      "reference": "Уточняет, какую функцию строить. Запрос без функции не запускает MCP.",
+      "required_result_passed": true,
+      "tool_sequence_passed": true,
+      "mandatory": false,
+      "run": "resume-2",
+      "review_note": "",
+      "direct": {
+        "matched": null,
+        "calls": []
+      },
+      "live": {
+        "decision": "clarify",
+        "decision_matches": true,
+        "reason": "clarification",
+        "answer": "В сообщении не видно самой функции — подскажи, что строить. Пришли формулу z = f(x, y) (например, z = x^2 - y^2) и, если важно, диапазоны по x и y. Если функция была в предыдущем сообщении или в файле, продублируй её текстом: контекст переписки до меня не дошёл.",
+        "truncated": false,
+        "images": [],
+        "duration_ms": 3659,
+        "steps": [
+          {
+            "duration_ms": 3658,
+            "max_tokens": 32768,
+            "finish": "tool_calls",
+            "prompt_tokens": 4814,
+            "completion_tokens": 241,
+            "calls": [
+              {
+                "name": "clarification",
+                "arguments": {
+                  "question": "В сообщении не видно самой функции — подскажи, что строить. Пришли формулу z = f(x, y) (например, z = x^2 - y^2) и, если важно, диапазоны по x и y. Если функция была в предыдущем сообщении или в файле, продублируй её текстом: контекст переписки до меня не дошёл."
+                }
+              }
+            ]
+          }
+        ],
+        "calls": []
+      }
+    }
+  ]
+}

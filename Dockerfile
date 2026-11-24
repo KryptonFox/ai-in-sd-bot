@@ -8,6 +8,7 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-project \
     && useradd --uid 10001 --create-home student
+COPY --chown=student:student config.toml ./config.toml
 COPY --chown=student:student app ./app
 COPY --chown=student:student mcp_servers ./mcp_servers
 USER student

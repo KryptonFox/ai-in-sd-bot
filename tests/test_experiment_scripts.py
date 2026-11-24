@@ -306,6 +306,46 @@ async def test_recording_executor_rejects_resource_outside_discovered_catalog() 
     mcp.call_tool.assert_not_awaited()
 
 
+async def test_recording_executor_applies_configured_runtime_tool_budget() -> None:
+    clock = run_routing_eval.FrozenClock(
+        run_routing_eval.datetime.fromisoformat("2026-10-12T09:00:00+03:00")
+    )
+    mcp = create_student_tools_client(Settings(bot_token="unused", postgres_password="unused"))
+    mcp.load_catalog(tool_catalog())
+    mcp.load_resources(resource_catalog())
+    mcp.call_tool = AsyncMock()
+    state = RunState(
+        context=run_routing_eval.EventContext(
+            user_id=1,
+            event_id="eval:configured-budget",
+            request_id="eval:configured-budget",
+        ),
+        conversation=[],
+        timezone="Europe/Moscow",
+        calls_used=5,
+    )
+    call = ToolCall(
+        id="weather",
+        name="get_weather",
+        arguments={"city": "Казань"},
+    )
+
+    at_default_limit = run_routing_eval.RecordingToolExecutionService(mcp, clock)
+    with pytest.raises(ToolFailure) as captured:
+        await at_default_limit.execute(state, [call])
+    assert captured.value.code == "call_budget"
+
+    above_default = run_routing_eval.RecordingToolExecutionService(
+        mcp,
+        clock,
+        max_calls=6,
+    )
+    with pytest.raises(run_routing_eval.SelectedAction):
+        await above_default.execute(state, [call])
+
+    mcp.call_tool.assert_not_awaited()
+
+
 def test_routing_revision_hash_includes_mcp_server_sources(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

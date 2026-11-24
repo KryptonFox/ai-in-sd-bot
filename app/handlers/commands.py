@@ -12,7 +12,7 @@ from app.services.dialog_service import DialogService
 logger = logging.getLogger("app.handlers.commands")
 router = Router(name="commands")
 
-ROLE_ICONS = {"study": "🎓", "translate": "🌐", "review": "🔍"}
+ROLE_ICONS = {"study": "🎓", "translate": "🌐", "review": "🔍", "everyday": "🧭"}
 
 
 def get_roles_keyboard() -> InlineKeyboardMarkup:
@@ -31,7 +31,7 @@ def get_roles_keyboard() -> InlineKeyboardMarkup:
 @router.message(Command("start", "help", "menu"), F.chat.type == "private")
 async def handle_start(message: Message) -> None:
     text = (
-        "👋 Привет! Я твой учебный AI-ассистент.\n\n"
+        "👋 Привет! Я твой AI-ассистент по учёбе и повседневным делам.\n\n"
         f"{registry.format_help()}\n\n"
         "Выбери нужную роль с помощью кнопок ниже или отправь команду из списка.\n\n"
         "⚙️ **Управление настройками:**\n"

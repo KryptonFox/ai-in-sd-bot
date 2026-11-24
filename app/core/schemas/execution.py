@@ -19,6 +19,8 @@ class RunState:
     last_call: ToolCall | None = None
     resource_uris: list[str] = field(default_factory=list)
     images: list[ToolImage] = field(default_factory=list)
+    protected_prefix: int = 0
+    deadline_at: float | None = None
 
     def build_result(
         self,

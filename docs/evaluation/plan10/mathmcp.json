@@ -1,0 +1,653 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "improper-log",
+      "query": "Вычисли точно несобственный интеграл от 0 до бесконечности ln(1+x²)/(1+x²). Объясни сходимость.",
+      "reference": "Подстановка x=tan(t), результат π ln 2. При x→∞ подынтегральная функция O(log x/x²).",
+      "direct": [
+        {
+          "name": "math_calculate",
+          "arguments": {
+            "operation": "integrate",
+            "expression": "log(1+x^2)/(1+x^2)",
+            "lower": 0,
+            "upper": "oo"
+          },
+          "expected": {
+            "status": "ok",
+            "result": "pi*log(2)",
+            "convergence": "convergent"
+          }
+        }
+      ]
+    },
+    {
+      "id": "limit-cancellation",
+      "query": "Найди двусторонний предел (sin(x)−x+x³/6)/x⁵ при x→0 и объясни, какие члены сокращаются.",
+      "reference": "1/120. Сокращаются члены степеней 1 и 3.",
+      "direct": [
+        {
+          "name": "math_calculate",
+          "arguments": {
+            "operation": "limit",
+            "expression": "(sin(x)-x+x^3/6)/x^5",
+            "point": 0
+          },
+          "expected": {
+            "status": "ok",
+            "result": "1/120"
+          }
+        }
+      ]
+    },
+    {
+      "id": "one-sided-limit",
+      "query": "Найди предел (1−cos x)/x² при x→0 справа. Дай точное значение.",
+      "reference": "1/2; можно применить формулу 1−cos(x)=2 sin²(x/2).",
+      "direct": [
+        {
+          "name": "math_calculate",
+          "arguments": {
+            "operation": "limit",
+            "expression": "(1-cos(x))/x^2",
+            "point": 0,
+            "direction": "right"
+          },
+          "expected": {
+            "status": "ok",
+            "result": "1/2"
+          }
+        }
+      ]
+    },
+    {
+      "id": "two-sided-disagreement",
+      "query": "Существует ли двусторонний предел |x|/x при x→0? Укажи оба односторонних предела.",
+      "reference": "Слева −1, справа 1. Двусторонний предел не существует.",
+      "direct": [
+        {
+          "name": "math_calculate",
+          "arguments": {
+            "operation": "limit",
+            "expression": "abs(x)/x",
+            "point": 0,
+            "direction": "left"
+          },
+          "expected": {
+            "status": "ok",
+            "result": "-1"
+          }
+        },
+        {
+          "name": "math_calculate",
+          "arguments": {
+            "operation": "limit",
+            "expression": "abs(x)/x",
+            "point": 0,
+            "direction": "right"
+          },
+          "expected": {
+            "status": "ok",
+            "result": "1"
+          }
+        }
+      ]
+    },
+    {
+      "id": "divergent-integral",
+      "query": "Вычисли или докажи расходимость интеграла от 1 до бесконечности 1/x. Как ведут себя усечённые интегралы?",
+      "reference": "Расходится к +∞. Интеграл до R равен ln R.",
+      "direct": [
+        {
+          "name": "math_calculate",
+          "arguments": {
+            "operation": "integrate",
+            "expression": "1/x",
+            "lower": 1,
+            "upper": "oo"
+          },
+          "expected": {
+            "status": "ok",
+            "result": "oo",
+            "convergence": "divergent"
+          }
+        }
+      ]
+    },
+    {
+      "id": "series-converges",
+      "query": "Проверь сходимость ряда от n=1 до бесконечности 1/n². Если можешь, приведи точную сумму.",
+      "reference": "Сходится абсолютно по p-признаку с p=2, сумма π²/6.",
+      "direct": [
+        {
+          "name": "math_calculate",
+          "arguments": {
+            "operation": "series",
+            "expression": "1/n^2",
+            "variable": "n",
+            "lower": 1,
+            "upper": "oo"
+          },
+          "expected": {
+            "status": "ok",
+            "result": "pi**2/6",
+            "convergence": "convergent",
+            "absolute_convergence": "convergent",
+            "conditional": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "series-conditional",
+      "query": "Сходится ли ряд от n=1 до бесконечности (−1)^(n−1)/n абсолютно или условно? Если известна точная сумма, укажи её.",
+      "reference": "Сходится условно по Лейбницу. Ряд модулей гармонический. Сумма ln 2.",
+      "direct": [
+        {
+          "name": "math_calculate",
+          "arguments": {
+            "operation": "series",
+            "expression": "(-1)^(n-1)/n",
+            "variable": "n",
+            "lower": 1,
+            "upper": "oo"
+          },
+          "expected": {
+            "status": "ok",
+            "result": "log(2)",
+            "convergence": "convergent",
+            "absolute_convergence": "divergent",
+            "conditional": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "partial-derivative",
+      "query": "Вычисли вторую частную производную x³y²+sin(xy) по x при фиксированном y.",
+      "reference": "6xy²−y² sin(xy).",
+      "direct": [
+        {
+          "name": "math_calculate",
+          "arguments": {
+            "operation": "diff",
+            "expression": "x^3*y^2+sin(x*y)",
+            "variable": "x",
+            "order": 2
+          },
+          "expected": {
+            "status": "ok",
+            "result": "y**2*(6*x - sin(x*y))"
+          }
+        }
+      ]
+    },
+    {
+      "id": "mixed-derivative",
+      "query": "Найди смешанную производную x²y³, сначала по x и затем по y.",
+      "reference": "6xy².",
+      "direct": [
+        {
+          "name": "math_calculate",
+          "arguments": {
+            "operation": "diff",
+            "expression": "x^2*y^3",
+            "variable": "x"
+          },
+          "expected": {
+            "status": "ok",
+            "result": "2*x*y**3"
+          }
+        },
+        {
+          "name": "math_calculate",
+          "arguments": {
+            "operation": "diff",
+            "expression": "2*x*y^3",
+            "variable": "y"
+          },
+          "expected": {
+            "status": "ok",
+            "result": "6*x*y**2"
+          }
+        }
+      ]
+    },
+    {
+      "id": "jacobian",
+      "query": "Найди матрицу Якоби отображения (x²+y², xy) по переменным (x,y) и её определитель.",
+      "reference": "Матрица [[2x,2y],[y,x]], определитель 2(x²−y²).",
+      "direct": [
+        {
+          "name": "math_calculate",
+          "arguments": {
+            "operation": "jacobian",
+            "functions": [
+              "x^2+y^2",
+              "x*y"
+            ],
+            "variables": [
+              "x",
+              "y"
+            ]
+          },
+          "expected": {
+            "status": "ok",
+            "jacobian": [
+              [
+                "2*x",
+                "2*y"
+              ],
+              [
+                "y",
+                "x"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "constrained-extrema",
+      "query": "Найди глобальный максимум и минимум xy на окружности x²+y²=1. Перечисли все точки и объясни, почему других экстремумов нет.",
+      "reference": "Максимум 1/2 при x=y=±1/√2. Минимум −1/2 при x=−y=±1/√2. Окружность компактна, градиент связи ненулевой.",
+      "direct": [
+        {
+          "name": "math_calculate",
+          "arguments": {
+            "operation": "constrained_extrema",
+            "expression": "x*y",
+            "variables": [
+              "x",
+              "y"
+            ],
+            "constraints": [
+              "x^2+y^2=1"
+            ]
+          },
+          "expected": {
+            "status": "ok",
+            "operation": "constrained_extrema"
+          },
+          "expected_items": {
+            "extrema": [
+              {
+                "point": {
+                  "x": "sqrt(2)/2",
+                  "y": "sqrt(2)/2"
+                },
+                "value": "1/2",
+                "kind": "maximum"
+              },
+              {
+                "point": {
+                  "x": "-sqrt(2)/2",
+                  "y": "-sqrt(2)/2"
+                },
+                "value": "1/2",
+                "kind": "maximum"
+              },
+              {
+                "point": {
+                  "x": "sqrt(2)/2",
+                  "y": "-sqrt(2)/2"
+                },
+                "value": "-1/2",
+                "kind": "minimum"
+              },
+              {
+                "point": {
+                  "x": "-sqrt(2)/2",
+                  "y": "sqrt(2)/2"
+                },
+                "value": "-1/2",
+                "kind": "minimum"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "parametric",
+      "query": "Построй 2D параметрическую кривую x=2cos(t), y=sin(t) при 0≤t≤2π и поясни, где она пересекает оси.",
+      "reference": "Эллипс с полуосями 2 и 1, пересечения (±2,0),(0,±1).",
+      "image": true,
+      "direct": [
+        {
+          "name": "math_plot",
+          "arguments": {
+            "plot_type": "parametric",
+            "functions": [
+              "2*cos(t)",
+              "sin(t)"
+            ],
+            "parameter": "t",
+            "x_min": 0,
+            "x_max": 6.283185307179586
+          },
+          "expected": {
+            "status": "ok",
+            "plot_type": "parametric"
+          }
+        }
+      ]
+    },
+    {
+      "id": "level-curves",
+      "query": "На квадрате [−2,2]×[−2,2] построй линии уровня 1 и 2 функции x²+y² и объясни, какие это кривые.",
+      "reference": "Концентрические окружности радиусов 1 и √2; обе целиком в области.",
+      "image": true,
+      "direct": [
+        {
+          "name": "math_plot",
+          "arguments": {
+            "plot_type": "contour",
+            "functions": [
+              "x^2+y^2"
+            ],
+            "levels": [
+              1,
+              2
+            ],
+            "x_min": -2,
+            "x_max": 2,
+            "y_min": -2,
+            "y_max": 2
+          },
+          "expected": {
+            "status": "ok",
+            "plot_type": "contour",
+            "levels": [
+              1,
+              2
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "complex-pole",
+      "query": "Построй цветную карту комплексной функции 1/z на квадрате Re z, Im z от −2 до 2. Покажи фазу цветом и объясни, что видно в нуле.",
+      "reference": "Один простой полюс в нуле, фаза −arg z, область вокруг полюса замаскирована.",
+      "image": true,
+      "mandatory": true,
+      "direct": [
+        {
+          "name": "math_plot",
+          "arguments": {
+            "plot_type": "domain_coloring",
+            "functions": [
+              "1/z"
+            ],
+            "variable": "z",
+            "x_min": -2,
+            "x_max": 2,
+            "y_min": -2,
+            "y_max": 2
+          },
+          "expected": {
+            "status": "ok",
+            "plot_type": "domain_coloring",
+            "poles": [
+              "z=0"
+            ],
+            "branch_cuts": []
+          },
+          "expected_items": {
+            "checkpoints": [
+              {
+                "point": "z=0",
+                "state": "pole"
+              },
+              {
+                "point": "z=1",
+                "value": "1"
+              },
+              {
+                "point": "z=I",
+                "value": "-I"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "complex-log",
+      "query": "Построй 2D-карту фазы главной ветви log(z) на квадрате от −2 до 2 по обеим осям. Отметь разрез и объясни, что происходит на нём.",
+      "reference": "Главная ветвь определена вне неположительной вещественной полуоси, скачок мнимой части 2π на отрицательной вещественной оси.",
+      "image": true,
+      "direct": [
+        {
+          "name": "math_plot",
+          "arguments": {
+            "plot_type": "domain_coloring",
+            "functions": [
+              "log(z)"
+            ],
+            "variable": "z",
+            "x_min": -2,
+            "x_max": 2,
+            "y_min": -2,
+            "y_max": 2
+          },
+          "expected": {
+            "status": "ok",
+            "plot_type": "domain_coloring"
+          },
+          "expected_items": {
+            "checkpoints": [
+              {
+                "point": "z=-1",
+                "state": "branch_cut"
+              },
+              {
+                "point": "z=1",
+                "value": "0"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "surface-saddle",
+      "query": "Построй 3D-поверхность z=xy на квадрате [−2,2]×[−2,2] и скажи, какого типа критическая точка в нуле.",
+      "reference": "Седловая поверхность, по y=x и y=−x значения противоположных знаков.",
+      "image": true,
+      "direct": [
+        {
+          "name": "math_plot",
+          "arguments": {
+            "plot_type": "surface",
+            "functions": [
+              "x*y"
+            ],
+            "x_min": -2,
+            "x_max": 2,
+            "y_min": -2,
+            "y_max": 2
+          },
+          "expected": {
+            "status": "ok",
+            "plot_type": "surface"
+          },
+          "expected_items": {
+            "checkpoints": [
+              {
+                "point": "(x, y)=(0, 0)",
+                "value": "0"
+              },
+              {
+                "point": "(x, y)=(1, 1)",
+                "numeric": "1.00000000000000"
+              },
+              {
+                "point": "(x, y)=(-1, 1)",
+                "numeric": "-1.00000000000000"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "surface-masked",
+      "query": "Построй 3D-поверхность z=√(1−x²−y²) на квадрате [−1.5,1.5]×[−1.5,1.5]. Покажи только её действительную часть области определения и назови высоту в нуле.",
+      "reference": "Верхняя полусфера радиуса 1 над x²+y²≤1. Высота 1 в (0,0). За диском сетка скрыта.",
+      "image": true,
+      "direct": [
+        {
+          "name": "math_plot",
+          "arguments": {
+            "plot_type": "surface",
+            "functions": [
+              "sqrt(1-x^2-y^2)"
+            ],
+            "x_min": -1.5,
+            "x_max": 1.5,
+            "y_min": -1.5,
+            "y_max": 1.5
+          },
+          "expected": {
+            "status": "ok",
+            "plot_type": "surface"
+          },
+          "expected_items": {
+            "checkpoints": [
+              {
+                "point": "(x, y)=(0, 0)",
+                "value": "1"
+              },
+              {
+                "point": "(x, y)=(1, 1)",
+                "value": "undefined"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "complex-modulus",
+      "query": "Построй 3D-график модуля функции f(z)=z²−1 над квадратом [−2,2]×[−2,2] в комплексной плоскости. Отметь нули.",
+      "reference": "Высота |z²−1|. Нули z=±1. Контрольные высоты 1 при z=0 и 2 при z=i.",
+      "image": true,
+      "mandatory": true,
+      "direct": [
+        {
+          "name": "math_plot",
+          "arguments": {
+            "plot_type": "complex_height",
+            "functions": [
+              "z^2-1"
+            ],
+            "variable": "z",
+            "x_min": -2,
+            "x_max": 2,
+            "y_min": -2,
+            "y_max": 2
+          },
+          "expected": {
+            "status": "ok",
+            "plot_type": "complex_height"
+          },
+          "expected_items": {
+            "checkpoints": [
+              {
+                "point": "z=-1",
+                "value": "0"
+              },
+              {
+                "point": "z=1",
+                "value": "0"
+              },
+              {
+                "point": "z=0",
+                "height": "1"
+              },
+              {
+                "point": "z=I",
+                "height": "2"
+              }
+            ],
+            "zero_markers": [
+              {
+                "re": -1,
+                "im": 0
+              },
+              {
+                "re": 1,
+                "im": 0
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "critical-and-plot",
+      "query": "Найди все критические точки x⁴−2x², классифицируй их и построй 2D-график на [−2,2].",
+      "reference": "x=±1 — минимумы со значением −1, x=0 — локальный максимум со значением 0. График с двумя минимумами, симметричный.",
+      "image": true,
+      "mandatory": true,
+      "direct": [
+        {
+          "name": "math_calculate",
+          "arguments": {
+            "operation": "diff",
+            "expression": "x^4-2*x^2"
+          },
+          "expected": {
+            "status": "ok",
+            "result": "4*x*(x**2 - 1)"
+          }
+        },
+        {
+          "name": "math_solve",
+          "arguments": {
+            "equations": [
+              "4*x*(x^2-1)=0"
+            ]
+          },
+          "expected": {
+            "status": "solutions",
+            "solutions": [
+              {
+                "x": "-1"
+              },
+              {
+                "x": "0"
+              },
+              {
+                "x": "1"
+              }
+            ]
+          }
+        },
+        {
+          "name": "math_plot",
+          "arguments": {
+            "functions": [
+              "x^4-2*x^2"
+            ],
+            "x_min": -2,
+            "x_max": 2
+          },
+          "expected": {
+            "status": "ok"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ambiguous-plot",
+      "query": "Построй поверхность этой функции.",
+      "reference": "Уточняет, какую функцию строить. Запрос без функции не запускает MCP.",
+      "decision": "clarify",
+      "direct": []
+    }
+  ]
+}

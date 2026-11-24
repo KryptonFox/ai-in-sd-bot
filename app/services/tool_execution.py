@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import logging
@@ -6,6 +7,7 @@ from collections.abc import Mapping, Sequence
 
 from pydantic import ValidationError
 
+from app.core.limits import DEFAULT_AGENT_MAX_TOOL_CALLS
 from app.core.ports import ToolClient, TurnStore
 from app.core.schemas.agent import AgentResult
 from app.core.schemas.execution import RunState, StepAction
@@ -35,7 +37,7 @@ class ToolExecutionService:
         confirmations: ConfirmationService | None = None,
         store: TurnStore | None = None,
         *,
-        max_calls: int = 2,
+        max_calls: int = DEFAULT_AGENT_MAX_TOOL_CALLS,
         max_output_chars: int = 12000,
     ) -> None:
         self._mcp = mcp
@@ -178,18 +180,58 @@ class ToolExecutionService:
 
         state.images.extend(images)
 
+    @staticmethod
+    def _remaining_timeout(state: RunState) -> float | None:
+        if state.deadline_at is None:
+            return None
+
+        remaining = state.deadline_at - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise ToolFailure(
+                "request_deadline",
+                "Общее время обработки запроса истекло.",
+            )
+
+        return remaining
+
+    async def _call_with_timeout(
+        self,
+        call: ToolCall,
+        client: ToolClient,
+        call_timeout: float | None,
+    ) -> dict[str, object] | PhotoToolResult:
+        if call_timeout is None:
+            return await client.call_tool(call.name, call.arguments)
+
+        try:
+            async with asyncio.timeout(call_timeout):
+                return await client.call_tool(call.name, call.arguments)
+        except TimeoutError:
+            raise ToolFailure(
+                "request_deadline",
+                "Общее время обработки запроса истекло.",
+            ) from None
+
     async def _read(self, state: RunState, call: ToolCall) -> None:
         client = self._client()
+        code = "ok"
+        timeout = self._remaining_timeout(state)
         await self._reserve(state)
         started = time.monotonic()
-        outcome = await client.call_tool(call.name, call.arguments)
+        try:
+            outcome = await self._call_with_timeout(call, client, timeout)
+        except ToolFailure as error:
+            code = error.code
+            raise
+        finally:
+            logger.info(
+                "tool_complete request=%s tool=%s duration_ms=%.0f code=%s",
+                state.context.request_id,
+                call.name,
+                (time.monotonic() - started) * 1000,
+                code,
+            )
 
-        logger.info(
-            "tool_complete request=%s tool=%s duration_ms=%.0f",
-            state.context.request_id,
-            call.name,
-            (time.monotonic() - started) * 1000,
-        )
         if isinstance(outcome, PhotoToolResult):
             payload = outcome.payload
             images = outcome.images
@@ -214,22 +256,38 @@ class ToolExecutionService:
 
     async def _read_resource_call(self, state: RunState, call: ToolCall, uri: str) -> None:
         client = self._client()
+        timeout = self._remaining_timeout(state)
+        code = "ok"
         await self._reserve(state)
         started = time.monotonic()
         payload: dict[str, object] = {"source": "mcp_resource", "uri": uri}
         try:
-            resource = await client.read_resource(uri)
+            if timeout is None:
+                resource = await client.read_resource(uri)
+            else:
+                async with asyncio.timeout(timeout):
+                    resource = await client.read_resource(uri)
             if len(resource.text) > self._max_output_chars:
                 raise ToolFailure("tool_output_budget", "Результат ресурса слишком большой.")
             payload.update(mime_type=resource.mime_type, content=resource.text)
             state.resource_uris.append(resource.uri)
+        except TimeoutError:
+            code = "request_deadline"
+            raise ToolFailure(
+                "request_deadline",
+                "Общее время обработки запроса истекло.",
+            ) from None
         except ToolFailure as error:
+            code = error.code
+            if error.code == "request_deadline":
+                raise
             payload["error"] = {"code": error.code, "message": error.message}
 
         logger.info(
-            "resource_complete request=%s duration_ms=%.0f",
+            "resource_complete request=%s duration_ms=%.0f code=%s",
             state.context.request_id,
             (time.monotonic() - started) * 1000,
+            code,
         )
         state.conversation.append(
             ChatMessage(

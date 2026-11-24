@@ -108,6 +108,54 @@ def test_stdio_factory_generates_one_secret_for_both_servers(
     assert math_transport.env["MCP_SHARED_SECRET"] == clients.student.secret
 
 
+def test_math_client_uses_separate_rpc_timeout() -> None:
+    settings = stdio_settings(mcp_timeout=10, math_mcp_request_timeout_seconds=40)
+    clients = create_tool_clients(settings)
+
+    assert clients.math is not None
+    assert clients.student._client._init_timeout == 10
+    assert clients.math._client._init_timeout == 40
+    assert clients.student._client._session_kwargs["read_timeout_seconds"] == 10
+    assert clients.math._client._session_kwargs["read_timeout_seconds"] == 40
+
+
+def test_math_stdio_receives_only_resolved_math_settings(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", "/tmp/student-home")
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "BOT_TOKEN=123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk\n"
+        "POSTGRES_PASSWORD=unused\n"
+        "MATH_MCP_QUEUE_TIMEOUT_SECONDS=2.5\n",
+        encoding="utf-8",
+    )
+    settings = Settings.load(
+        env_file,
+        environ={
+            "BOT_TOKEN": TOKEN,
+            "POSTGRES_PASSWORD": "unused",
+            "MATH_MCP_CONFIG_FILE": "/tmp/math.toml",
+            "MATH_MCP_OPERATION_TIMEOUT_SECONDS": "3.5",
+            "LLM_API_KEY": "must-not-leak",
+        },
+        config_file=tmp_path / "missing.toml",
+    )
+    clients = create_tool_clients(settings)
+
+    assert clients.math is not None
+    transport = clients.math._client.transport
+    assert isinstance(transport, StdioTransport)
+    assert transport.env is not None
+    assert transport.env["MATH_MCP_QUEUE_TIMEOUT_SECONDS"] == "2.5"
+    assert transport.env["MATH_MCP_OPERATION_TIMEOUT_SECONDS"] == "3.5"
+    assert transport.env["MATH_MCP_CONFIG_FILE"] == "/tmp/math.toml"
+    assert "LLM_API_KEY" not in transport.env
+    assert "BOT_TOKEN" not in transport.env
+    assert "POSTGRES_PASSWORD" not in transport.env
+
+
 def test_http_factory_uses_separate_urls_and_one_bearer_secret() -> None:
     settings = Settings(
         bot_token="unused",
