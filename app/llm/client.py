@@ -2,6 +2,7 @@ import asyncio
 import logging
 import time
 from typing import Any, Self
+from uuid import uuid4
 
 import httpx
 import httpx2
@@ -40,6 +41,9 @@ from app.llm.diagnostics import (
 
 logger = logging.getLogger("app.llm")
 
+OPENCODE_USER_AGENT = "itmo-study-bot/0.1"
+OPENCODE_SESSION_HEADER = "x-opencode-session"
+
 HTTP_ERROR_CODES: dict[int, LLMErrorCode] = {
     400: LLMErrorCode.INVALID_REQUEST,
     401: LLMErrorCode.AUTHENTICATION,
@@ -62,6 +66,7 @@ class OpenAIClient(BaseLLMClient):
     ) -> None:
         self._settings = settings
         self._owns_client = client is None
+        self._opencode_session = f"ses_{uuid4()}" if settings.llm_opencode_session else ""
         strict_response_validation = not settings.llm_streaming
         self._client = (
             client.with_options(
@@ -97,6 +102,17 @@ class OpenAIClient(BaseLLMClient):
 
     async def get_context_length(self, model: str | None = None) -> int:
         return await self._context.get(model or self._settings.llm_model)
+
+    def _request_options(self) -> dict[str, Any]:
+        if not self._opencode_session:
+            return {}
+
+        return {
+            "extra_headers": {
+                "User-Agent": OPENCODE_USER_AGENT,
+                OPENCODE_SESSION_HEADER: self._opencode_session,
+            }
+        }
 
     async def generate(self, request: LLMRequest) -> LLMResponse:
         req_id = get_request_id() or "local"
@@ -164,7 +180,11 @@ class OpenAIClient(BaseLLMClient):
                     return await self._stream_response(payload, model)
 
                 stage = "response_decode"
-                data = await self._client.chat.completions.create(model=model, **payload)
+                data = await self._client.chat.completions.create(
+                    model=model,
+                    **payload,
+                    **self._request_options(),
+                )
 
                 return decode_response(data)
         except (APITimeoutError, TimeoutError, httpx2.TimeoutException):
@@ -212,6 +232,7 @@ class OpenAIClient(BaseLLMClient):
             model=model,
             stream_options={"include_usage": True},
             **payload,
+            **self._request_options(),
         ) as stream:
             await stream.until_done()
 

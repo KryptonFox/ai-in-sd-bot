@@ -64,8 +64,11 @@ def test_local_and_cloud_compose_ports_credentials_and_healthchecks(tmp_path):
     assert cloud["bot"]["environment"]["POSTGRES_HOST"] == "db"
     assert cloud["bot"]["environment"]["POSTGRES_PORT"] == "5432"
     assert cloud["bot"]["environment"]["MCP_SERVER_URL"] == "http://student-tools-mcp:8000/mcp"
+    assert cloud["bot"]["environment"]["MATH_MCP_SERVER_URL"] == "http://math-tools-mcp:8000/mcp"
     assert cloud["bot"]["image"] == cloud["student-tools-mcp"]["image"] == "itmo-ai-bot:local"
+    assert cloud["bot"]["image"] == cloud["math-tools-mcp"]["image"]
     assert cloud["bot"]["build"] == cloud["student-tools-mcp"]["build"]
+    assert cloud["bot"]["build"] == cloud["math-tools-mcp"]["build"]
     assert cloud["student-tools-mcp"]["command"] == [
         "python",
         "-m",
@@ -73,17 +76,39 @@ def test_local_and_cloud_compose_ports_credentials_and_healthchecks(tmp_path):
         "--transport",
         "streamable-http",
     ]
+    assert cloud["math-tools-mcp"]["command"] == [
+        "python",
+        "-m",
+        "mcp_servers.math_tools",
+        "--transport",
+        "streamable-http",
+    ]
     assert "BOT_TOKEN" not in cloud["student-tools-mcp"]["environment"]
+    assert "BOT_TOKEN" not in cloud["math-tools-mcp"]["environment"]
     assert "env_file" not in cloud["student-tools-mcp"]
+    assert "env_file" not in cloud["math-tools-mcp"]
     assert not cloud["student-tools-mcp"].get("ports")
+    assert not cloud["math-tools-mcp"].get("ports")
     assert cloud["student-tools-mcp"]["depends_on"]["db"]["condition"] == "service_healthy"
+    assert "depends_on" not in cloud["math-tools-mcp"]
     assert cloud["bot"]["depends_on"].keys() == {"db"}
     assert "mcp_internal" in cloud["student-tools-mcp"]["networks"]
     assert "mcp_internal" in cloud["bot"]["networks"]
+    assert list(cloud["math-tools-mcp"]["networks"]) == ["mcp_internal"]
     assert (
         cloud["student-tools-mcp"]["healthcheck"]["test"][-1]
         == "mcp_servers.student_tools.healthcheck"
     )
+    assert (
+        cloud["math-tools-mcp"]["healthcheck"]["test"][-1] == "mcp_servers.math_tools.healthcheck"
+    )
+    math_environment = cloud["math-tools-mcp"]["environment"]
+    assert (
+        math_environment["MCP_SHARED_SECRET"]
+        == (cloud["student-tools-mcp"]["environment"]["MCP_SHARED_SECRET"])
+    )
+    assert all(not key.startswith("POSTGRES_") for key in math_environment)
+    assert math_environment["MCP_PORT"] == "8000"
     schedule_mount = cloud["student-tools-mcp"]["volumes"][0]
     assert schedule_mount["type"] == "bind"
     assert schedule_mount["target"] == "/app/mcp_servers/student_tools/data/schedule.json"

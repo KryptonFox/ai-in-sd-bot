@@ -14,8 +14,8 @@ from app.handlers import router
 from app.health import HealthState, start_health_server
 from app.llm.client import OpenAIClient
 from app.logging_setup import configure_logging
-from app.mcp.client import MCPClient
-from app.mcp.connection import create_student_tools_client
+from app.mcp.composite import CompositeToolClient
+from app.mcp.connection import create_tool_clients
 from app.services.agent_service import AgentService
 from app.services.confirmation_service import ConfirmationService
 from app.services.dialog_service import DialogService
@@ -30,7 +30,7 @@ async def run(settings: Settings) -> None:
     bot = create_bot(settings)
     runner = None
     llm_client = None
-    mcp_client = None
+    mcp_client: CompositeToolClient | None = None
     recovery_task = None
 
     try:
@@ -40,13 +40,14 @@ async def run(settings: Settings) -> None:
 
         await _prepare_telegram(bot)
 
-        mcp_client = create_student_tools_client(settings)
+        clients = create_tool_clients(settings)
+        mcp_client = clients.composite
         await mcp_client.start()
         state.mcp = mcp_client
 
         confirmations = ConfirmationService(
             state.pool,
-            mcp_client,
+            clients.student,
             ttl=settings.confirmation_ttl,
         )
         store = PostgresTurnStore(state.pool)
@@ -123,15 +124,18 @@ async def _prepare_telegram(bot: Bot) -> None:
 
 async def _recover_services(
     confirmations: ConfirmationService,
-    mcp: MCPClient,
+    mcp: CompositeToolClient,
 ) -> None:
     while True:
         try:
             await confirmations.recover()
-            if not mcp.available:
-                await mcp.start()
         except Exception:
-            logger.warning("agent_recovery_unavailable")
+            logger.warning("confirmation_recovery_unavailable")
+
+        try:
+            await mcp.recover()
+        except Exception:
+            logger.warning("mcp_recovery_unavailable")
 
         await asyncio.sleep(15)
 
@@ -148,7 +152,7 @@ async def _shutdown(
     state: HealthState,
     bot: Bot,
     llm: OpenAIClient | None,
-    mcp: MCPClient | None,
+    mcp: CompositeToolClient | None,
     runner: web.AppRunner | None,
     recovery_task: asyncio.Task[None] | None,
 ) -> None:

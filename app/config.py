@@ -48,6 +48,14 @@ def _minimum_integer(key: str, raw_value: str, minimum: int) -> int:
         raise ConfigError(f"{key}: значение должно быть целым числом >= {minimum}.") from None
 
 
+def _boolean(key: str, raw_value: str) -> bool:
+    normalized = raw_value.strip().lower()
+    if normalized not in {"true", "false", "1", "0"}:
+        raise ConfigError(f"{key}: укажите true или false.")
+
+    return normalized in {"true", "1"}
+
+
 @dataclass(frozen=True)
 class Settings:
     bot_token: str = field(repr=False)
@@ -64,6 +72,7 @@ class Settings:
     llm_model: str = "openai/gpt-4o-mini"
     llm_timeout: float = 180.0
     llm_streaming: bool = True
+    llm_opencode_session: bool = False
     llm_max_tokens: int = 16384
     agent_timeout: float = 240.0
     summary_max_chars: int = 2000
@@ -77,6 +86,7 @@ class Settings:
     user_queue_max_size: int = 3
     mcp_transport: MCPTransport = MCPTransport.STDIO
     mcp_server_url: str = "http://127.0.0.1:8000/mcp/"
+    math_mcp_server_url: str = ""
     mcp_shared_secret: str = field(default="", repr=False)
     mcp_timeout: float = 10.0
     agent_max_tool_calls: int = 2
@@ -141,9 +151,8 @@ class Settings:
                 raise ConfigError("LLM_BASE_URL: укажите корректный URL (http:// или https://).")
 
         llm_model = value("LLM_MODEL", "openai/gpt-4o-mini").strip() or "openai/gpt-4o-mini"
-        streaming = value("LLM_STREAMING", "true").strip().lower()
-        if streaming not in {"true", "false", "1", "0"}:
-            raise ConfigError("LLM_STREAMING: укажите true или false.")
+        streaming = _boolean("LLM_STREAMING", value("LLM_STREAMING", "true"))
+        opencode_session = _boolean("LLM_OPENCODE_SESSION", value("LLM_OPENCODE_SESSION", "false"))
 
         try:
             llm_timeout = float(value("LLM_TIMEOUT", "180.0"))
@@ -231,7 +240,8 @@ class Settings:
             llm_base_url=llm_url,
             llm_model=llm_model,
             llm_timeout=llm_timeout,
-            llm_streaming=streaming in {"true", "1"},
+            llm_streaming=streaming,
+            llm_opencode_session=opencode_session,
             llm_max_tokens=bounded("LLM_MAX_TOKENS", 16384, 64, 131072),
             agent_timeout=bounded("AGENT_TIMEOUT", 240, 1, 1800),
             summary_max_chars=bounded("SUMMARY_MAX_CHARS", 2000, 100, 8000),
@@ -250,6 +260,7 @@ class Settings:
             user_queue_max_size=queue_size,
             mcp_transport=transport,
             mcp_server_url=value("MCP_SERVER_URL", "http://127.0.0.1:8000/mcp/"),
+            math_mcp_server_url=value("MATH_MCP_SERVER_URL").strip(),
             mcp_shared_secret=value("MCP_SHARED_SECRET"),
             mcp_timeout=bounded("MCP_TIMEOUT", 10, 1, 120),
             agent_max_tool_calls=bounded("AGENT_MAX_TOOL_CALLS", 2, 1, 2),

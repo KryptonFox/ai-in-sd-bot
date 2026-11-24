@@ -296,6 +296,10 @@ def test_deploy_archive_never_contains_env_or_keys(tmp_path):
     (data / "schedule.json").write_text("[]", encoding="utf-8")
     (data.parent / "__init__.py").write_text("", encoding="utf-8")
     (data.parent / "server.py").write_text("SERVER", encoding="utf-8")
+    math_source = tmp_path / "mcp_servers" / "math_tools"
+    math_source.mkdir()
+    (math_source / "__init__.py").write_text("", encoding="utf-8")
+    (math_source / "server.py").write_text("MATH", encoding="utf-8")
     (data.parent / "credentials.json").write_text('{"token": "PRIVATE"}', encoding="utf-8")
     (tmp_path / "app" / ".env").write_text("SECRET=yes", encoding="utf-8")
     (tmp_path / ".env.cloud").write_text("SECRET=yes", encoding="utf-8")
@@ -324,6 +328,8 @@ def test_deploy_archive_never_contains_env_or_keys(tmp_path):
         "app/db/migrations/sql/0001_initial_schema.sql",
         "mcp_servers/student_tools/server.py",
         "mcp_servers/student_tools/data/schedule.json",
+        "mcp_servers/math_tools/__init__.py",
+        "mcp_servers/math_tools/server.py",
     } <= set(names)
     assert all(".env" not in n and "id_ed25519" not in n for n in names)
 
@@ -437,6 +443,7 @@ def test_deploy_uploads_secrets_only_over_ssh_stdin(
     assert "config --services" in deployment_command
     assert "stop mcp-server" in deployment_command
     assert "stop student-tools-mcp" in deployment_command
+    assert "stop math-tools-mcp" in deployment_command
     assert "--remove-orphans" in deployment_command
     assert (
         "rm -rf /home/student/course-bot/app /home/student/course-bot/mcp_servers"
@@ -469,7 +476,7 @@ def test_cloud_help_renders(capsys):
     ("action", "expected"),
     [
         ("status", "ps --all"),
-        ("logs", "logs --tail 100 bot student-tools-mcp db"),
+        ("logs", "logs --tail 100 bot student-tools-mcp math-tools-mcp db"),
     ],
 )
 def test_cloud_status_and_logs_include_mcp_server(tmp_path, monkeypatch, action, expected):

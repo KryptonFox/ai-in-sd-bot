@@ -1,10 +1,42 @@
+import base64
+import binascii
+import io
+import warnings
+import zlib
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Annotated, Literal
 
+from PIL import Image
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 DEFAULT_WEATHER_CITY = "Санкт-Петербург"
+PNG_MIME_TYPE = "image/png"
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+MAX_IMAGE_BYTES = 256 * 1024
+MAX_IMAGE_PIXELS = 8 * 1024 * 1024
+MAX_IMAGE_DIMENSION = 8192
+MAX_DECODED_IMAGE_BYTES = 32 * 1024 * 1024
+MAX_AGENT_IMAGES = 2
+MAX_AGENT_IMAGE_BYTES = MAX_IMAGE_BYTES * MAX_AGENT_IMAGES
+MAX_BASE64_LENGTH = ((MAX_IMAGE_BYTES + 2) // 3) * 4
+_PNG_COLOR_DEPTHS: dict[int, frozenset[int]] = {
+    0: frozenset({1, 2, 4, 8, 16}),
+    2: frozenset({8, 16}),
+    3: frozenset({1, 2, 4, 8}),
+    4: frozenset({8, 16}),
+    6: frozenset({8, 16}),
+}
+_PNG_CHANNELS = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
+_ADAM7_PASSES = (
+    (0, 0, 8, 8),
+    (4, 0, 8, 8),
+    (0, 4, 4, 8),
+    (2, 0, 4, 4),
+    (0, 2, 2, 4),
+    (1, 0, 2, 2),
+    (0, 1, 1, 2),
+)
 CityName = Annotated[
     str,
     Field(
@@ -47,6 +79,164 @@ class WeatherStatus(StrEnum):
 
 class ToolDTO(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+def _png_pixel_data_size(
+    width: int,
+    height: int,
+    bit_depth: int,
+    color_type: int,
+    interlace_method: int,
+) -> int:
+    bits_per_pixel = _PNG_CHANNELS[color_type] * bit_depth
+
+    if interlace_method == 0:
+        row_bytes = (width * bits_per_pixel + 7) // 8
+        return height * (1 + row_bytes)
+
+    total = 0
+    for x_start, y_start, x_step, y_step in _ADAM7_PASSES:
+        pass_width = (width - x_start + x_step - 1) // x_step if width > x_start else 0
+        pass_height = (height - y_start + y_step - 1) // y_step if height > y_start else 0
+        if pass_width == 0 or pass_height == 0:
+            continue
+
+        row_bytes = (pass_width * bits_per_pixel + 7) // 8
+        total += pass_height * (1 + row_bytes)
+
+    return total
+
+
+def _validate_png_stream(data: bytes, expected_size: int) -> None:
+    decompressor = zlib.decompressobj()
+
+    try:
+        decoded = decompressor.decompress(data, expected_size + 1)
+    except zlib.error:
+        raise ValueError("invalid PNG pixel data") from None
+
+    if len(decoded) != expected_size or decompressor.unused_data or not decompressor.eof:
+        raise ValueError("invalid PNG pixel data")
+
+
+def _validate_png_image(raw: bytes) -> None:
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(raw)) as image:
+                if image.format != "PNG":
+                    raise ValueError("image data must be a PNG file")
+                image.load()
+    except Exception as error:
+        raise ValueError("image data must be a valid PNG file") from error
+
+
+def _validate_png(raw: bytes) -> None:
+    if not raw.startswith(PNG_SIGNATURE):
+        raise ValueError("image data must be a PNG file")
+
+    offset = len(PNG_SIGNATURE)
+    header: tuple[int, int, int, int, int] | None = None
+    image_data: list[bytes] = []
+    seen_end = False
+
+    while offset < len(raw):
+        if offset + 12 > len(raw):
+            raise ValueError("truncated PNG chunk")
+        length = int.from_bytes(raw[offset : offset + 4], "big")
+        chunk_type = raw[offset + 4 : offset + 8]
+        chunk_end = offset + 12 + length
+        if chunk_end > len(raw):
+            raise ValueError("truncated PNG chunk")
+        if not chunk_type.isalpha():
+            raise ValueError("invalid PNG chunk type")
+
+        payload = raw[offset + 8 : offset + 8 + length]
+        expected_crc = int.from_bytes(raw[offset + 8 + length : chunk_end], "big")
+        if zlib.crc32(chunk_type + payload) & 0xFFFFFFFF != expected_crc:
+            raise ValueError("PNG chunk checksum mismatch")
+
+        if header is None:
+            if chunk_type != b"IHDR" or length != 13:
+                raise ValueError("PNG must start with an IHDR chunk")
+            width = int.from_bytes(payload[0:4], "big")
+            height = int.from_bytes(payload[4:8], "big")
+            bit_depth = payload[8]
+            color_type = payload[9]
+            compression_method = payload[10]
+            filter_method = payload[11]
+            interlace_method = payload[12]
+            if width == 0 or height == 0:
+                raise ValueError("PNG dimensions must be positive")
+            if bit_depth not in _PNG_COLOR_DEPTHS.get(color_type, frozenset()):
+                raise ValueError("unsupported PNG color depth")
+            if compression_method != 0 or filter_method != 0 or interlace_method not in {0, 1}:
+                raise ValueError("unsupported PNG encoding")
+            header = (width, height, bit_depth, color_type, interlace_method)
+        elif chunk_type == b"IHDR":
+            raise ValueError("duplicate PNG header")
+        elif chunk_type == b"IDAT":
+            image_data.append(payload)
+        elif chunk_type == b"IEND":
+            if length != 0:
+                raise ValueError("invalid PNG end chunk")
+            if chunk_end != len(raw):
+                raise ValueError("unexpected data after PNG end")
+            seen_end = True
+            break
+
+        offset = chunk_end
+
+    if header is None or not image_data or not seen_end:
+        raise ValueError("incomplete PNG file")
+
+    width, height, bit_depth, color_type, interlace_method = header
+    if (
+        width > MAX_IMAGE_DIMENSION
+        or height > MAX_IMAGE_DIMENSION
+        or width * height > MAX_IMAGE_PIXELS
+    ):
+        raise ValueError("PNG dimensions exceed the allowed limit")
+
+    expected_size = _png_pixel_data_size(width, height, bit_depth, color_type, interlace_method)
+    if expected_size > MAX_DECODED_IMAGE_BYTES:
+        raise ValueError("PNG pixel data exceeds the allowed limit")
+
+    _validate_png_stream(b"".join(image_data), expected_size)
+    _validate_png_image(raw)
+
+
+def _decode_png_base64(value: str) -> bytes:
+    if not isinstance(value, str) or not value:
+        raise ValueError("image data must be a non-empty base64 string")
+    if len(value) > MAX_BASE64_LENGTH:
+        raise ValueError("image exceeds the size limit")
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("image data must be valid base64") from None
+    if len(raw) > MAX_IMAGE_BYTES:
+        raise ValueError("image exceeds the size limit")
+    if base64.b64encode(raw).decode("ascii") != value:
+        raise ValueError("image data must use canonical base64")
+    _validate_png(raw)
+    return raw
+
+
+class ToolImage(ToolDTO):
+    data: str
+    mime_type: Literal["image/png"] = PNG_MIME_TYPE
+
+    @field_validator("data")
+    @classmethod
+    def validate_png_data(cls, value: str) -> str:
+        _decode_png_base64(value)
+        return value
+
+
+class PhotoToolResult(ToolDTO):
+    payload: dict[str, object]
+    images: list[ToolImage] = Field(default_factory=list, max_length=MAX_AGENT_IMAGES)
 
 
 class WeatherArguments(ToolDTO):

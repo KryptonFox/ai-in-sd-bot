@@ -112,7 +112,9 @@ class DialogService:
                         if claim.result.confirmation_id and self._confirmations is not None:
                             current = await self._confirmations.existing(context)
                             if current is not None:
-                                return current
+                                return current.model_copy(
+                                    update={"images": list(claim.result.images)}
+                                )
 
                         return claim.result
 

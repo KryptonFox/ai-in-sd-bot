@@ -12,9 +12,12 @@ dependencies = [
     "httpx>=0.28,<0.29",
     "httpx2==2.16.0",
     "jsonschema==4.26.0",
+    "matplotlib==3.11.2",
     "openai==3.37.0",
+    "pillow==13.0.0",
     "pydantic==2.13.5",
     "python-dotenv==1.2.3",
+    "sympy==1.14.0",
     "telegramify-markdown==1.4.1",
     "tzdata>=2026.5",
 ]

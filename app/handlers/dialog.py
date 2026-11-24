@@ -1,13 +1,20 @@
 import asyncio
+import base64
 import logging
 import math
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 
 from aiogram import F, Router
 from aiogram.enums import ChatAction
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    BufferedInputFile,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
 from app.core.context import generate_request_id, set_request_id
 from app.core.exceptions import (
@@ -20,6 +27,7 @@ from app.core.exceptions import (
 )
 from app.core.formatters import send_formatted_message
 from app.core.schemas.agent import AgentResult
+from app.core.schemas.tools import ToolImage
 from app.handlers.agent_commands import get_confirmation_keyboard
 from app.llm.diagnostics import generation_error_details
 from app.presentation.agent import reply_text
@@ -76,6 +84,34 @@ async def _send_typing(message: Message) -> None:
         await asyncio.sleep(TYPING_INTERVAL)
 
 
+async def _send_result_photos(
+    target_message: Message,
+    images: Sequence[ToolImage],
+    request_id: str,
+) -> None:
+    failed = 0
+
+    for index, image in enumerate(images, start=1):
+        try:
+            await target_message.answer_photo(
+                BufferedInputFile(
+                    base64.b64decode(image.data, validate=True),
+                    filename=f"result-{index}.png",
+                )
+            )
+        except Exception:
+            failed += 1
+
+    if not failed:
+        return
+
+    logger.warning("[%s] photo_send_failed count=%d", request_id, failed)
+    try:
+        await send_formatted_message(target_message, "📷 Не удалось отправить фото результата.")
+    except Exception:
+        logger.warning("[%s] photo_failure_notice_unavailable", request_id)
+
+
 async def _execute_dialog(
     target_message: Message,
     dialog_service: DialogService,
@@ -115,6 +151,8 @@ async def _execute_dialog(
             reply_text(result),
             reply_markup=keyboard,
         )
+        if isinstance(result, AgentResult) and result.images:
+            await _send_result_photos(target_message, result.images, req_id)
     except Exception as error:
         await _send_dialog_error(
             target_message,

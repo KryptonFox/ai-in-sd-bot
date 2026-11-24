@@ -601,7 +601,9 @@ class Cloud:
             "if printf '%s\\n' \"$services\" | grep -qx mcp-server; then "
             f"{COMPOSE} stop mcp-server; fi; "
             "if printf '%s\\n' \"$services\" | grep -qx student-tools-mcp; then "
-            f"{COMPOSE} stop student-tools-mcp; fi; fi; "
+            f"{COMPOSE} stop student-tools-mcp; fi; "
+            "if printf '%s\\n' \"$services\" | grep -qx math-tools-mcp; then "
+            f"{COMPOSE} stop math-tools-mcp; fi; fi; "
             f"rm -rf {REMOTE}/app {REMOTE}/mcp_servers; "
             f"tar -xzf /home/student/course-source.tar.gz -C {REMOTE}; "
             f"mv /home/student/course-env.pending {REMOTE}/.env.cloud; "
@@ -683,7 +685,9 @@ class Cloud:
 
         if instance.get("status") == "RUNNING":
             command = (
-                "ps --all" if action == "status" else "logs --tail 100 bot student-tools-mcp db"
+                "ps --all"
+                if action == "status"
+                else "logs --tail 100 bot student-tools-mcp math-tools-mcp db"
             )
             output = self.ssh(instance, f"{COMPOSE} {command}")
             print(output)

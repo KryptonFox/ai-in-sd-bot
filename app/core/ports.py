@@ -6,6 +6,7 @@ from app.core.schemas.agent import AgentResult, EventContext, TurnClaim
 from app.core.schemas.llm import ToolDefinition
 from app.core.schemas.mcp import ResourceContent, ResourceDefinition
 from app.core.schemas.message import ChatMessage
+from app.core.schemas.tools import PhotoToolResult
 
 
 class ToolExecutor(Protocol):
@@ -16,7 +17,7 @@ class ToolExecutor(Protocol):
         *,
         user_id: int | None = None,
         confirmation_id: str | None = None,
-    ) -> dict[str, object]: ...
+    ) -> dict[str, object] | PhotoToolResult: ...
 
 
 class ToolClient(ToolExecutor, Protocol):

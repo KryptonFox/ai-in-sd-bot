@@ -12,7 +12,7 @@
 - **СУБД и пул соединений:** PostgreSQL 16 (в Docker Compose), асинхронный драйвер `asyncpg` с пулом подключений
 - **Миграции базы данных:** собственный асинхронный runner с `pg_advisory_lock` и контрольными суммами SHA-256 (`app/db/migrations/`)
 - **LLM-интеграция:** `openai.AsyncOpenAI` (Chat Completions через HTTPX2; настраиваемый OpenAI-совместимый endpoint)
-- **MCP:** FastMCP 4.1.5; отдельный сервер `student-tools` на FastMCP и FastMCP Client в приложении, транспорты `stdio` и Streamable HTTP
+- **MCP:** FastMCP 4.1.5; отдельные серверы `student-tools` и `math-tools` на FastMCP, составной клиент и FastMCP Client в приложении, транспорты `stdio` и Streamable HTTP
 - **Схемы и валидация данных:** `pydantic v2` (модели запросов/ответов LLM, сообщений, валидация настроек пользователей)
 - **Форматирование Telegram:** `telegramify-markdown==1.4.1` (текст + entities, готовое разбиение)
 - **Служебный HTTP-сервер:** `aiohttp` (эндпоинт `/health` на порту 8080 для Docker и оркестраторов)
@@ -108,7 +108,8 @@ ai-in-sd-bot/
 │   │   └── registry.py                # Реестр доступных ролей ModeRegistry
 │   ├── prompts/                       # Builder, политика, Telegram-контракт и компактизация
 │   ├── mcp/                           # MCP-транспорт, каталог tools и вызовы
-│   │   ├── connection.py              # FastMCP Client с транспортом и настройками
+│   │   ├── connection.py              # Фабрики клиентов и транспортов MCP
+│   │   ├── composite.py               # Объединённый каталог и маршрутизация вызовов
 │   │   ├── client.py                  # Discovery, catalog delegation и tool/resource RPC
 │   │   └── catalog.py                 # Discovery definitions и compiled input/output validators
 │   ├── services/                      # Слой бизнес-логики
@@ -135,7 +136,9 @@ ai-in-sd-bot/
 │   ├── test_bot_scenarios.py          # Сценарные тесты взаимодействия с ботом и компактизации
 │   ├── test_commands_registration.py  # Тесты автоматической регистрации команд в Telegram
 │   ├── test_compaction_and_context.py # Тесты автоопределения контекста модели и настроек сжатия
+│   ├── test_composite_mcp.py          # Объединение каталогов MCP и изоляция сбоев серверов
 │   ├── test_compose.py                # Тесты конфигурации compose.yaml
+│   ├── test_math_connection.py        # Транспорты и окружение math-tools
 │   ├── test_formatters.py             # Конвертация, UTF-16 entities, разбиение и fallback
 │   ├── test_integration.py            # Интеграционные тесты с реальной СУБД в Docker
 │   ├── test_lifecycle.py              # Тесты жизненного цикла приложения и shutdown
@@ -148,8 +151,9 @@ ai-in-sd-bot/
 │   ├── test_queue.py                  # Тесты менеджера очереди сообщений пользователя
 │   ├── test_scripts.py                # Тесты инфраструктурных скриптов проекта
 │   └── test_storage.py                # Тесты валидации моделей данных
-├── compose.yaml                       # PostgreSQL, бот и MCP-сервер для cloud profile
+├── compose.yaml                       # PostgreSQL, бот и два MCP-сервера для cloud profile
 ├── mcp_servers/student_tools/         # Отдельный FastMCP-сервер student-tools
+├── mcp_servers/math_tools/            # Независимый FastMCP-сервер math-tools
 ├── pyproject.toml                     # Метаданные проекта, зависимости, настройки pytest и ruff
 └── .env.example                       # Шаблон переменных окружения
 ```
@@ -192,11 +196,12 @@ COMPACTION_KEEP_RECENT=3         # Сколько последних сообщ�
 # MCP и агент
 MCP_TRANSPORT=stdio              # stdio | streamable-http
 MCP_SERVER_URL=http://127.0.0.1:8000/mcp/
+MATH_MCP_SERVER_URL=             # Пусто в HTTP-режиме — только student_tools
 MCP_TIMEOUT=10
 AGENT_MAX_TOOL_CALLS=2
 AGENT_MAX_LLM_STEPS=4
 CONFIRMATION_TTL=300
-MCP_SHARED_SECRET=               # Для HTTP — отдельный секрет не короче 32 символов
+MCP_SHARED_SECRET=               # Для HTTP — общий секрет MCP-серверов, не короче 32 символов
 SCHEDULE_PATH=mcp_servers/student_tools/data/schedule.json
 SCHEDULE_TIMEZONE=Europe/Moscow
 
@@ -204,6 +209,26 @@ SCHEDULE_TIMEZONE=Europe/Moscow
 LOG_LEVEL=INFO
 HEALTH_PORT=8080
 ```
+
+### Тестовый режим OpenCode Go
+
+Для проверки через OpenCode Go оставьте обычные `LLM_*` и включите
+дополнительные заголовки одной строкой:
+
+```dotenv
+LLM_API_KEY=<ключ OpenCode Go>
+LLM_BASE_URL=https://opencode.ai/inference/go/openai/v1
+LLM_MODEL=deepseek-v4.1-flash
+LLM_OPENCODE_SESSION=1
+```
+
+При `LLM_OPENCODE_SESSION=1` клиент отправляет `User-Agent: itmo-study-bot/0.1`
+и стабильный для времени жизни процесса заголовок
+`x-opencode-session: ses_<uuid4>`. Сессия создаётся на клиент и не содержит
+Telegram ID: это режим однопользовательской проверки API, а не
+многопользовательской изоляции. При `0` (по умолчанию) заголовки и запросы
+не меняются. После изменения `.env` перезапустите бота; новый процесс начнёт
+новую сессию.
 
 ---
 
@@ -326,7 +351,9 @@ Docker-образ собирается на Python 3.12 с uv 0.13.1. Runtime-з
 `/app/.venv/bin/python` для приложения и healthcheck. При старте пакеты не скачиваются.
 Для локальной проверки образа: `docker build -t ai-in-sd-bot:uv .`.
 Архив развёртывания включает конфигурацию uv, исходники, SQL-миграции и JSON из
-`mcp_servers/student_tools/data`, исключая `.env`, локальные окружения и ключи.
+`mcp_servers/*/data`, исключая `.env`, локальные окружения и ключи. Compose
+запускает внутренние сервисы `student-tools-mcp` и `math-tools-mcp` без
+публикации портов; сбой одного MCP-сервера не блокирует другой.
 
 Скрипты `scripts/deploy.sh` (Linux/macOS) и `scripts/deploy.ps1` (Windows) автоматизируют развёртывание бота на виртуальной машине в Yandex Cloud:
 
@@ -349,41 +376,90 @@ bash scripts/deploy.sh destroy
 
 ## Lab 2: MCP-агент
 
-Lab2 расширяет этого бота четырьмя инструментами FastMCP и ресурсом текущей недели:
-`get_weather`, `get_schedule`, `get_schedule_week`, `add_reminder` и
-`schedule://current-week`. Клиент
-получает их входные и выходные схемы через discovery, проверяет аргументы и
-структуру результатов. Погода запрашивается у Open-Meteo, расписание загружается
-из JSON-файла, напоминания и подтверждения хранятся в PostgreSQL.
+Lab2 расширяет этого бота инструментами FastMCP. Сервер `student_tools` публикует
+`get_weather`, `get_schedule`, `get_schedule_week`, `add_reminder` и ресурс
+`schedule://current-week`. Независимый сервер `math_tools` публикует
+`math_calculate`, `math_solve` и `math_plot`. Клиент получает их входные и
+выходные схемы через discovery, проверяет аргументы и структуру результатов.
+Погода запрашивается у Open-Meteo, расписание загружается из JSON-файла,
+напоминания и подтверждения хранятся в PostgreSQL. Математический сервер не
+зависит от базы, Telegram или LLM.
 
-Локально по умолчанию используется `stdio`: бот запускает MCP-сервер как дочерний
-процесс, поэтому отдельный порт и отдельная команда запуска сервера не нужны.
-Сервер получает отдельное окружение без Telegram- и LLM-секретов. Для HTTP
-используется Streamable HTTP; бот подключается к `/mcp/` с `Authorization: Bearer`.
-Compose service называется `student-tools-mcp`, внутри сети Compose бот обращается
-к `http://student-tools-mcp:8000/mcp`. FastMCP server name — `student-tools`.
-Сервер слушает внутреннюю сеть Compose и не публикует порт наружу. Для этого
-режима задайте один и тот же `MCP_SHARED_SECRET` длиной не менее 32 символов в
-окружении бота и сервера. В режиме `stdio`, если секрет не задан, клиент создаёт
-временный секрет для запуска дочернего процесса.
+Один составной клиент объединяет discovery доступных серверов. Инструменты и
+ресурсы с совпадающими именами или URI исключаются из общего каталога и
+отклоняются при прямом вызове; каталог и валидаторы принадлежат исходному
+клиенту. Если один сервер недоступен, второй продолжает работать, а фоновый
+цикл повторяет discovery только недоступного сервера. Подтверждение напоминания
+всегда отправляется в `student_tools`.
+
+Локально по умолчанию используется `stdio`: бот запускает оба MCP-сервера как
+дочерние процессы, поэтому отдельный порт и отдельная команда запуска серверов
+не нужны. Сервер `student_tools` получает отдельное окружение без Telegram- и
+LLM-секретов; `math_tools` получает только общие переменные окружения и
+`MCP_SHARED_SECRET`, без PostgreSQL, Telegram и LLM. Для HTTP используется
+Streamable HTTP; бот подключается к `/mcp/` с `Authorization: Bearer`.
+Compose service для `student_tools` называется `student-tools-mcp`, для
+математики — `math-tools-mcp`. Внутри сети Compose бот обращается к
+`http://student-tools-mcp:8000/mcp` и `http://math-tools-mcp:8000/mcp`.
+FastMCP server names — `student-tools` и `math-tools`. Оба сервера слушают
+внутреннюю сеть Compose и не публикуют порт наружу. Для этого режима задайте
+один и тот же `MCP_SHARED_SECRET` длиной не менее 32 символов в окружении бота
+и обоих серверов. Пустой `MATH_MCP_SERVER_URL` сохраняет прежний режим с одним
+сервером `student_tools`. В режиме `stdio`, если секрет не задан, клиент создаёт
+временный секрет для запуска дочерних процессов.
 
 Для локального запуска FastMCP-сервера отдельно (например, для MCP Inspector)
-подготовьте `.env` с PostgreSQL-параметрами и `MCP_SHARED_SECRET` длиной не менее
-32 символов. Не вставляйте реальный секрет в документацию, скриншоты или отчёт.
-Затем запускайте один из транспортов:
+подготовьте `.env` с `MCP_SHARED_SECRET` длиной не менее 32 символов; для
+`student_tools` также нужны PostgreSQL-параметры. Не вставляйте реальный секрет
+в документацию, скриншоты или отчёт. Затем запускайте нужный транспорт:
 
 ```bash
-uv run --locked python -m mcp_servers.student_tools --transport stdio
-uv run --locked python -m mcp_servers.student_tools --transport streamable-http
+uv run --locked python -m mcp_servers.student_tools --transport stdio --env-file .env
+uv run --locked python -m mcp_servers.student_tools --transport streamable-http --env-file .env
+uv run --locked python -m mcp_servers.math_tools --transport stdio --env-file .env
+uv run --locked python -m mcp_servers.math_tools --transport streamable-http --env-file .env
 ```
 
+`math_tools` не читает PostgreSQL, Telegram или LLM-настройки. Для Streamable
+HTTP ему нужны `MCP_HOST` (по умолчанию `0.0.0.0`), `MCP_PORT` (по умолчанию
+`8000`) и общий `MCP_SHARED_SECRET`; проверка готовности — `GET /health` или
+`uv run --locked python -m mcp_servers.math_tools.healthcheck`. Чтобы запустить
+оба HTTP-сервера одновременно, назначьте им разные `MCP_PORT`.
+
 Для Inspector 2.12 настройте stdio-сервер командой `uv` и аргументами
-`run --locked python -m mcp_servers.student_tools --transport stdio`, передав PostgreSQL-
-переменные и общий `MCP_SHARED_SECRET` в окружение процесса. Для Streamable HTTP
-укажите URL `http://127.0.0.1:8000/mcp/` и заголовок
+`run --locked python -m mcp_servers.student_tools --transport stdio --env-file .env`,
+передав PostgreSQL-переменные и общий `MCP_SHARED_SECRET` в окружение процесса.
+Для `math_tools` используйте команду с `mcp_servers.math_tools`. Для Streamable
+HTTP укажите URL `http://127.0.0.1:8000/mcp/` и заголовок
 `Authorization: Bearer <MCP_SHARED_SECRET>`; секрет должен совпадать с серверным.
 Используйте отдельную тестовую базу и тестовую учётную запись, особенно при
 проверке изменения данных.
+
+### Математические инструменты
+
+`math_calculate` упрощает выражения, выполняет точные и численные вычисления,
+производные, определённые и неопределённые интегралы и пределы; переменная по
+умолчанию — `x`, численная точность — 15 знаков. `math_solve` решает уравнение
+или систему до трёх уравнений с указанными неизвестными и по умолчанию возвращает
+вещественные решения с проверкой по исходным уравнениям и области определения.
+`math_plot` строит от одной до четырёх функций `y=f(x)` на общих осях; диапазон
+по умолчанию — `[-10, 10]`, описание кривых и диапазона приходит как
+`structuredContent`, PNG — как `ImageContent`.
+
+Примеры запросов:
+
+- «Посчитай производную `x^3 - 2*x` по `x` и упрости результат».
+- «Реши систему `x + y = 5`, `x - y = 1` относительно `x` и `y`».
+- «Построй графики `sin(x)` и `1/x` на отрезке `[-5, 5]`».
+
+Выражения собираются из разрешённых узлов AST: числа, переменные, скобки,
+явное умножение, `**` и `^`, базовые математические функции. Длина выражения
+ограничена 512 символами, дерево — 128 узлами; `eval`, `sympify` и `parse_expr`
+не используются. На сервере выполняется один активный расчёт, лимит операции —
+5 секунд и 768 МиБ памяти; при тайм-ауте процесс завершается. PNG ограничен
+256 КиБ на изображение. Модель получает только структурированный текст, а
+изображения передаются отдельно. Общий бюджет остаётся прежним: не более двух
+MCP-вызовов на сообщение и не более четырёх шагов LLM.
 
 В облачном сценарии скрипт развёртывания сам создаёт и сохраняет ключ MCP;
 при ручном запуске Compose задайте общий `MCP_SHARED_SECRET` в локальном `.env`.

@@ -3,6 +3,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.core.schemas.tools import MAX_AGENT_IMAGES, ToolImage
+
 
 class AgentDecision(StrEnum):
     RESPOND = "respond"
@@ -33,6 +35,7 @@ class AgentResult(BaseModel):
     reason: str = "completed"
     truncated: bool = False
     resource_uris: list[str] = Field(default_factory=list)
+    images: list[ToolImage] = Field(default_factory=list, max_length=MAX_AGENT_IMAGES)
 
     @model_validator(mode="after")
     def validate_confirmation(self) -> "AgentResult":

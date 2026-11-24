@@ -1,0 +1,1 @@
+"""Independent mathematical MCP server."""

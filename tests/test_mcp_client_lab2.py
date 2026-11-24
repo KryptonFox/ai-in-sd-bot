@@ -432,6 +432,7 @@ async def test_streamable_http_client_auth_failure_and_reconnect(tmp_path, datab
         assert await client.start() is True
         assert "get_schedule" in client.tools
         schedule_result = await client.call_tool("get_schedule", {"date": "2026-11-02"})
+        assert isinstance(schedule_result, dict)
         assert schedule_result["date"] == "2026-11-02"
         resource = await client.read_resource("schedule://current-week")
         assert json.loads(resource.text)["start_date"]

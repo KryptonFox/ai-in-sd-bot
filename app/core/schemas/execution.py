@@ -3,6 +3,7 @@ from enum import StrEnum
 
 from app.core.schemas.agent import AgentDecision, AgentResult, EventContext
 from app.core.schemas.message import ChatMessage, ToolCall
+from app.core.schemas.tools import ToolImage
 
 
 class StepAction(StrEnum):
@@ -17,6 +18,7 @@ class RunState:
     calls_used: int = 0
     last_call: ToolCall | None = None
     resource_uris: list[str] = field(default_factory=list)
+    images: list[ToolImage] = field(default_factory=list)
 
     def build_result(
         self,
@@ -39,5 +41,6 @@ class RunState:
             tool_name=tool_name,
             arguments=arguments,
             resource_uris=list(self.resource_uris),
+            images=list(self.images),
             truncated=truncated,
         )

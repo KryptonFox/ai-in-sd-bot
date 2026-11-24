@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import time
@@ -11,7 +12,13 @@ from app.core.schemas.execution import RunState, StepAction
 from app.core.schemas.llm import ToolDefinition
 from app.core.schemas.mcp import ReadResourceArguments, ResourceDefinition
 from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
-from app.core.schemas.tools import ToolFailure
+from app.core.schemas.tools import (
+    MAX_AGENT_IMAGE_BYTES,
+    MAX_AGENT_IMAGES,
+    PhotoToolResult,
+    ToolFailure,
+    ToolImage,
+)
 from app.services.confirmation_service import ConfirmationService
 
 logger = logging.getLogger("app.tools")
@@ -145,14 +152,37 @@ class ToolExecutionService:
             update={
                 "reason": "awaiting_confirmation",
                 "resource_uris": list(state.resource_uris),
+                "images": list(state.images),
             }
         )
+
+    def _add_images(self, state: RunState, images: Sequence[ToolImage]) -> None:
+        if not images:
+            return
+
+        if len(state.images) + len(images) > MAX_AGENT_IMAGES:
+            raise ToolFailure(
+                "tool_output_budget",
+                "Инструмент вернул слишком много изображений. Уточните запрос.",
+            )
+
+        known_bytes = sum(
+            len(base64.b64decode(image.data, validate=True)) for image in state.images
+        )
+        added_bytes = sum(len(base64.b64decode(image.data, validate=True)) for image in images)
+        if known_bytes + added_bytes > MAX_AGENT_IMAGE_BYTES:
+            raise ToolFailure(
+                "tool_output_budget",
+                "Изображения результата слишком большие. Уточните запрос.",
+            )
+
+        state.images.extend(images)
 
     async def _read(self, state: RunState, call: ToolCall) -> None:
         client = self._client()
         await self._reserve(state)
         started = time.monotonic()
-        payload = await client.call_tool(call.name, call.arguments)
+        outcome = await client.call_tool(call.name, call.arguments)
 
         logger.info(
             "tool_complete request=%s tool=%s duration_ms=%.0f",
@@ -160,12 +190,20 @@ class ToolExecutionService:
             call.name,
             (time.monotonic() - started) * 1000,
         )
+        if isinstance(outcome, PhotoToolResult):
+            payload = outcome.payload
+            images = outcome.images
+        else:
+            payload = outcome
+            images = []
+
         content = json.dumps({"source": call.name, "data": payload}, ensure_ascii=False)
         if len(content) > self._max_output_chars:
             raise ToolFailure(
                 "tool_output_budget", "Результат инструмента слишком большой. Уточните запрос."
             )
 
+        self._add_images(state, images)
         state.conversation.append(
             ChatMessage(
                 role=MessageRole.TOOL,

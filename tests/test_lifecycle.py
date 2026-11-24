@@ -145,9 +145,11 @@ async def test_http_proxy_receives_connect_and_failure_has_no_direct_fallback(un
 @pytest.mark.parametrize("failure", ["db", "telegram", "health", "polling", "none"])
 async def test_application_closes_llm_at_every_lifecycle_boundary(monkeypatch, failure):
     from app import __main__ as application
+    from app.mcp.connection import ToolClients
 
-    mcp = Mock(start=AsyncMock(), aclose=AsyncMock(), available=False)
-    monkeypatch.setattr(application, "create_student_tools_client", Mock(return_value=mcp))
+    mcp = Mock(start=AsyncMock(), recover=AsyncMock(), aclose=AsyncMock(), available=False)
+    clients = ToolClients(student=mcp, math=None, composite=mcp)
+    monkeypatch.setattr(application, "create_tool_clients", Mock(return_value=clients))
     llm = Mock(aclose=AsyncMock())
     monkeypatch.setattr(
         application,
@@ -205,3 +207,83 @@ async def test_application_closes_llm_at_every_lifecycle_boundary(monkeypatch, f
     bot.session.close.assert_awaited_once()
     if failure != "db":
         pool.close.assert_awaited_once()
+
+
+async def test_run_wires_student_client_to_confirmations_and_composite_to_tools(
+    monkeypatch,
+):
+    from app import __main__ as application
+    from app.mcp.connection import ToolClients
+
+    student = Mock(available=True)
+    composite = Mock(
+        start=AsyncMock(return_value=True),
+        recover=AsyncMock(),
+        aclose=AsyncMock(),
+        available=True,
+    )
+    clients = ToolClients(student=student, math=None, composite=composite)
+    monkeypatch.setattr(application, "create_tool_clients", Mock(return_value=clients))
+
+    confirmations = Mock(recover=AsyncMock())
+    configuration = Mock(return_value=confirmations)
+    monkeypatch.setattr(application, "ConfirmationService", configuration)
+    tools = Mock(available=True)
+    tool_configuration = Mock(return_value=tools)
+    monkeypatch.setattr(application, "ToolExecutionService", tool_configuration)
+    dialog = Mock(recover=AsyncMock())
+    dialog_configuration = Mock(return_value=dialog)
+    monkeypatch.setattr(application, "DialogService", dialog_configuration)
+
+    monkeypatch.setattr(application, "OpenAIClient", Mock(return_value=Mock(aclose=AsyncMock())))
+    monkeypatch.setattr(application, "create_pool", AsyncMock(return_value=Mock(close=AsyncMock())))
+    monkeypatch.setattr(
+        application,
+        "PostgresTurnStore",
+        Mock(return_value=Mock(recover=AsyncMock())),
+    )
+    bot = Mock(
+        get_me=AsyncMock(return_value=Mock(username="test")),
+        get_webhook_info=AsyncMock(return_value=Mock(url="")),
+        session=Mock(close=AsyncMock()),
+    )
+    monkeypatch.setattr(application, "create_bot", Mock(return_value=bot))
+    monkeypatch.setattr(application, "setup_bot_commands", AsyncMock())
+    monkeypatch.setattr(application, "setup_bot_description", AsyncMock())
+    dispatcher = Mock(
+        start_polling=AsyncMock(side_effect=RuntimeError("stop after wiring")),
+        resolve_used_update_types=Mock(return_value=[]),
+    )
+    monkeypatch.setattr(application, "Dispatcher", Mock(return_value=dispatcher))
+    monkeypatch.setattr(
+        application,
+        "start_health_server",
+        AsyncMock(return_value=Mock(cleanup=AsyncMock())),
+    )
+
+    with pytest.raises(RuntimeError, match="stop after wiring"):
+        await application.run(Settings(bot_token="unused", postgres_password="unused"))
+
+    assert configuration.call_args.args[1] is student
+    assert tool_configuration.call_args.args[0] is composite
+    assert dialog_configuration.call_args.kwargs["tool_client"] is composite
+    composite.start.assert_awaited_once()
+    composite.aclose.assert_awaited_once()
+
+
+async def test_recovery_isolates_confirmation_failure_from_math_recovery(monkeypatch):
+    from app import __main__ as application
+
+    confirmations = Mock(recover=AsyncMock(side_effect=RuntimeError("database busy")))
+    mcp = Mock(recover=AsyncMock())
+
+    async def stop_after_first_cycle(_delay: float) -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(application.asyncio, "sleep", stop_after_first_cycle)
+
+    with pytest.raises(asyncio.CancelledError):
+        await application._recover_services(confirmations, mcp)
+
+    confirmations.recover.assert_awaited_once()
+    mcp.recover.assert_awaited_once()

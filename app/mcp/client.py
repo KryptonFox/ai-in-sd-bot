@@ -7,10 +7,17 @@ from fastmcp import Client
 from fastmcp.client.client import CallToolResult
 from fastmcp.exceptions import ResourceError
 from mcp import MCPError, types
+from pydantic import ValidationError
 
 from app.core.schemas.llm import ToolDefinition
 from app.core.schemas.mcp import ResourceContent, ResourceDefinition
-from app.core.schemas.tools import ToolFailure
+from app.core.schemas.tools import (
+    MAX_AGENT_IMAGES,
+    PNG_MIME_TYPE,
+    PhotoToolResult,
+    ToolFailure,
+    ToolImage,
+)
 from app.mcp.catalog import ToolCatalog
 
 logger = logging.getLogger("app.mcp.client")
@@ -85,10 +92,11 @@ class MCPClient:
         *,
         user_id: int | None = None,
         confirmation_id: str | None = None,
-    ) -> dict[str, object]:
+    ) -> dict[str, object] | PhotoToolResult:
         self.catalog.validate_arguments(name, arguments)
+        read_only = self.catalog.is_read_only(name)
         meta: dict[str, object] | None = None
-        if not self.catalog.is_read_only(name):
+        if not read_only:
             if user_id is None or confirmation_id is None:
                 raise ToolFailure("confirmation_required", "Нужно подтверждение владельца.")
             meta = {
@@ -107,7 +115,37 @@ class MCPClient:
 
         if result.is_error:
             raise self._tool_error(result)
-        return self.catalog.validate_output(name, result.structured_content)
+        payload = self.catalog.validate_output(name, result.structured_content)
+        images = self._images(result)
+        if images and not read_only:
+            raise ToolFailure(
+                "invalid_output", "Инструмент изменения не может возвращать изображения."
+            )
+        if images:
+            return PhotoToolResult(payload=payload, images=images)
+        return payload
+
+    @staticmethod
+    def _images(result: CallToolResult) -> list[ToolImage]:
+        images: list[ToolImage] = []
+
+        for content in result.content:
+            if not isinstance(content, types.ImageContent):
+                continue
+            if len(images) >= MAX_AGENT_IMAGES:
+                raise ToolFailure("invalid_output", "Инструмент вернул слишком много изображений.")
+            if content.mime_type != PNG_MIME_TYPE:
+                raise ToolFailure(
+                    "invalid_output", "Инструмент вернул изображение неподдерживаемого формата."
+                )
+            try:
+                images.append(ToolImage(data=content.data))
+            except ValidationError:
+                raise ToolFailure(
+                    "invalid_output", "Инструмент вернул некорректное изображение."
+                ) from None
+
+        return images
 
     @staticmethod
     def _tool_error(result: CallToolResult) -> ToolFailure:
