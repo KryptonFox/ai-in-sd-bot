@@ -1,7 +1,10 @@
 import asyncio
+import inspect
 import logging
 import time
 import uuid
+from collections.abc import Awaitable
+from typing import TypeVar
 from zoneinfo import ZoneInfo
 
 import asyncpg
@@ -46,6 +49,8 @@ from app.services.confirmation_service import ConfirmationService
 from app.services.context_builder import ContextBuilder
 
 logger = logging.getLogger("app.services.dialog")
+TURN_STORE_TIMEOUT_SECONDS = 3.0
+T = TypeVar("T")
 
 
 class DialogService:
@@ -104,31 +109,33 @@ class DialogService:
         async with self._queue.acquire(user_id):
             started = time.monotonic()
             deadline_at = asyncio.get_running_loop().time() + self._settings.agent_timeout
-            deadline = asyncio.timeout_at(deadline_at)
 
             try:
-                async with deadline:
-                    claim = await self._store.claim(context, self._clock.now())
-                    if isinstance(claim, Replay):
-                        if claim.result.confirmation_id and self._confirmations is not None:
-                            current = await self._confirmations.existing(context)
-                            if current is not None:
-                                return current.model_copy(
-                                    update={"images": list(claim.result.images)}
-                                )
+                claim = await self._bounded(
+                    self._store.claim(context, self._clock.now()),
+                    deadline_at,
+                )
+                if isinstance(claim, Replay):
+                    if claim.result.confirmation_id and self._confirmations is not None:
+                        current = await self._bounded(
+                            self._confirmations.existing(context),
+                            deadline_at,
+                        )
+                        if current is not None:
+                            return current.model_copy(update={"images": list(claim.result.images)})
 
-                        return claim.result
+                    return claim.result
 
-                    if isinstance(claim, InProgress):
-                        return claim
+                if isinstance(claim, InProgress):
+                    return claim
 
-                    return await self._process(
-                        context,
-                        user_text,
-                        claim.calls_used,
-                        started,
-                        deadline_at,
-                    )
+                return await self._process(
+                    context,
+                    user_text,
+                    claim.calls_used,
+                    started,
+                    deadline_at,
+                )
             except BaseException as error:
                 reason = error.code if isinstance(error, LLMError) else type(error).__name__
                 partial = await self._interrupt(context, str(reason))
@@ -138,10 +145,23 @@ class DialogService:
                 if partial:
                     raise InterruptedRunError from error
 
-                if isinstance(error, TimeoutError) and deadline.expired():
-                    raise LLMTimeoutError("Превышено общее время обработки запроса.") from None
-
                 raise
+
+    async def _bounded(self, operation: Awaitable[T], deadline_at: float) -> T:
+        """Run one preparation stage inside the request deadline."""
+        if deadline_at <= asyncio.get_running_loop().time():
+            if inspect.iscoroutine(operation):
+                operation.close()
+            raise LLMTimeoutError("Превышено общее время обработки запроса.")
+
+        timeout = asyncio.timeout_at(deadline_at)
+        try:
+            async with timeout:
+                return await operation
+        except TimeoutError:
+            if timeout.expired():
+                raise LLMTimeoutError("Превышено общее время обработки запроса.") from None
+            raise
 
     async def _process(
         self,
@@ -153,7 +173,10 @@ class DialogService:
     ) -> AgentResult:
         existing = None
         if self._confirmations is not None:
-            existing = await self._confirmations.existing(context)
+            existing = await self._bounded(
+                self._confirmations.existing(context),
+                deadline_at,
+            )
         if existing is not None:
             result = existing
         else:
@@ -162,12 +185,11 @@ class DialogService:
         user_message = ChatMessage(role=MessageRole.USER, content=text)
         assistant_message = ChatMessage(role=MessageRole.ASSISTANT, content=reply_text(result))
         duration_ms = (time.monotonic() - started) * 1000
-        await self._store.complete(
+        await self._complete(
             context,
             user_message,
             assistant_message,
             result,
-            self._clock.now(),
             duration_ms,
         )
 
@@ -181,20 +203,34 @@ class DialogService:
         deadline_at: float,
     ) -> AgentResult:
         try:
-            user = await get_or_create_user(self._pool, context.user_id)
-            timezone = await get_timezone(self._pool, context.user_id) or DEFAULT_USER_TIMEZONE
+            user = await self._bounded(
+                get_or_create_user(self._pool, context.user_id),
+                deadline_at,
+            )
+            timezone = (
+                await self._bounded(
+                    get_timezone(self._pool, context.user_id),
+                    deadline_at,
+                )
+            ) or DEFAULT_USER_TIMEZONE
             mode = self._registry.get_or_default(user.mode)
             action = None
             if self._confirmations is not None:
-                action = await self._confirmations.action_context(context.user_id)
+                action = await self._bounded(
+                    self._confirmations.action_context(context.user_id),
+                    deadline_at,
+                )
 
-            prepared = await self._context.build(
-                context.user_id,
-                text,
-                mode,
-                self._agent.definitions,
-                self._agent.instructions(timezone),
-                action,
+            prepared = await self._bounded(
+                self._context.build(
+                    context.user_id,
+                    text,
+                    mode,
+                    self._agent.definitions,
+                    self._agent.instructions(timezone),
+                    action,
+                ),
+                deadline_at,
             )
 
             return await self._agent.run(
@@ -215,9 +251,31 @@ class DialogService:
                 reason=error.code,
             )
 
+    async def _complete(
+        self,
+        context: EventContext,
+        user_message: ChatMessage,
+        assistant_message: ChatMessage,
+        result: AgentResult,
+        duration_ms: float,
+    ) -> None:
+        try:
+            async with asyncio.timeout(TURN_STORE_TIMEOUT_SECONDS):
+                await self._store.complete(
+                    context,
+                    user_message,
+                    assistant_message,
+                    result,
+                    self._clock.now(),
+                    duration_ms,
+                )
+        except TimeoutError:
+            logger.warning("turn_completion_timeout request=%s", context.request_id)
+            raise
+
     async def _interrupt(self, context: EventContext, reason: str) -> bool:
         try:
-            async with asyncio.timeout(3):
+            async with asyncio.timeout(TURN_STORE_TIMEOUT_SECONDS):
                 return await self._store.interrupt(
                     context,
                     reason,

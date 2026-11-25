@@ -71,6 +71,9 @@ async def setup_bot_commands(bot: Bot, mode_registry: ModeRegistry = registry) -
         await bot.set_my_commands(commands=commands, scope=BotCommandScopeDefault())
         logger.info("Зарегистрировано %d команд в автокомплите Telegram.", len(commands))
     except Exception as exc:
-        logger.warning("Не удалось зарегистрировать команды в автокомплите Telegram: %s", exc)
+        logger.warning(
+            "Не удалось зарегистрировать команды в автокомплите Telegram: %s",
+            type(exc).__name__,
+        )
 
     return commands

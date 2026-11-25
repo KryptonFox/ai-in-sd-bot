@@ -1,5 +1,7 @@
 import pytest
 
+from mcp_servers.math_tools import expressions as expressions_module
+from mcp_servers.math_tools import syntax as syntax_module
 from mcp_servers.math_tools.errors import MathError
 from mcp_servers.math_tools.limits import MAX_AST_NODES, MAX_EXPRESSION_LENGTH
 from mcp_servers.math_tools.syntax import (
@@ -97,3 +99,45 @@ def test_equation_uses_shared_node_budget() -> None:
     right = "+".join(["y"] * 30)
     assert error_code(equation_sides, f"{left} = {right}") == "expression_too_complex"
     assert MAX_AST_NODES == 128
+
+
+def test_parse_expression_keeps_source_and_normalized_forms() -> None:
+    parsed = syntax_module.parse_expression("  x^2 + 1  ")
+    assert parsed.text == "x^2 + 1"
+    assert parsed.normalized == "x**2 + 1"
+    assert parsed.variables == ("x",)
+
+
+def test_equation_variables_parse_each_side_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+    original = syntax_module._parse_expression
+
+    def counting(text: str):
+        nonlocal calls
+        calls += 1
+        return original(text)
+
+    monkeypatch.setattr(syntax_module, "_parse_expression", counting)
+
+    assert equation_variables("x^2 + y = 1") == ("x", "y")
+    assert calls == 2
+
+
+def test_build_parsed_expression_reuses_parsed_tree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+    original = syntax_module._parse_expression
+
+    def counting(text: str):
+        nonlocal calls
+        calls += 1
+        return original(text)
+
+    monkeypatch.setattr(syntax_module, "_parse_expression", counting)
+
+    parsed = expressions_module.build_parsed_expression("x^2 + 1")
+    assert parsed.text == "x**2 + 1"
+    assert calls == 1

@@ -1,11 +1,25 @@
-import json
 import os
-import resource
 import sys
-from typing import Any
+from collections.abc import Callable, Mapping
+
+try:
+    import resource as _resource
+except ImportError:
+    _resource = None
 
 from mcp_servers.math_tools.errors import MathError
+from mcp_servers.math_tools.ipc import (
+    IpcProtocolError,
+    decode_message,
+    encode_message,
+    error_message,
+    ready_message,
+    success_message,
+)
 from mcp_servers.math_tools.limits import MEMORY_LIMIT_MIB, OPERATION_TIMEOUT_SECONDS
+from mcp_servers.math_tools.operations import WorkerOperation
+
+type RequestHandler = Callable[[Mapping[str, object]], dict[str, object]]
 
 
 def _environment_integer(name: str, default: int) -> int:
@@ -39,35 +53,41 @@ OPERATION_TIMEOUT_SECONDS = _environment_number(
 
 
 def _apply_memory_limit() -> None:
+    if _resource is None:
+        return
     limit = MEMORY_LIMIT_BYTES
     try:
-        _, hard = resource.getrlimit(resource.RLIMIT_AS)
-        if hard != resource.RLIM_INFINITY:
+        _, hard = _resource.getrlimit(_resource.RLIMIT_AS)
+        if hard != _resource.RLIM_INFINITY:
             limit = min(limit, hard)
-        resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+        _resource.setrlimit(_resource.RLIMIT_AS, (limit, limit))
     except (OSError, ValueError):
         return
 
 
 def _memory_report() -> dict[str, object]:
-    try:
-        soft, _ = resource.getrlimit(resource.RLIMIT_AS)
-    except (OSError, ValueError):
-        soft = MEMORY_LIMIT_BYTES
-    return {
-        "memory_limit_bytes": int(soft),
+    report: dict[str, object] = {
+        "memory_limit_bytes": 0,
+        "memory_limit_enforced": False,
         "timeout_seconds": OPERATION_TIMEOUT_SECONDS,
     }
+    if _resource is None:
+        return report
+    try:
+        soft, _ = _resource.getrlimit(_resource.RLIMIT_AS)
+    except (OSError, ValueError):
+        return report
+    if soft == _resource.RLIM_INFINITY or soft <= 0:
+        return report
+    report["memory_limit_bytes"] = int(soft)
+    report["memory_limit_enforced"] = True
+    return report
 
 
-def _error(code: str, message: str) -> dict[str, object]:
-    return {"ok": False, "code": code, "message": message}
-
-
-def _warmup(handle_request: Any) -> None:
+def _warmup(handle_request: RequestHandler) -> None:
     handle_request(
         {
-            "operation": "calculate",
+            "operation": WorkerOperation.CALCULATE.value,
             "calculation": "simplify",
             "expression": "x + x",
             "variable": "x",
@@ -77,7 +97,7 @@ def _warmup(handle_request: Any) -> None:
     )
     handle_request(
         {
-            "operation": "plot",
+            "operation": WorkerOperation.PLOT.value,
             "functions": ["x"],
             "variable": "x",
             "x_min": 0.0,
@@ -86,57 +106,62 @@ def _warmup(handle_request: Any) -> None:
     )
 
 
-def _execute(payload: dict[str, Any], handle_request: Any) -> dict[str, object]:
-    operation = payload.get("operation")
-    if operation == "limits":
-        return {"ok": True, "result": _memory_report()}
-    if operation == "warmup":
+def _parse_operation(value: object) -> WorkerOperation | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return WorkerOperation(value)
+    except ValueError:
+        return None
+
+
+def _execute(payload: Mapping[str, object], handle_request: RequestHandler) -> dict[str, object]:
+    operation = _parse_operation(payload.get("operation"))
+    if operation is WorkerOperation.LIMITS:
+        return success_message({"status": "ok", **_memory_report()})
+    if operation is WorkerOperation.WARMUP:
         try:
             _warmup(handle_request)
         except MathError as error:
-            return _error(error.code, error.message)
+            return error_message(error.code, error.message)
         except MemoryError:
-            return _error("memory_limit", "Вычисление превысило лимит памяти.")
+            return error_message("memory_limit", "Вычисление превысило лимит памяти.")
         except Exception:
-            return _error("evaluation_failed", "Не удалось прогреть вычислитель.")
-        return {"ok": True, "result": {"status": "ok", **_memory_report()}}
+            return error_message("evaluation_failed", "Не удалось прогреть вычислитель.")
+        return success_message({"status": "ok", **_memory_report()})
     try:
         result = handle_request(payload)
     except MathError as error:
-        return _error(error.code, error.message)
+        return error_message(error.code, error.message)
     except MemoryError:
-        return _error("memory_limit", "Вычисление превысило лимит памяти.")
+        return error_message("memory_limit", "Вычисление превысило лимит памяти.")
     except RecursionError:
-        return _error("resource_limit", "Вычисление превысило допустимую сложность.")
+        return error_message("resource_limit", "Вычисление превысило допустимую сложность.")
     except OverflowError:
-        return _error("resource_limit", "Вычисление превысило допустимый числовой диапазон.")
+        return error_message("resource_limit", "Вычисление превысило допустимый числовой диапазон.")
     except Exception:
-        return _error("evaluation_failed", "Не удалось вычислить выражение.")
-    return {"ok": True, "result": result}
+        return error_message("evaluation_failed", "Не удалось вычислить выражение.")
+    return success_message(result)
 
 
 def main() -> None:
     _apply_memory_limit()
     from mcp_servers.math_tools.engine import handle_request
 
-    _write({"ready": True})
+    _write(ready_message())
     for raw_line in sys.stdin.buffer:
         if not raw_line.strip():
             continue
         try:
-            payload = json.loads(raw_line)
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            _write(_error("invalid_arguments", "Некорректный запрос к вычислителю."))
-            continue
-        if not isinstance(payload, dict):
-            _write(_error("invalid_arguments", "Некорректный запрос к вычислителю."))
+            payload = decode_message(raw_line)
+        except IpcProtocolError:
+            _write(error_message("invalid_arguments", "Некорректный запрос к вычислителю."))
             continue
         _write(_execute(payload, handle_request))
 
 
 def _write(payload: dict[str, object]) -> None:
-    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    sys.stdout.buffer.write(encoded.encode("utf-8") + b"\n")
+    sys.stdout.buffer.write(encode_message(payload))
     sys.stdout.buffer.flush()
 
 

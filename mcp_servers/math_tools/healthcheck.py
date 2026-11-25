@@ -1,9 +1,9 @@
 import argparse
-import json
 import os
-import urllib.request
 
 from dotenv import dotenv_values
+
+from app.core.health_probe import endpoint_is_healthy
 
 
 def main() -> int:
@@ -13,7 +13,7 @@ def main() -> int:
     parser.add_argument("--env-file")
     args = parser.parse_args()
 
-    file_values = dotenv_values(args.env_file) if args.env_file else {}
+    file_values = dotenv_values(args.env_file, interpolate=False) if args.env_file else {}
     host = args.host or os.environ.get("MCP_HEALTH_HOST") or file_values.get("MCP_HEALTH_HOST")
     port = (
         args.port
@@ -22,14 +22,7 @@ def main() -> int:
     )
     if not host:
         host = "127.0.0.1"
-    if port is None or not 1 <= port <= 65535:
-        return 1
-
-    try:
-        with urllib.request.urlopen(f"http://{host}:{port}/health", timeout=5) as response:
-            return 0 if json.load(response).get("status") == "ok" else 1
-    except Exception:
-        return 1
+    return 0 if port is not None and endpoint_is_healthy(host, port) else 1
 
 
 def _port(value: object) -> int | None:

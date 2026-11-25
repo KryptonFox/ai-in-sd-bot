@@ -50,7 +50,7 @@ async def handle_mode_switch(message: Message, dialog_service: DialogService) ->
     if not message.text:
         return
 
-    command = message.text.strip().lstrip("/").split()[0].lower()
+    command = message.text.strip().lstrip("/").split()[0].lower().split("@", 1)[0]
     user_id = message.from_user.id if message.from_user else message.chat.id
     mode = await dialog_service.switch_mode(user_id, command)
     logger.info("mode_changed mode=%s", mode.id)

@@ -1,38 +1,22 @@
-import base64
 import io
 from collections.abc import Mapping
-from typing import cast
 
+import numpy as np
 import pytest
 from PIL import Image
 
 from mcp_servers.math_tools.engine import handle_request
 from mcp_servers.math_tools.errors import MathError
-from mcp_servers.math_tools.limits import MAX_PNG_BYTES
+from mcp_servers.math_tools.expressions import build_parsed_expression, build_variable
+from mcp_servers.math_tools.limits import MAX_PNG_BYTES, PLOT_SAMPLES
+from mcp_servers.math_tools.plotting import render_contour, render_curve
+from mcp_servers.math_tools.plotting.sampling import magnitude_mask
+from mcp_servers.math_tools.schemas import CheckpointState
+from tests.math_helpers import decode_png, mapping, number, sequence, text
 
 
 def plot(**payload: object) -> dict[str, object]:
     return handle_request({"operation": "plot", "variable": "x", **payload})
-
-
-def mapping(value: object) -> Mapping[str, object]:
-    assert isinstance(value, dict)
-    return cast(Mapping[str, object], value)
-
-
-def sequence(value: object) -> list[object]:
-    assert isinstance(value, list)
-    return value
-
-
-def text(value: object) -> str:
-    assert isinstance(value, str)
-    return value
-
-
-def number(value: object) -> float:
-    assert isinstance(value, (int, float)) and not isinstance(value, bool)
-    return float(value)
 
 
 def result_of(response: dict[str, object]) -> Mapping[str, object]:
@@ -40,17 +24,7 @@ def result_of(response: dict[str, object]) -> Mapping[str, object]:
 
 
 def png_of(response: dict[str, object]) -> bytes:
-    encoded = response["png_base64"]
-    assert isinstance(encoded, str)
-    png = base64.b64decode(encoded)
-    assert png.startswith(b"\x89PNG\r\n\x1a\n")
-    assert len(png) <= MAX_PNG_BYTES
-    with Image.open(io.BytesIO(png)) as image:
-        image.load()
-        assert image.format == "PNG"
-        assert image.width > 0
-        assert image.height > 0
-    return png
+    return decode_png(response["png_base64"])
 
 
 def checkpoints(result: Mapping[str, object]) -> list[Mapping[str, object]]:
@@ -239,3 +213,222 @@ def test_plot_rejects_invalid_type_specific_arguments() -> None:
     with pytest.raises(MathError) as captured:
         plot(plot_type="curl", functions=["x"])
     assert captured.value.code == "invalid_arguments"
+
+
+def test_curve_checkpoint_uses_actual_variable_name() -> None:
+    response = plot(functions=["t^2"], variable="t", x_min=-2, x_max=2)
+    result = result_of(response)
+
+    assert text(checkpoints(result)[0]["point"]) == "t=0"
+
+
+def test_complex_poles_and_checkpoints_use_actual_variable_name() -> None:
+    response = plot(
+        plot_type="domain_coloring",
+        functions=["1/w"],
+        variable="w",
+        x_min=-2,
+        x_max=2,
+        y_min=-2,
+        y_max=2,
+    )
+    result = result_of(response)
+    assert result["poles"] == ["w=0"]
+
+    by_point = {text(checkpoint["point"]): checkpoint for checkpoint in checkpoints(result)}
+    assert by_point["w=0"]["state"] == CheckpointState.POLE
+
+
+def test_surface_labels_use_actual_variable_names() -> None:
+    response = plot(
+        plot_type="surface",
+        functions=["u*v"],
+        variable="u",
+        y_variable="v",
+        x_min=-2,
+        x_max=2,
+        y_min=-2,
+        y_max=2,
+    )
+    result = result_of(response)
+
+    assert text(result["color_scale"]) == "viridis: f(u, v)"
+    by_point = {text(checkpoint["point"]): checkpoint for checkpoint in checkpoints(result)}
+    assert by_point["(u, v)=(0, 0)"]["value"] == "0"
+
+
+def test_contour_sorts_requested_levels_before_rendering() -> None:
+    parsed = build_parsed_expression("x^2+y^2")
+    rendering = render_contour(
+        parsed,
+        build_variable("x"),
+        build_variable("y"),
+        -2,
+        2,
+        -2,
+        2,
+        [2.0, 1.0],
+    )
+
+    assert rendering.has_points
+    assert rendering.levels == (1.0, 2.0)
+
+
+def test_real_checkpoint_reports_undefined_for_cancelled_domain() -> None:
+    parsed = build_parsed_expression("sqrt(x)*sqrt(x)")
+    rendering = render_curve(
+        [(parsed.text, parsed)],
+        "x",
+        build_variable("x"),
+        -2.0,
+        -0.5,
+        PLOT_SAMPLES,
+    )
+    checkpoint = rendering.checkpoints[0]
+
+    assert checkpoint.point == "x=-1.25"
+    assert checkpoint.value == "undefined"
+    assert checkpoint.numeric == ""
+    assert checkpoint.state is CheckpointState.UNDEFINED
+
+
+def test_gamma_and_factorial_plot_real_values() -> None:
+    gamma_response = plot(functions=["gamma(x)"], x_min=1, x_max=3)
+    gamma_result = result_of(gamma_response)
+    assert gamma_result["status"] == "ok"
+    gamma_checkpoint = checkpoints(gamma_result)[0]
+    assert text(gamma_checkpoint["point"]) == "x=2"
+    assert text(gamma_checkpoint["value"]) == "1"
+    png_of(gamma_response)
+
+    factorial_response = plot(functions=["factorial(x)"], x_min=1, x_max=3)
+    factorial_result = result_of(factorial_response)
+    assert factorial_result["status"] == "ok"
+    factorial_checkpoint = checkpoints(factorial_result)[0]
+    assert text(factorial_checkpoint["point"]) == "x=2"
+    assert text(factorial_checkpoint["value"]) == "2"
+    png_of(factorial_response)
+
+
+@pytest.mark.parametrize("function", ["gamma", "factorial", "floor", "ceil"])
+@pytest.mark.parametrize("plot_type", ["domain_coloring", "complex_height"])
+def test_unsupported_complex_function_is_rejected_explicitly(
+    function: str,
+    plot_type: str,
+) -> None:
+    with pytest.raises(MathError) as captured:
+        plot(
+            plot_type=plot_type,
+            functions=[f"{function}(z)"],
+            variable="z",
+            x_min=-2,
+            x_max=2,
+            y_min=-2,
+            y_max=2,
+        )
+
+    assert captured.value.code == "unsupported_syntax"
+    assert function in captured.value.message
+
+
+def test_complex_plot_accepts_floor_with_a_real_argument() -> None:
+    response = plot(plot_type="domain_coloring", functions=["floor(abs(z))"], variable="z")
+
+    assert result_of(response)["status"] == "ok"
+    png_of(response)
+
+
+def test_magnitude_mask_rejects_non_finite_points() -> None:
+    values = np.array([0.0, 1.0, np.inf, np.nan])
+
+    assert magnitude_mask(values).tolist() == [True, True, False, False]
+
+
+def test_render_curve_honors_configured_png_limit() -> None:
+    parsed = build_parsed_expression("sin(50*x)+cos(37*x)")
+    functions = [(parsed.text, parsed)]
+    symbol = build_variable("x")
+
+    default = render_curve(functions, "x", symbol, -10, 10, PLOT_SAMPLES)
+    limit = int(len(default.png) * 0.8)
+    reduced = render_curve(
+        functions,
+        "x",
+        symbol,
+        -10,
+        10,
+        PLOT_SAMPLES,
+        max_png_bytes=limit,
+    )
+
+    assert len(default.png) <= MAX_PNG_BYTES
+    assert len(reduced.png) <= limit
+    assert len(reduced.png) < len(default.png)
+    with Image.open(io.BytesIO(reduced.png)) as image:
+        assert image.width < 640
+
+
+def test_render_curve_rejects_png_over_configured_limit() -> None:
+    parsed = build_parsed_expression("sin(50*x)+cos(37*x)")
+
+    with pytest.raises(MathError) as captured:
+        render_curve(
+            [(parsed.text, parsed)],
+            "x",
+            build_variable("x"),
+            -10,
+            10,
+            PLOT_SAMPLES,
+            max_png_bytes=1024,
+        )
+
+    assert captured.value.code == "resource_limit"
+    assert "1024" in captured.value.message
+
+
+def test_complex_poles_include_imaginary_roots() -> None:
+    response = plot(
+        plot_type="domain_coloring",
+        functions=["1/(z^2+1)"],
+        variable="z",
+        x_min=-2,
+        x_max=2,
+        y_min=-2,
+        y_max=2,
+    )
+    result = result_of(response)
+
+    assert set(sequence(result["poles"])) == {"z=-I", "z=I"}
+    by_point = {text(checkpoint["point"]): checkpoint for checkpoint in checkpoints(result)}
+    assert by_point["z=I"]["state"] == CheckpointState.POLE
+
+
+def test_complex_height_marks_imaginary_zeros() -> None:
+    response = plot(
+        plot_type="complex_height",
+        functions=["z^2+1"],
+        variable="z",
+        x_min=-2,
+        x_max=2,
+        y_min=-2,
+        y_max=2,
+    )
+    result = result_of(response)
+
+    zero_markers = {
+        (number(mapping(marker)["re"]), number(mapping(marker)["im"]))
+        for marker in sequence(result["zero_markers"])
+    }
+    assert zero_markers == {(0.0, -1.0), (0.0, 1.0)}
+
+
+def test_plot_payload_honors_lower_png_limit() -> None:
+    limit = 64 * 1024
+    response = plot(
+        functions=["sin(50*x)+cos(37*x)"],
+        x_min=-10,
+        x_max=10,
+        max_png_bytes=limit,
+    )
+
+    assert len(png_of(response)) <= limit

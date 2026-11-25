@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, MagicMock
 import asyncpg
 import pytest
 from aiogram.types import BufferedInputFile
-from fastmcp import Client, FastMCP
 from fastmcp.client.client import CallToolResult
 from mcp import types
 from pydantic import ValidationError
@@ -17,7 +16,7 @@ from pydantic import ValidationError
 from app.config import Settings
 from app.core.clock import FrozenClock
 from app.core.schemas.agent import AgentDecision, AgentResult, EventContext, Replay, TurnState
-from app.core.schemas.llm import LLMRequest, LLMResponse
+from app.core.schemas.llm import LLMResponse
 from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.core.schemas.tools import (
     MAX_AGENT_IMAGES,
@@ -36,7 +35,8 @@ from app.presentation.agent import reply_text
 from app.services.agent_service import AgentService
 from app.services.dialog_service import DialogService
 from app.services.tool_execution import ToolExecutionService
-from tests.fake_mcp import mock_sdk_client
+from tests.fake_llm import ScriptedLLM
+from tests.fake_mcp import MockToolClient, mock_sdk_client
 from tests.mcp_catalog import tool_catalog
 
 SECRET = "photo-test-secret"
@@ -145,39 +145,16 @@ def png_content(data: str | None = None, mime_type: str = "image/png") -> types.
     return types.ImageContent(data=data or encoded_png(), mime_type=mime_type)
 
 
-class RecordingLLM:
-    def __init__(self, responses: list[LLMResponse]) -> None:
-        self._responses = iter(responses)
-        self.requests: list[LLMRequest] = []
-
-    async def generate(self, request: LLMRequest) -> LLMResponse:
-        self.requests.append(request)
-        return next(self._responses)
-
-    async def get_context_length(self, model: str | None = None) -> int:
-        return 32768
-
-    async def aclose(self) -> None:
-        pass
-
-
-class MockToolClient(MCPClient):
-    call_tool: AsyncMock
-
-    def __init__(self) -> None:
-        super().__init__(Client(FastMCP("photo-test")))
-        self.load_catalog(tool_catalog())
-
-
 def make_agent(
     responses: list[LLMResponse],
     call_tool: AsyncMock,
     *,
     max_calls: int = 2,
     confirmations: MagicMock | None = None,
-) -> tuple[AgentService, RecordingLLM, MockToolClient]:
-    llm = RecordingLLM(responses)
+) -> tuple[AgentService, ScriptedLLM, MockToolClient]:
+    llm = ScriptedLLM(responses)
     mcp = MockToolClient()
+    mcp.load_catalog(tool_catalog())
     mcp.call_tool = call_tool
     service = AgentService(
         llm,

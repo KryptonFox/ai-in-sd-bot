@@ -1,5 +1,6 @@
 import logging
 import uuid
+from enum import StrEnum
 from zoneinfo import ZoneInfoNotFoundError
 
 from aiogram import F, Router
@@ -20,14 +21,25 @@ logger = logging.getLogger("app.handlers.agent_commands")
 router = Router(name="agent_commands")
 
 
+class ConfirmationAction(StrEnum):
+    CONFIRM = "confirm"
+    CANCEL = "cancel"
+
+
 def get_confirmation_keyboard(identifier: str) -> InlineKeyboardMarkup:
     parsed = uuid.UUID(identifier)
     normalized = str(parsed)
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="Подтвердить", callback_data=f"confirm:{normalized}"),
-                InlineKeyboardButton(text="Отменить", callback_data=f"cancel:{normalized}"),
+                InlineKeyboardButton(
+                    text="Подтвердить",
+                    callback_data=f"{ConfirmationAction.CONFIRM}:{normalized}",
+                ),
+                InlineKeyboardButton(
+                    text="Отменить",
+                    callback_data=f"{ConfirmationAction.CANCEL}:{normalized}",
+                ),
             ]
         ]
     )
@@ -72,12 +84,16 @@ async def handle_confirmation_callback(
         await callback.answer("Это действие больше недоступно.", show_alert=True)
         return
     data = callback.data or ""
-    action, separator, identifier = data.partition(":")
+    action_text, separator, identifier = data.partition(":")
+    try:
+        action = ConfirmationAction(action_text)
+    except ValueError:
+        action = None
     try:
         valid_identifier = len(identifier) == 36 and str(uuid.UUID(identifier)) == identifier
     except ValueError:
         valid_identifier = False
-    if not separator or action not in {"confirm", "cancel"} or not valid_identifier:
+    if not separator or action is None or not valid_identifier:
         await callback.answer("Идентификатор действия недействителен.", show_alert=True)
         return
 
@@ -86,7 +102,7 @@ async def handle_confirmation_callback(
     result: AgentResult = await dialog_service.confirm_action(
         user_id,
         identifier,
-        cancel=action == "cancel",
+        cancel=action is ConfirmationAction.CANCEL,
     )
     if result.decision != AgentDecision.ERROR:
         try:

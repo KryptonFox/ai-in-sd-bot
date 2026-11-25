@@ -21,7 +21,7 @@ from fastmcp.server.http import StarletteWithLifespan
 from app.config import MCPTransport, Settings
 from app.core.clock import FrozenClock
 from app.core.schemas.agent import AgentDecision, EventContext
-from app.core.schemas.llm import LLMRequest, LLMResponse, ToolDefinition
+from app.core.schemas.llm import LLMResponse, ToolDefinition
 from app.core.schemas.mcp import ResourceContent, ResourceDefinition
 from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.core.schemas.tools import PhotoToolResult, ToolFailure
@@ -36,6 +36,7 @@ from mcp_servers.math_tools.server import build_server as build_math_server
 from mcp_servers.student_tools.__main__ import http_app as student_http_app
 from mcp_servers.student_tools.config import ServerSettings
 from mcp_servers.student_tools.server import build_server as build_student_server
+from tests.fake_llm import ScriptedLLM
 from tests.mcp_catalog import tool_catalog
 
 SECRET = "composite-transport-secret-0123456789abcdef"
@@ -100,22 +101,6 @@ class FakeStudentPool:
     @asynccontextmanager
     async def acquire(self) -> AsyncGenerator[FakeStudentConnection, None]:
         yield FakeStudentConnection(self)
-
-
-class ScriptedLLM:
-    def __init__(self, responses: list[LLMResponse]) -> None:
-        self._responses = iter(responses)
-        self.requests: list[LLMRequest] = []
-
-    async def generate(self, request: LLMRequest) -> LLMResponse:
-        self.requests.append(request)
-        return next(self._responses)
-
-    async def get_context_length(self, model: str | None = None) -> int:
-        return 32768
-
-    async def aclose(self) -> None:
-        pass
 
 
 def weather_handler(request: httpx.Request) -> httpx.Response:

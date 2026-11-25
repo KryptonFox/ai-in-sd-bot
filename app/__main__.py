@@ -179,7 +179,7 @@ async def _shutdown(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Учебный текстовый эхо-бот")
+    parser = argparse.ArgumentParser(description="Учебный Telegram-бот с языковой моделью и MCP")
     parser.add_argument("--env-file", default=".env")
     args = parser.parse_args()
 

@@ -1,13 +1,14 @@
 import asyncio
-import os
 import sys
 import time
 from typing import cast
 
 import pytest
 
+import mcp_servers.math_tools.worker as worker_module
 from mcp_servers.math_tools.errors import MathError
 from mcp_servers.math_tools.limits import MEMORY_LIMIT_BYTES, OPERATION_TIMEOUT_SECONDS
+from mcp_servers.math_tools.operations import WorkerOperation
 from mcp_servers.math_tools.runtime import MathRuntime, MathWorker
 
 SLEEPING_WORKER = """
@@ -61,29 +62,39 @@ def python_command(source: str) -> list[str]:
     return [sys.executable, "-c", source]
 
 
-async def wait_for_process(worker: MathWorker) -> int:
+async def wait_for_process(worker: MathWorker) -> asyncio.subprocess.Process:
     for _ in range(300):
-        pid = worker.pid
-        if pid is not None:
-            return pid
+        process = worker._process
+        if process is not None:
+            return process
         await asyncio.sleep(0.01)
     raise AssertionError("worker process did not start")
 
 
-def process_exists(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    return True
+def worker_process(worker: MathWorker) -> asyncio.subprocess.Process:
+    process = worker._process
+    assert process is not None
+    return process
+
+
+def assert_reaped(worker: MathWorker, process: asyncio.subprocess.Process) -> None:
+    assert worker.is_running is False
+    assert worker.pid is None
+    assert process.returncode is not None
 
 
 async def test_real_worker_reports_limits_and_is_reaped() -> None:
     runtime = MathRuntime()
+    process: asyncio.subprocess.Process | None = None
     try:
         limits = await runtime.request({"operation": "limits"})
-        assert limits["memory_limit_bytes"] == MEMORY_LIMIT_BYTES
         assert limits["timeout_seconds"] == OPERATION_TIMEOUT_SECONDS
+        if sys.platform.startswith("linux"):
+            assert limits["memory_limit_enforced"] is True
+            assert limits["memory_limit_bytes"] == MEMORY_LIMIT_BYTES
+        elif worker_module._resource is None:
+            assert limits["memory_limit_enforced"] is False
+            assert limits["memory_limit_bytes"] == 0
 
         result = await runtime.request(
             {
@@ -96,27 +107,23 @@ async def test_real_worker_reports_limits_and_is_reaped() -> None:
         assert result["status"] == "ok"
         assert str(result["result"]).startswith("1.4142135623731")
         assert runtime.worker.is_running
-        pid = runtime.worker.pid
-        assert pid is not None
+        process = worker_process(runtime.worker)
     finally:
         await runtime.aclose()
 
-    assert runtime.worker.is_running is False
-    assert runtime.worker.pid is None
-    assert not process_exists(pid)
+    assert process is not None
+    assert_reaped(runtime.worker, process)
 
 
 async def test_timeout_kills_and_joins_worker_process() -> None:
     worker = MathWorker(command=python_command(SLEEPING_WORKER), timeout=0.3)
     task = asyncio.create_task(worker.request({"operation": "calculate"}))
-    pid = await wait_for_process(worker)
+    process = await wait_for_process(worker)
 
     with pytest.raises(MathError) as captured:
         await task
     assert captured.value.code == "timeout"
-    assert worker.is_running is False
-    assert worker.pid is None
-    assert not process_exists(pid)
+    assert_reaped(worker, process)
 
 
 async def test_startup_timeout_has_distinct_code_and_metrics() -> None:
@@ -176,14 +183,12 @@ async def test_warmup_starts_worker_and_reports_numeric_metrics() -> None:
 async def test_cancellation_kills_and_joins_worker_process() -> None:
     worker = MathWorker(command=python_command(SLEEPING_WORKER), timeout=30)
     task = asyncio.create_task(worker.request({"operation": "calculate"}))
-    pid = await wait_for_process(worker)
+    process = await wait_for_process(worker)
 
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert worker.is_running is False
-    assert worker.pid is None
-    assert not process_exists(pid)
+    assert_reaped(worker, process)
 
 
 async def test_requests_are_serialized_through_one_worker() -> None:
@@ -264,3 +269,24 @@ async def test_kill_waits_for_reaped_process_until_wait_returns() -> None:
     await kill_task
     assert process.wait_finished.is_set()
     assert worker.pid is None
+
+
+def test_memory_report_marks_limit_unavailable_without_resource(monkeypatch) -> None:
+    monkeypatch.setattr(worker_module, "_resource", None)
+
+    worker_module._apply_memory_limit()
+    report = worker_module._memory_report()
+
+    assert report["memory_limit_enforced"] is False
+    assert report["memory_limit_bytes"] == 0
+    assert report["timeout_seconds"] == OPERATION_TIMEOUT_SECONDS
+
+
+def test_worker_operation_enum_covers_safe_protocol() -> None:
+    assert {operation.value for operation in WorkerOperation} == {
+        "calculate",
+        "solve",
+        "plot",
+        "warmup",
+        "limits",
+    }

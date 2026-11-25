@@ -4,6 +4,7 @@ from datetime import datetime
 from app.core.exceptions import LLM_ERROR_MESSAGES
 from app.core.schemas.agent import AgentDecision, AgentResult, DialogResult, InProgress
 from app.core.schemas.status import TimezoneStatus, ToolStatus
+from app.core.schemas.tools import TOOL_ERROR_MESSAGES
 from app.db.records import ConfirmationRecord, ConfirmationState, DecisionAudit
 
 _ACTION_TEXT = {
@@ -44,7 +45,11 @@ _STATUS_TEXT = {
     "timezone_mismatch": "Указанное время не соответствует сохранённому часовому поясу.",
     "ambiguous_time": "Локальное время неоднозначно или не существует из-за перехода DST.",
     "past_time": "Указанное время напоминания уже прошло.",
+    "invalid_time": "Указанное время не удалось распознать.",
     "invalid_arguments": "Аргументы действия не прошли проверку.",
+    "tool_output_budget": "Результат инструмента превышает допустимый размер.",
+    "capability_conflict": "Возможности инструментов конфликтуют с локальной функцией.",
+    "unsupported_action": "Для этого действия не настроено подтверждение.",
     "invalid_decision": "Решение модели не прошло проверку.",
     "mixed_decision": "Модель одновременно предложила ответ и обращение к инструменту.",
     "unknown_tool": "Модель выбрала недоступный инструмент.",
@@ -146,7 +151,11 @@ def decision_text(record: DecisionAudit | None) -> str:
 
 
 def _status_text(value: str) -> str:
-    return LLM_ERROR_MESSAGES.get(value) or _STATUS_TEXT.get(value, value)
+    return (
+        LLM_ERROR_MESSAGES.get(value)
+        or TOOL_ERROR_MESSAGES.get(value)
+        or _STATUS_TEXT.get(value, value)
+    )
 
 
 def _decision_reason(record: DecisionAudit) -> str:

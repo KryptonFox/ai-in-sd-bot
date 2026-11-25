@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from copy import deepcopy
+from datetime import UTC, datetime
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -14,6 +15,7 @@ from app.core.exceptions import InvalidTemperatureError, LLMTimeoutError
 from app.core.schemas.agent import AgentResult
 from app.core.schemas.llm import FinishReason, LLMRequest, LLMResponse
 from app.core.schemas.message import MessageRole
+from app.handlers import commands as command_handlers
 from app.handlers.commands import handle_role_callback, handle_start
 from app.handlers.dialog import handle_retry_callback, handle_user_text
 from app.llm.base import BaseLLMClient
@@ -262,6 +264,31 @@ async def test_scenario_4_mode_switch_clears_history(in_memory_pool, base_settin
 
     user_msgs = [m for m in in_memory_pool.messages if m["user_id"] == 20]
     assert len(user_msgs) == 0
+
+
+async def test_mode_command_with_bot_suffix_switches_mode(
+    in_memory_pool,
+    base_settings,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    mock_llm = MagicMock()
+    service = make_dialog(in_memory_pool, base_settings, mock_llm, registry)
+    send = AsyncMock()
+    monkeypatch.setattr(command_handlers, "send_formatted_message", send)
+    message = Message(
+        message_id=1,
+        date=datetime(2026, 11, 25, tzinfo=UTC),
+        chat=Chat(id=42, type="private"),
+        from_user=User(id=42, is_bot=False, first_name="Студент"),
+        text="/translate@test_bot",
+    )
+
+    await command_handlers.handle_mode_switch(message, service)
+
+    _, mode = await service.get_user_status(42)
+    assert mode.id == "translate"
+    assert send.await_args is not None
+    assert "Переводчик" in send.await_args.args[1]
 
 
 async def test_scenario_5_reset_clears_only_caller_history(in_memory_pool, base_settings):

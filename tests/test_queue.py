@@ -60,7 +60,6 @@ async def test_queue_allows_different_users_concurrently(queue_manager):
 
     assert "start_10" in events
     assert "start_20" in events
-    # Both start before either ends because they are different users
     assert events.index("start_10") < events.index("end_10")
     assert events.index("start_20") < events.index("end_20")
 
@@ -78,7 +77,6 @@ async def test_queue_full_raises_error(queue_manager):
         t2 = asyncio.create_task(subtask())
         await asyncio.sleep(0.01)
 
-        # 3 tasks active or queued, 4th must raise QueueFullError
         with pytest.raises(QueueFullError):
             async with queue_manager.acquire(user_id=1):
                 pass
@@ -90,7 +88,6 @@ async def test_queue_full_raises_error(queue_manager):
 @pytest.mark.asyncio
 async def test_queue_ignore_limits(queue_manager):
     async with queue_manager.acquire(user_id=1):
-        # Even if at capacity, ignore_limits allows acquire to wait instead of raising
         entered = False
 
         async def admin_task():
@@ -168,19 +165,15 @@ async def test_sequential_messages_in_dialog_handler():
     )
     msg2._bot = bot
 
-    # Fire both simultaneously
     task1 = asyncio.create_task(handle_user_text(msg1, dialog_service=service))
     task2 = asyncio.create_task(handle_user_text(msg2, dialog_service=service))
 
     await asyncio.gather(task1, task2)
 
-    # Check answers sent in order
     send_messages = [m for m in sent_methods if isinstance(m, SendMessage)]
-    # Filter only response messages (exclude queue notifications if any)
     answers = [m.text for m in send_messages if "Ответ" in m.text]
     assert answers == ["Ответ 1", "Ответ 2"]
 
-    # History in pool should have user 1, assistant 1, user 2, assistant 2 in order
     user_msgs = [m["content"] for m in pool.messages if m["user_id"] == 77]
     assert user_msgs == [
         "Первое сообщение",

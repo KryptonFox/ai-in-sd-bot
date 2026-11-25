@@ -9,8 +9,10 @@ from sympy import Expr
 
 from mcp_servers.math_tools.errors import MathError
 from mcp_servers.math_tools.syntax import (
-    equation_sides,
-    normalize_expression,
+    EquationSyntax,
+    ExpressionSyntax,
+    parse_equation,
+    parse_expression,
     validate_variable,
 )
 
@@ -124,32 +126,49 @@ def build_variable(name: str) -> sympy.Symbol:
 
 
 def build_expression(text: str) -> Expr:
-    return build_parsed_expression(text).expression
+    return build_expression_syntax(parse_expression(text))
+
+
+def build_expression_syntax(syntax: ExpressionSyntax) -> Expr:
+    return _convert_expression(syntax.tree.body, syntax.normalized)
 
 
 def build_parsed_expression(text: str) -> ParsedExpression:
-    normalized = normalize_expression(text)
-    tree = ast.parse(normalized, mode="eval")
+    return build_parsed_syntax(parse_expression(text))
+
+
+def build_parsed_syntax(syntax: ExpressionSyntax) -> ParsedExpression:
     return ParsedExpression(
-        text=normalized,
-        expression=_convert_expression(tree.body, normalized),
-        original=_convert_original_expression(tree.body, normalized),
-        constraints=_collect_constraints(tree.body, normalized),
+        text=syntax.normalized,
+        expression=_convert_expression(syntax.tree.body, syntax.normalized),
+        original=_convert_original_expression(syntax.tree.body, syntax.normalized),
+        constraints=_collect_constraints(syntax.tree.body, syntax.normalized),
     )
 
 
 def build_equation(text: str) -> ParsedEquation:
-    left_text, right_text = equation_sides(text)
-    left = build_parsed_expression(left_text)
-    right = build_parsed_expression(right_text)
+    return build_equation_syntax(parse_equation(text))
+
+
+def build_equation_syntax(equation: EquationSyntax) -> ParsedEquation:
+    left = build_parsed_syntax(equation.left)
+    right = build_parsed_syntax(equation.right)
     return ParsedEquation(
         left=left,
         right=right,
-        normalized=f"{left.text} = {right.text}",
+        normalized=equation.normalized,
     )
 
 
 def _convert_expression(node: ast.expr, source: str) -> Expr:
+    return _convert(node, source, preserve_structure=False)
+
+
+def _convert_original_expression(node: ast.expr, source: str) -> Expr:
+    return _convert(node, source, preserve_structure=True)
+
+
+def _convert(node: ast.expr, source: str, *, preserve_structure: bool) -> Expr:
     if isinstance(node, ast.Constant):
         return _constant_expression(node, source)
 
@@ -159,17 +178,15 @@ def _convert_expression(node: ast.expr, source: str) -> Expr:
         return build_variable(node.id)
 
     if isinstance(node, ast.BinOp):
-        operation = BINARY_OPERATIONS.get(type(node.op))
-        if operation is None:
-            raise MathError("unsupported_syntax")
-        return operation(
-            _convert_expression(node.left, source),
-            _convert_expression(node.right, source),
-        )
+        left = _convert(node.left, source, preserve_structure=preserve_structure)
+        right = _convert(node.right, source, preserve_structure=preserve_structure)
+        return _convert_binary(node.op, left, right, preserve_structure=preserve_structure)
 
     if isinstance(node, ast.UnaryOp):
-        operand = _convert_expression(node.operand, source)
+        operand = _convert(node.operand, source, preserve_structure=preserve_structure)
         if isinstance(node.op, ast.USub):
+            if preserve_structure:
+                return sympy.Mul(sympy.Integer(-1), operand, evaluate=False)
             return -operand
         if isinstance(node.op, ast.UAdd):
             return operand
@@ -179,61 +196,48 @@ def _convert_expression(node: ast.expr, source: str) -> Expr:
         function = FUNCTIONS.get(node.func.id) if isinstance(node.func, ast.Name) else None
         if function is None:
             raise MathError("unknown_function")
-        arguments = [_convert_expression(argument, source) for argument in node.args]
+        arguments = [
+            _convert(argument, source, preserve_structure=preserve_structure)
+            for argument in node.args
+        ]
+        if preserve_structure and isinstance(node.func, ast.Name) and node.func.id == "sqrt":
+            return sympy.Pow(arguments[0], sympy.Rational(1, 2), evaluate=False)
         return function(*arguments)
 
     raise MathError("unsupported_syntax")
 
 
-def _convert_original_expression(node: ast.expr, source: str) -> Expr:
-    if isinstance(node, ast.Constant):
-        return _constant_expression(node, source)
-
-    if isinstance(node, ast.Name):
-        if node.id in CONSTANTS:
-            return CONSTANTS[node.id]
-        return build_variable(node.id)
-
-    if isinstance(node, ast.BinOp):
-        left = _convert_original_expression(node.left, source)
-        right = _convert_original_expression(node.right, source)
-        if isinstance(node.op, ast.Add):
-            return sympy.Add(left, right, evaluate=False)
-        if isinstance(node.op, ast.Sub):
-            return sympy.Add(
-                left,
-                sympy.Mul(sympy.Integer(-1), right, evaluate=False),
-                evaluate=False,
-            )
-        if isinstance(node.op, ast.Mult):
-            return sympy.Mul(left, right, evaluate=False)
-        if isinstance(node.op, ast.Div):
-            return sympy.Mul(
-                left,
-                sympy.Pow(right, sympy.Integer(-1), evaluate=False),
-                evaluate=False,
-            )
-        if isinstance(node.op, ast.Pow):
-            return sympy.Pow(left, right, evaluate=False)
-        raise MathError("unsupported_syntax")
-
-    if isinstance(node, ast.UnaryOp):
-        operand = _convert_original_expression(node.operand, source)
-        if isinstance(node.op, ast.USub):
-            return sympy.Mul(sympy.Integer(-1), operand, evaluate=False)
-        if isinstance(node.op, ast.UAdd):
-            return operand
-        raise MathError("unsupported_syntax")
-
-    if isinstance(node, ast.Call):
-        function = FUNCTIONS.get(node.func.id) if isinstance(node.func, ast.Name) else None
+def _convert_binary(
+    operation: ast.operator,
+    left: Expr,
+    right: Expr,
+    *,
+    preserve_structure: bool,
+) -> Expr:
+    if not preserve_structure:
+        function = BINARY_OPERATIONS.get(type(operation))
         if function is None:
-            raise MathError("unknown_function")
-        arguments = [_convert_original_expression(argument, source) for argument in node.args]
-        if isinstance(node.func, ast.Name) and node.func.id == "sqrt":
-            return sympy.Pow(arguments[0], sympy.Rational(1, 2), evaluate=False)
-        return function(*arguments)
+            raise MathError("unsupported_syntax")
+        return function(left, right)
 
+    if isinstance(operation, ast.Add):
+        return sympy.Add(left, right, evaluate=False)
+    if isinstance(operation, ast.Sub):
+        return sympy.Add(
+            left,
+            sympy.Mul(sympy.Integer(-1), right, evaluate=False),
+            evaluate=False,
+        )
+    if isinstance(operation, ast.Mult):
+        return sympy.Mul(left, right, evaluate=False)
+    if isinstance(operation, ast.Div):
+        return sympy.Mul(
+            left,
+            sympy.Pow(right, sympy.Integer(-1), evaluate=False),
+            evaluate=False,
+        )
+    if isinstance(operation, ast.Pow):
+        return sympy.Pow(left, right, evaluate=False)
     raise MathError("unsupported_syntax")
 
 

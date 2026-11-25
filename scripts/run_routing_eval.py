@@ -435,7 +435,6 @@ async def run_evaluation(
 
     import asyncpg
     import httpx
-    from fastmcp import Client
 
     from app.config import Settings
     from app.llm.client import OpenAIClient
@@ -470,9 +469,7 @@ async def run_evaluation(
                 http,
                 frozen_clock,
             )
-            async with Client(server, name="routing-evaluation") as catalog:
-                mcp.load_catalog(await catalog.list_tools())
-                mcp.load_resources(await catalog.list_resources())
+            await mcp.load_in_process_catalog(server, name="routing-evaluation")
 
         service = AgentService(
             client,

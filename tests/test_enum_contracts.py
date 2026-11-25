@@ -16,6 +16,7 @@ from app.core.schemas.execution import StepAction
 from app.core.schemas.llm import FinishReason, LLMResponse
 from app.core.schemas.tools import WeatherResult, WeatherStatus
 from app.db.records import ConfirmationState
+from app.handlers.agent_commands import ConfirmationAction
 from scripts.run_routing_eval import MeasurementStatus
 from tests.mcp_catalog import tool_catalog
 
@@ -27,6 +28,7 @@ from tests.mcp_catalog import tool_catalog
         StepAction,
         TurnState,
         ConfirmationState,
+        ConfirmationAction,
         WeatherStatus,
         FinishReason,
         MCPTransport,

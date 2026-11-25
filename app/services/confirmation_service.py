@@ -148,7 +148,7 @@ class ConfirmationService:
             payload = ReminderResult.model_validate(payload).model_dump(mode="json")
             await repo.complete(self.pool, row["id"], payload, self.clock.now())
             result = reminder_success(payload)
-            status = "succeeded"
+            status = ConfirmationState.SUCCEEDED
         except ToolFailure as error:
             transient = error.code not in {
                 "unauthorized",
@@ -202,7 +202,7 @@ class ConfirmationService:
             return None
 
         await repo.complete(self.pool, row["id"], committed, self.clock.now())
-        await self._audit(row, "succeeded", reason="recovered_committed_result")
+        await self._audit(row, ConfirmationState.SUCCEEDED, reason="recovered_committed_result")
 
         return reminder_success(committed)
 

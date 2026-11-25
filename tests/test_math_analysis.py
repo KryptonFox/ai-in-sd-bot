@@ -2,6 +2,7 @@ import math
 
 import pytest
 
+from mcp_servers.math_tools import series as series_module
 from mcp_servers.math_tools.engine import handle_request
 from mcp_servers.math_tools.errors import MathError
 
@@ -154,3 +155,95 @@ def test_constrained_extrema_report_no_solution_for_impossible_constraint() -> N
 
     assert result["status"] == "no_solution"
     assert result["extrema"] == []
+
+
+def test_constrained_extrema_checks_objective_domain_after_simplification() -> None:
+    result = calculate(
+        "sqrt(x)*sqrt(x)+y^2",
+        "constrained_extrema",
+        variables=["x", "y"],
+        constraints=["x=-1"],
+    )
+
+    assert result["status"] == "no_solution"
+    assert result["extrema"] == []
+
+
+def test_constrained_extrema_orders_values_numerically() -> None:
+    result = calculate(
+        "x*y - 3/2",
+        "constrained_extrema",
+        variables=["x", "y"],
+        constraints=["x^2+y^2=1"],
+    )
+
+    assert result["status"] == "ok"
+    values = [float(extreme["numeric_value"]) for extreme in result["extrema"]]
+    assert values == sorted(values)
+    assert values[0] == pytest.approx(-2.0)
+    assert values[-1] == pytest.approx(-1.0)
+    assert [extreme["value"] for extreme in result["extrema"]] == ["-2", "-2", "-1", "-1"]
+
+
+def test_constrained_extrema_use_numeric_point_in_numeric_summary() -> None:
+    result = calculate(
+        "x*y",
+        "constrained_extrema",
+        variables=["x", "y"],
+        constraints=["x^2+y^2=1"],
+    )
+
+    numeric_summary = str(result["numeric"])
+    assert "sqrt(" not in numeric_summary
+    assert "x=-0.707106781186548" in numeric_summary
+    for extreme in result["extrema"]:
+        assert "sqrt(" not in extreme["numeric_point"]["x"]
+        assert float(extreme["numeric_point"]["x"]) ** 2 + float(
+            extreme["numeric_point"]["y"]
+        ) ** 2 == pytest.approx(1.0)
+
+
+def test_series_with_infinite_lower_bound_reports_convergence() -> None:
+    result = calculate(
+        "1/n^2",
+        "series",
+        variable="n",
+        lower="-oo",
+        upper="-1",
+    )
+
+    assert result["status"] == "ok"
+    assert result["result"] == "pi**2/6"
+    assert result["convergence"] == "convergent"
+    assert result["absolute_convergence"] == "convergent"
+    assert result["conditional"] is False
+    assert "конечная сумма" not in str(result["detail"])
+
+
+def test_divergent_series_skips_numeric_evaluation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden(_: object) -> str:
+        raise AssertionError("numeric evaluation must not run for a divergent series")
+
+    monkeypatch.setattr(series_module, "_series_numeric_text", forbidden)
+    result = calculate("(-1)^n", "series", variable="n")
+
+    assert result["status"] == "ok"
+    assert result["result"] == ""
+    assert result["convergence"] == "divergent"
+
+
+def test_exact_improper_integral_supports_constant_multiplier() -> None:
+    result = calculate(
+        "2*log(1+x^2)/(1+x^2)",
+        "integrate",
+        lower=0,
+        upper="oo",
+    )
+
+    assert result["status"] == "ok"
+    assert result["result"] == "2*pi*log(2)"
+    assert result["convergence"] == "convergent"
+    assert float(result["numeric"]) == pytest.approx(2 * math.pi * math.log(2))
+    assert "дифференцированием по параметру" in str(result["detail"])

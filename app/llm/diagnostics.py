@@ -243,46 +243,59 @@ def _provider_diagnosis(
     return "unclassified_api_error", "API вернул ошибку без распознанного описания"
 
 
+CONTEXT_LENGTH_DIAGNOSIS = (
+    "context_length_exceeded",
+    "API сообщил, что превышен лимит контекста модели",
+)
+MISSING_ENDPOINTS_DIAGNOSIS = (
+    "no_available_endpoints",
+    "API сообщил, что для модели нет доступных точек подключения",
+)
+QUOTA_DIAGNOSIS = ("insufficient_quota", "API сообщил об исчерпанной квоте")
+RATE_LIMIT_DIAGNOSIS = ("rate_limit_exceeded", "API ограничил запросы или число токенов")
+
+
+def _unsupported_parameter(param: str | None) -> tuple[str, str]:
+    if param:
+        return (
+            f"unsupported_parameter_for_{param}",
+            f"API отклонил {param}: параметр или значение не поддерживается моделью",
+        )
+    return "unsupported_parameter", "API сообщил о неподдерживаемом параметре или значении"
+
+
+def _invalid_parameter(param: str | None) -> tuple[str, str]:
+    if param:
+        return (
+            f"invalid_parameter_for_{param}",
+            f"API отклонил недопустимое значение параметра {param}",
+        )
+    return "invalid_parameter", "API сообщил о недопустимом значении параметра"
+
+
 def _diagnosis_from_fields(
     code: str | None, error_type: str | None, param: str | None
 ) -> tuple[str, str] | None:
     if code == "context_length_exceeded":
-        return "context_length_exceeded", "API сообщил, что превышен лимит контекста модели"
+        return CONTEXT_LENGTH_DIAGNOSIS
 
     if code in {"model_not_found", "model_not_available", "model_not_supported"}:
         return "model_unavailable", "API сообщил, что модель недоступна или не найдена"
 
     if code == "no_available_endpoints":
-        return (
-            "no_available_endpoints",
-            "API сообщил, что для модели нет доступных точек подключения",
-        )
+        return MISSING_ENDPOINTS_DIAGNOSIS
 
     if code == "insufficient_quota" or error_type == "insufficient_quota":
-        return "insufficient_quota", "API сообщил об исчерпанной квоте"
+        return QUOTA_DIAGNOSIS
 
     if code == "rate_limit_exceeded" or error_type == "rate_limit_error":
-        return "rate_limit_exceeded", "API ограничил запросы или число токенов"
+        return RATE_LIMIT_DIAGNOSIS
 
     if code in {"unsupported_parameter", "unsupported_value"}:
-        suffix = f"_for_{param}" if param else ""
-        if param:
-            return (
-                f"unsupported_parameter{suffix}",
-                f"API отклонил {param}: параметр или значение не поддерживается моделью",
-            )
-
-        return "unsupported_parameter", "API сообщил о неподдерживаемом параметре или значении"
+        return _unsupported_parameter(param)
 
     if code == "invalid_parameter":
-        suffix = f"_for_{param}" if param else ""
-        if param:
-            return (
-                f"invalid_parameter{suffix}",
-                f"API отклонил недопустимое значение параметра {param}",
-            )
-
-        return "invalid_parameter", "API сообщил о недопустимом значении параметра"
+        return _invalid_parameter(param)
 
     if error_type == "authentication_error" or code == "invalid_api_key":
         return "authentication_rejected", "API отклонил учётные данные"
@@ -299,39 +312,22 @@ def _diagnosis_from_fields(
 def _diagnosis_from_message(message: object) -> tuple[str, str] | None:
     text = message.casefold() if isinstance(message, str) else ""
     if "context length" in text:
-        return "context_length_exceeded", "API сообщил, что превышен лимит контекста модели"
+        return CONTEXT_LENGTH_DIAGNOSIS
 
     if "no endpoints" in text:
-        return (
-            "no_available_endpoints",
-            "API сообщил, что для модели нет доступных точек подключения",
-        )
+        return MISSING_ENDPOINTS_DIAGNOSIS
 
     if any(phrase in text for phrase in ("unsupported", "not supported", "does not support")):
-        message_param = _message_param(message)
-        if message_param:
-            return (
-                f"unsupported_parameter_for_{message_param}",
-                f"API отклонил {message_param}: параметр или значение не поддерживается моделью",
-            )
-
-        return "unsupported_parameter", "API сообщил о неподдерживаемом параметре или значении"
+        return _unsupported_parameter(_message_param(message))
 
     if "invalid value" in text:
-        message_param = _message_param(message)
-        if message_param:
-            return (
-                f"invalid_parameter_for_{message_param}",
-                f"API отклонил недопустимое значение параметра {message_param}",
-            )
-
-        return "invalid_parameter", "API сообщил о недопустимом значении параметра"
+        return _invalid_parameter(_message_param(message))
 
     if "quota" in text:
-        return "insufficient_quota", "API сообщил об исчерпанной квоте"
+        return QUOTA_DIAGNOSIS
 
     if "rate limit" in text:
-        return "rate_limit_exceeded", "API ограничил запросы или число токенов"
+        return RATE_LIMIT_DIAGNOSIS
 
     return None
 

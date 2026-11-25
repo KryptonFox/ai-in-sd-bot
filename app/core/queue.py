@@ -9,14 +9,6 @@ logger = logging.getLogger("app.core.queue")
 
 
 class UserQueueManager:
-    """Менеджер очередей сообщений пользователей.
-
-    Обеспечивает последовательную обработку сообщений одного пользователя (FIFO),
-    предотвращая состояния гонки (race conditions) при одновременной отправке
-    нескольких сообщений подряд, при этом запросы разных пользователей
-    обрабатываются параллельно.
-    """
-
     def __init__(self, max_queue_size: int = 3) -> None:
         self.max_queue_size = max_queue_size
         self._locks: dict[int, asyncio.Lock] = {}
@@ -24,31 +16,21 @@ class UserQueueManager:
         self._global_lock = asyncio.Lock()
 
     async def is_user_busy(self, user_id: int) -> bool:
-        """Проверяет, обрабатывается ли сейчас запрос данного пользователя."""
         async with self._global_lock:
             return self._active_counts.get(user_id, 0) > 0
 
     async def get_queue_size(self, user_id: int) -> int:
-        """Возвращает текущее количество активных и ожидающих запросов пользователя."""
         async with self._global_lock:
             return self._active_counts.get(user_id, 0)
 
     @asynccontextmanager
     async def acquire(self, user_id: int, ignore_limits: bool = False) -> AsyncGenerator[int]:
-        """Захватывает очередь для пользователя.
-
-        Yields:
-            int: Позиция в очереди (0 если выполняется сразу, > 0 если ожидало).
-
-        Raises:
-            QueueFullError: Если количество запросов пользователя превышает лимит.
-        """
+        """Serialize work per user and yield the position in that user's queue."""
         async with self._global_lock:
             current_count = self._active_counts.get(user_id, 0)
             if not ignore_limits and current_count >= self.max_queue_size:
                 raise QueueFullError(
-                    f"Очередь сообщений пользователя {user_id} переполнена "
-                    f"(максимум {self.max_queue_size})"
+                    f"Очередь сообщений переполнена (максимум {self.max_queue_size})"
                 )
 
             self._active_counts[user_id] = current_count + 1

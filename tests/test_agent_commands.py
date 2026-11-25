@@ -209,30 +209,18 @@ def test_confirmation_keyboard_callback_data_fits_telegram_limit() -> None:
     assert all(value is not None and len(value) < 64 for value in callback_values)
 
 
-@pytest.mark.parametrize(
-    ("decision", "tool", "reason", "expected"),
-    [
-        ("tool", "get_weather", "structured_response", "актуальные погодные данные"),
-        ("tool", "get_schedule_week", "structured_response", "расписание выбранной недели"),
-        ("respond", None, "plain_response", "без обращения к внешним данным"),
-        ("clarify", None, "structured_response", "уточнить недостающие параметры"),
-        ("error", None, "call_budget", "лимит обращений к инструментам"),
-        ("tool", "add_reminder", "confirmed_operation", "Владелец подтвердил"),
-    ],
-)
-def test_why_explains_route_without_internal_completion_codes(
-    decision: str,
-    tool: str | None,
+def make_audit_record(
+    decision: AgentDecision,
     reason: str,
-    expected: str,
-) -> None:
-    record: DecisionAudit = {
+    tool_name: str | None = None,
+) -> DecisionAudit:
+    return {
         "id": 1,
         "user_id": 1,
         "event_id": "event",
         "request_id": "request",
         "decision": decision,
-        "tool_name": tool,
+        "tool_name": tool_name,
         "arguments": {},
         "validation": "ok",
         "execution": "completed",
@@ -241,10 +229,61 @@ def test_why_explains_route_without_internal_completion_codes(
         "created_at": datetime(2026, 11, 2, tzinfo=UTC),
     }
 
-    text = decision_text(record)
+
+@pytest.mark.parametrize(
+    ("decision", "tool", "reason", "expected"),
+    [
+        (AgentDecision.TOOL, "get_weather", "structured_response", "актуальные погодные данные"),
+        (
+            AgentDecision.TOOL,
+            "get_schedule_week",
+            "structured_response",
+            "расписание выбранной недели",
+        ),
+        (AgentDecision.RESPOND, None, "plain_response", "без обращения к внешним данным"),
+        (
+            AgentDecision.CLARIFY,
+            None,
+            "structured_response",
+            "уточнить недостающие параметры",
+        ),
+        (AgentDecision.ERROR, None, "call_budget", "лимит обращений к инструментам"),
+        (AgentDecision.TOOL, "add_reminder", "confirmed_operation", "Владелец подтвердил"),
+    ],
+)
+def test_why_explains_route_without_internal_completion_codes(
+    decision: AgentDecision,
+    tool: str | None,
+    reason: str,
+    expected: str,
+) -> None:
+    text = decision_text(make_audit_record(decision, reason, tool))
 
     assert expected in text
     assert "Проверка: пройдена" in text
     assert "Выполнение: обработка завершена" in text
     assert "structured_response" not in text
     assert "plain_response" not in text
+
+
+@pytest.mark.parametrize(
+    ("reason", "expected"),
+    [
+        ("queue_timeout", "Вычислитель занят"),
+        ("request_deadline", "Общее время обработки запроса истекло"),
+        ("worker_start_timeout", "Вычислительный процесс не запустился"),
+        ("worker_failed", "завершился аварийно"),
+        ("memory_limit", "лимит памяти"),
+        ("resource_limit", "допустимый размер"),
+        ("evaluation_failed", "Не удалось вычислить"),
+        ("tool_output_budget", "допустимый размер"),
+        ("capability_conflict", "конфликтуют"),
+        ("unsupported_action", "не настроено подтверждение"),
+        ("invalid_time", "не удалось распознать"),
+    ],
+)
+def test_why_maps_tool_error_codes(reason: str, expected: str) -> None:
+    text = decision_text(make_audit_record(AgentDecision.ERROR, reason))
+
+    assert expected in text
+    assert reason not in text

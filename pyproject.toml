@@ -1,7 +1,7 @@
 [project]
 name = "itmo-tg-template"
 version = "0.1.0"
-description = "Учебный Telegram-бот: текстовое эхо и подключение PostgreSQL"
+description = "Учебный Telegram-бот с языковой моделью и инструментами MCP"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "aiogram==3.31.0",

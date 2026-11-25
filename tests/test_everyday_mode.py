@@ -17,7 +17,7 @@ from PIL import Image
 from app.config import Settings
 from app.core.clock import FrozenClock
 from app.core.schemas.agent import AgentDecision, AgentResult, EventContext
-from app.core.schemas.llm import FinishReason, LLMRequest, LLMResponse
+from app.core.schemas.llm import FinishReason, LLMResponse
 from app.core.schemas.mcp import ResourceContent
 from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.core.schemas.tools import PhotoToolResult, ToolImage
@@ -36,6 +36,7 @@ from app.services.dialog_service import DialogService
 from app.services.tool_execution import READ_RESOURCE_FUNCTION, ToolExecutionService
 from app.telegram import get_default_bot_commands
 from mcp_servers.math_tools.server import build_server as build_math_server
+from tests.fake_llm import ScriptedLLM
 from tests.mcp_catalog import resource_catalog, tool_catalog
 
 EVALUATION_TIME = datetime(2026, 10, 12, 9, tzinfo=UTC)
@@ -104,22 +105,6 @@ def weather_payload() -> dict[str, object]:
         "timezone": "Europe/Moscow",
         "candidates": [],
     }
-
-
-class ScriptedLLM:
-    def __init__(self, responses: Sequence[LLMResponse]) -> None:
-        self._responses = iter(responses)
-        self.requests: list[LLMRequest] = []
-
-    async def generate(self, request: LLMRequest) -> LLMResponse:
-        self.requests.append(request.model_copy(update={"messages": list(request.messages)}))
-        return next(self._responses)
-
-    async def get_context_length(self, model: str | None = None) -> int:
-        return 32768
-
-    async def aclose(self) -> None:
-        pass
 
 
 class EverydayToolClient(MCPClient):

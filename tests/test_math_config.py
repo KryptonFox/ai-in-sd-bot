@@ -2,11 +2,12 @@ import io
 import json
 import sys
 from pathlib import Path
-from types import TracebackType
+from types import SimpleNamespace, TracebackType
 
 import pytest
 
 from app.config import Settings
+from app.core import health_probe
 from app.core.schemas.tools import ToolFailure
 from app.mcp.connection import create_math_tools_client
 from mcp_servers.math_tools import healthcheck
@@ -111,33 +112,29 @@ class FakeResponse:
         self._buffer.close()
 
 
-def test_healthcheck_cli_returns_status_for_health_endpoint(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("payload", "status"),
+    [
+        ({"status": "ok"}, 0),
+        ({"status": "unavailable"}, 1),
+        ([], 1),
+        (None, 1),
+    ],
+)
+def test_healthcheck_cli(monkeypatch: pytest.MonkeyPatch, payload: object, status: int) -> None:
     calls: list[str] = []
 
-    def fake_urlopen(url: str, timeout: int) -> FakeResponse:
+    def open_health_endpoint(url: str, timeout: int) -> FakeResponse:
         calls.append(url)
         assert timeout == 5
-        return FakeResponse(json.dumps({"status": "ok"}).encode("utf-8"))
+        if payload is None:
+            raise OSError("unreachable")
+        return FakeResponse(json.dumps(payload).encode("utf-8"))
 
-    monkeypatch.setattr(healthcheck.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        health_probe, "build_opener", lambda _: SimpleNamespace(open=open_health_endpoint)
+    )
     monkeypatch.setattr(sys, "argv", ["healthcheck", "--port", "8123"])
-    assert healthcheck.main() == 0
+
+    assert healthcheck.main() == status
     assert calls == ["http://127.0.0.1:8123/health"]
-
-
-def test_healthcheck_cli_returns_failure_for_bad_status(monkeypatch) -> None:
-    def fake_urlopen(url: str, timeout: int) -> FakeResponse:
-        return FakeResponse(json.dumps({"status": "unavailable"}).encode("utf-8"))
-
-    monkeypatch.setattr(healthcheck.urllib.request, "urlopen", fake_urlopen)
-    monkeypatch.setattr(sys, "argv", ["healthcheck", "--port", "8123"])
-    assert healthcheck.main() == 1
-
-
-def test_healthcheck_cli_returns_failure_when_unreachable(monkeypatch) -> None:
-    def fake_urlopen(url: str, timeout: int) -> FakeResponse:
-        raise OSError("unreachable")
-
-    monkeypatch.setattr(healthcheck.urllib.request, "urlopen", fake_urlopen)
-    monkeypatch.setattr(sys, "argv", ["healthcheck", "--port", "8123"])
-    assert healthcheck.main() == 1

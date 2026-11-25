@@ -80,25 +80,14 @@ class ContextBuilder:
         action: ChatMessage | None = None,
     ) -> PreparedContext:
         budget = await self.budget()
-        history = await history_repo.get_dialog_history(
-            self._pool,
-            user_id,
-            self._settings.history_max_messages,
-            self._settings.history_max_chars,
-        )
         mode_messages = mode.build_initial_messages(text)
         current = ChatMessage(role=MessageRole.USER, content=text)
         overhead = len(instructions.encode()) + 64
-        pairs = complete_pairs(history)
-        summary = await history_repo.get_dialog_summary(self._pool, user_id)
-        decision_initial = list(mode_messages)
-        if summary:
-            decision_initial.append(summary_message(summary))
-        if action:
-            decision_initial.append(action)
+        pairs, summary = await self._load_history(user_id)
+        initial = self._compose_initial(mode_messages, summary, action)
 
         needs_budget_compaction = self._needs_compaction(
-            decision_initial,
+            initial,
             current,
             pairs,
             tools,
@@ -106,20 +95,8 @@ class ContextBuilder:
             budget,
         )
         if await self.compact(user_id, budget, force=needs_budget_compaction):
-            history = await history_repo.get_dialog_history(
-                self._pool,
-                user_id,
-                self._settings.history_max_messages,
-                self._settings.history_max_chars,
-            )
-            pairs = complete_pairs(history)
-            summary = await history_repo.get_dialog_summary(self._pool, user_id)
-
-        initial = list(mode_messages)
-        if summary:
-            initial.append(summary_message(summary))
-        if action:
-            initial.append(action)
+            pairs, summary = await self._load_history(user_id)
+            initial = self._compose_initial(mode_messages, summary, action)
 
         return self._fit_context(
             initial,
@@ -129,6 +106,32 @@ class ContextBuilder:
             overhead,
             budget,
         )
+
+    async def _load_history(
+        self,
+        user_id: int,
+    ) -> tuple[list[list[ChatMessage]], str | None]:
+        history = await history_repo.get_dialog_history(
+            self._pool,
+            user_id,
+            self._settings.history_max_messages,
+            self._settings.history_max_chars,
+        )
+        summary = await history_repo.get_dialog_summary(self._pool, user_id)
+        return complete_pairs(history), summary
+
+    @staticmethod
+    def _compose_initial(
+        mode_messages: list[ChatMessage],
+        summary: str | None,
+        action: ChatMessage | None,
+    ) -> list[ChatMessage]:
+        initial = list(mode_messages)
+        if summary:
+            initial.append(summary_message(summary))
+        if action:
+            initial.append(action)
+        return initial
 
     @staticmethod
     def _needs_compaction(

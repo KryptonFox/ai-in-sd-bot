@@ -163,14 +163,3 @@ async def get_user_messages_with_ids(
         result.append((row["id"], message))
 
     return result
-
-
-async def delete_dialog_messages_by_ids(
-    pool: asyncpg.Pool,
-    message_ids: list[int],
-) -> None:
-    if not message_ids:
-        return
-
-    async with pool.acquire() as conn:
-        await conn.execute("DELETE FROM dialog_messages WHERE id = ANY($1)", message_ids)

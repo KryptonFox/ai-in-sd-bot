@@ -401,3 +401,114 @@ def test_math_worker_environment_receives_resolved_limits() -> None:
 def test_math_settings_reject_png_limit_above_existing_contract(tmp_path: Path) -> None:
     with pytest.raises(MathConfigError, match="MATH_MCP_MAX_PNG_BYTES"):
         math_settings_from(tmp_path, environ={"MATH_MCP_MAX_PNG_BYTES": "524288"})
+
+
+def test_settings_forward_custom_toml_path_to_math_stdio(tmp_path: Path) -> None:
+    from fastmcp.client.transports import StdioTransport
+
+    from app.mcp.connection import create_math_tools_client
+
+    config_file = tmp_path / "custom.toml"
+    config_file.write_text('[mcp]\ntransport = "stdio"\n', encoding="utf-8")
+
+    settings = Settings.load(
+        tmp_path / "missing.env",
+        environ={"BOT_TOKEN": TOKEN, "POSTGRES_PASSWORD": "unused"},
+        config_file=config_file,
+    )
+    client = create_math_tools_client(settings)
+
+    assert settings.math_mcp_environment["MATH_MCP_CONFIG_FILE"] == str(config_file)
+    assert client is not None
+    transport = client._client.transport
+    assert isinstance(transport, StdioTransport)
+    assert transport.env is not None
+    assert transport.env["MATH_MCP_CONFIG_FILE"] == str(config_file)
+
+
+def test_explicit_env_math_config_path_wins_over_custom_toml_path(tmp_path: Path) -> None:
+    settings = settings_from(
+        tmp_path,
+        env_text="MATH_MCP_CONFIG_FILE=./config.math.toml\n",
+    )
+
+    assert settings.math_mcp_environment["MATH_MCP_CONFIG_FILE"] == "./config.math.toml"
+
+
+def test_explicit_missing_math_config_path_is_reported(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.toml"
+
+    with pytest.raises(MathConfigError, match="файл не найден"):
+        MathSettings.load(
+            tmp_path / "missing.env",
+            environ={},
+            config_file=missing,
+        )
+
+
+def test_math_settings_use_config_path_from_selected_dotenv(tmp_path: Path) -> None:
+    config_file = tmp_path / "math.toml"
+    config_file.write_text("[math_mcp]\noperation_timeout_seconds = 7.0\n", encoding="utf-8")
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"MATH_MCP_CONFIG_FILE={config_file}\n", encoding="utf-8")
+
+    settings = MathSettings.load(env_file, environ={})
+
+    assert settings.math_mcp_operation_timeout_seconds == 7.0
+
+
+def test_missing_dotenv_math_config_path_is_reported(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"MATH_MCP_CONFIG_FILE={tmp_path / 'missing.toml'}\n", encoding="utf-8")
+
+    with pytest.raises(MathConfigError, match="файл не найден"):
+        MathSettings.load(env_file, environ={})
+
+
+def test_optional_default_toml_missing_keeps_math_defaults(tmp_path: Path) -> None:
+    from app.core.toml_config import TomlConfigError, load_toml_environment
+
+    assert load_toml_environment(tmp_path / "missing.toml", required=False) == {}
+    with pytest.raises(TomlConfigError, match="файл не найден"):
+        load_toml_environment(tmp_path / "missing.toml")
+
+
+def test_server_settings_read_toml_and_ignore_empty_process_values(tmp_path: Path) -> None:
+    from mcp_servers.student_tools.config import ServerSettings
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('[mcp]\ntransport = "streamable-http"\n', encoding="utf-8")
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        f"MCP_SHARED_SECRET={'s' * 32}\nPOSTGRES_PASSWORD=from-dotenv\n",
+        encoding="utf-8",
+    )
+
+    settings = ServerSettings.load(
+        env_file,
+        environ={"POSTGRES_PASSWORD": ""},
+        config_file=config_file,
+    )
+
+    assert settings.postgres_password == "from-dotenv"
+    assert settings.mcp_transport.value == "streamable-http"
+
+
+@pytest.mark.parametrize(
+    ("config_text", "environment"),
+    [
+        ("[llm]\ntimeout_seconds = 0.5\n", {"LLM_TIMEOUT": "0.5"}),
+        ("[history]\nmax_messages = 10001\n", {"HISTORY_MAX_MESSAGES": "10001"}),
+        ('[mcp]\nserver_url = "not-a-url"\n', {"MCP_SERVER_URL": "not-a-url"}),
+    ],
+)
+def test_toml_and_environment_reject_the_same_invalid_values(
+    tmp_path: Path,
+    config_text: str,
+    environment: dict[str, str],
+) -> None:
+    with pytest.raises(ConfigError):
+        settings_from(tmp_path, config_text=config_text)
+
+    with pytest.raises(ConfigError):
+        settings_from(tmp_path, environ=environment)

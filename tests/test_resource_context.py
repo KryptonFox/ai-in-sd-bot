@@ -1,4 +1,6 @@
+import asyncio
 import json
+import logging
 from collections.abc import Mapping
 from unittest.mock import AsyncMock, MagicMock
 
@@ -7,7 +9,7 @@ from fastmcp import Client, FastMCP
 
 from app.core.budget import ContextBudget
 from app.core.schemas.agent import AgentDecision, EventContext
-from app.core.schemas.llm import FinishReason, LLMRequest, LLMResponse
+from app.core.schemas.llm import FinishReason, LLMResponse
 from app.core.schemas.mcp import ResourceContent
 from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.core.schemas.tools import ToolFailure
@@ -15,26 +17,11 @@ from app.db.repositories.audit_repo import _safe_arguments
 from app.mcp.client import MCPClient
 from app.services.agent_service import AgentService
 from app.services.tool_execution import READ_RESOURCE_FUNCTION, ToolExecutionService
+from tests.fake_llm import ScriptedLLM
 from tests.mcp_catalog import resource_catalog, tool_catalog
 
 URI = "schedule://current-week"
 CONTEXT = EventContext(user_id=1, event_id="resources", request_id="resource-test")
-
-
-class ScriptedLLM:
-    def __init__(self, responses: list[LLMResponse]) -> None:
-        self.responses = iter(responses)
-        self.requests: list[LLMRequest] = []
-
-    async def generate(self, request: LLMRequest) -> LLMResponse:
-        self.requests.append(request.model_copy(update={"messages": list(request.messages)}))
-        return next(self.responses)
-
-    async def get_context_length(self, model: str | None = None) -> int:
-        return 32768
-
-    async def aclose(self) -> None:
-        pass
 
 
 class RecordingMCPClient(MCPClient):
@@ -392,6 +379,54 @@ async def test_resource_audit_uri_is_recorded_separately_from_arguments() -> Non
 
     assert result.arguments == {}
     assert audit_arguments == {"resource_uris": [URI]}
+
+
+def test_tool_metadata_is_audited_without_raw_formulas_or_text() -> None:
+    audit_arguments = json.loads(
+        _safe_arguments(
+            {
+                "operation": "plot",
+                "plot_type": "surface",
+                "week_offset": 1,
+                "expression": "gamma(x) + factorial(y)",
+            }
+        )
+    )
+
+    assert audit_arguments == {
+        "operation": "plot",
+        "plot_type": "surface",
+        "week_offset": 1,
+    }
+
+
+async def test_resource_deadline_also_logs_completion_metric(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = RecordingMCPClient()
+
+    async def slow_read(uri: str) -> ResourceContent:
+        await asyncio.sleep(1)
+        return ResourceContent(uri, "late")
+
+    client.resource_reads.side_effect = slow_read
+    agent, _, _ = make_agent(
+        client,
+        [tool_response(call(READ_RESOURCE_FUNCTION, {"uri": URI}, "resource-1"))],
+    )
+
+    with caplog.at_level(logging.INFO, logger="app.tools"):
+        result = await agent.run(
+            messages(),
+            CONTEXT,
+            deadline_at=asyncio.get_running_loop().time() + 0.05,
+        )
+
+    assert result.reason == "request_deadline"
+    assert any(
+        "resource_complete" in record.message and "code=request_deadline" in record.message
+        for record in caplog.records
+    )
 
 
 async def test_resource_content_is_untrusted_and_attached_as_tool_result() -> None:

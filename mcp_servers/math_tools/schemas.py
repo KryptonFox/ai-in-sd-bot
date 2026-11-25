@@ -55,6 +55,15 @@ class PlotStatus(StrEnum):
     UNDEFINED = "undefined"
 
 
+class CheckpointState(StrEnum):
+    NONE = ""
+    UNDEFINED = "undefined"
+    POLE = "pole"
+    REMOVABLE_POLE = "removable_pole"
+    BRANCH_CUT = "branch_cut"
+    BRANCH_POINT = "branch_point"
+
+
 class PlotType(StrEnum):
     CURVE = "curve"
     PARAMETRIC = "parametric"
@@ -129,7 +138,7 @@ class MathPlotCheckpoint(ToolDTO):
     numeric: str
     height: str = ""
     numeric_height: str = ""
-    state: str = ""
+    state: CheckpointState = CheckpointState.NONE
 
 
 class MathPlotZero(ToolDTO):

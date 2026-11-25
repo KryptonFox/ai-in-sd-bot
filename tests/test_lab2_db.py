@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock
 from zoneinfo import ZoneInfo
 
 import pytest
-from fastmcp import Client, FastMCP
 
 from app.core.clock import FrozenClock
 from app.core.schemas.agent import AgentDecision, AgentResult, EventContext
@@ -19,11 +18,11 @@ from app.db.records import ConfirmationState
 from app.db.repositories import confirmation_repo, event_repo, reminder_repo
 from app.db.repositories.audit_repo import latest_decision
 from app.db.repositories.turn_repo import PostgresTurnStore
-from app.mcp.client import MCPClient
 from app.services.agent_service import AgentService
 from app.services.confirmation_service import ConfirmationService
 from app.services.tool_execution import ToolExecutionService
 from tests.conftest import DatabaseFixture
+from tests.fake_mcp import MockToolClient
 from tests.mcp_catalog import tool_catalog
 
 pytestmark = [
@@ -69,13 +68,6 @@ class TimeoutBeforeInsertMCP:
         self.calls += 1
         assert name == "add_reminder"
         raise ToolFailure("mcp_timeout", "response lost")
-
-
-class MockToolClient(MCPClient):
-    call_tool: AsyncMock
-
-    def __init__(self) -> None:
-        super().__init__(Client(FastMCP("lab2-database-test")))
 
 
 def _context(user_id: int, event_id: str) -> EventContext:

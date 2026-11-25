@@ -20,24 +20,30 @@ def load_settings(tmp_path, **overrides: str) -> Settings:
 
 
 @pytest.mark.parametrize(
-    ("key", "minimum"),
+    ("key", "minimum", "maximum"),
     [
-        ("HISTORY_MAX_MESSAGES", 1),
-        ("HISTORY_MAX_CHARS", 100),
-        ("DEFAULT_CONTEXT_LENGTH", 512),
-        ("COMPACTION_THRESHOLD_MESSAGES", 2),
-        ("COMPACTION_KEEP_RECENT", 1),
-        ("USER_QUEUE_MAX_SIZE", 1),
+        ("HISTORY_MAX_MESSAGES", 1, 10000),
+        ("HISTORY_MAX_CHARS", 100, 1_000_000),
+        ("DEFAULT_CONTEXT_LENGTH", 512, 2_097_152),
+        ("COMPACTION_THRESHOLD_MESSAGES", 2, 10000),
+        ("COMPACTION_KEEP_RECENT", 1, 1000),
+        ("USER_QUEUE_MAX_SIZE", 1, 10000),
     ],
 )
-@pytest.mark.parametrize("invalid", ["nan", "below_minimum"])
+@pytest.mark.parametrize("invalid", ["nan", "below_minimum", "above_maximum"])
 def test_numeric_settings_keep_validation_messages_and_limits(
     tmp_path,
     key: str,
     minimum: int,
+    maximum: int,
     invalid: str,
 ) -> None:
-    value = str(minimum - 1) if invalid == "below_minimum" else invalid
+    if invalid == "below_minimum":
+        value = str(minimum - 1)
+    elif invalid == "above_maximum":
+        value = str(maximum + 1)
+    else:
+        value = invalid
 
     with pytest.raises(ConfigError) as error:
         Settings.load(
@@ -49,7 +55,7 @@ def test_numeric_settings_keep_validation_messages_and_limits(
             },
         )
 
-    assert str(error.value) == f"{key}: значение должно быть целым числом >= {minimum}."
+    assert str(error.value) == f"{key}: допустимый диапазон {minimum}..{maximum}."
 
 
 def test_settings_migrates_only_the_legacy_default_schedule_path(tmp_path) -> None:
@@ -138,3 +144,53 @@ def test_agent_tool_call_budget_rejects_zero_noninteger_and_overflow(tmp_path, r
     assert str(error.value) == (
         f"AGENT_MAX_TOOL_CALLS: допустимый диапазон 1..{POSTGRES_INTEGER_MAX}."
     )
+
+
+@pytest.mark.parametrize("value", ["0.5", "1800.1", "1801", "nan"])
+def test_llm_timeout_uses_the_same_range_as_toml(tmp_path, value: str) -> None:
+    with pytest.raises(ConfigError) as error:
+        load_settings(tmp_path, LLM_TIMEOUT=value)
+
+    assert str(error.value) == "LLM_TIMEOUT: допустимый диапазон 1..1800."
+
+
+@pytest.mark.parametrize("value", ["1", "1800"])
+def test_llm_timeout_accepts_toml_boundaries(tmp_path, value: str) -> None:
+    assert load_settings(tmp_path, LLM_TIMEOUT=value).llm_timeout == float(value)
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["MCP_SERVER_URL", "MATH_MCP_SERVER_URL"],
+)
+def test_mcp_urls_are_validated_in_environment(tmp_path, key: str) -> None:
+    with pytest.raises(ConfigError, match=key):
+        load_settings(tmp_path, **{key: "not-a-url"})
+
+    with pytest.raises(ConfigError, match=key):
+        load_settings(tmp_path, **{key: "http://user:password@mcp.test/mcp/"})
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "MATH_MCP_STARTUP_TIMEOUT_SECONDS",
+        "MATH_MCP_OPERATION_TIMEOUT_SECONDS",
+        "MATH_MCP_QUEUE_TIMEOUT_SECONDS",
+    ],
+)
+def test_math_environment_overrides_are_validated_before_spawn(tmp_path, key: str) -> None:
+    with pytest.raises(ConfigError, match=key):
+        load_settings(tmp_path, **{key: "not-a-number"})
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("MATH_MCP_MEMORY_LIMIT_MIB", "64"),
+        ("MATH_MCP_MAX_PNG_BYTES", "524288"),
+    ],
+)
+def test_math_integer_overrides_are_validated_before_spawn(tmp_path, key: str, value: str) -> None:
+    with pytest.raises(ConfigError, match=key):
+        load_settings(tmp_path, **{key: value})

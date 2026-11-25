@@ -5,6 +5,7 @@ from typing import cast
 
 import asyncpg
 
+from app.core.schemas.agent import AgentDecision
 from app.db.records import DecisionAudit
 
 _SAFE_ARGUMENT_LIMITS = {
@@ -12,7 +13,10 @@ _SAFE_ARGUMENT_LIMITS = {
     "date": 40,
     "text": 200,
     "remind_at": 64,
+    "operation": 64,
+    "plot_type": 32,
 }
+_SAFE_INTEGER_ARGUMENTS = frozenset({"week_offset"})
 
 
 def _safe_arguments(arguments: Mapping[str, object] | None) -> str:
@@ -22,6 +26,11 @@ def _safe_arguments(arguments: Mapping[str, object] | None) -> str:
             value = arguments.get(key)
             if isinstance(value, str):
                 safe[key] = value[:limit]
+
+        for key in _SAFE_INTEGER_ARGUMENTS:
+            value = arguments.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                safe[key] = value
 
         resource_uris = arguments.get("resource_uris")
         if isinstance(resource_uris, list):
@@ -35,7 +44,7 @@ async def record_decision(
     user_id: int,
     event_id: str,
     request_id: str,
-    decision: str,
+    decision: AgentDecision,
     tool_name: str | None = None,
     arguments: Mapping[str, object] | None = None,
     validation: str = "ok",
@@ -67,7 +76,7 @@ async def record_on_connection(
     user_id: int,
     event_id: str,
     request_id: str,
-    decision: str,
+    decision: AgentDecision,
     tool_name: str | None = None,
     arguments: Mapping[str, object] | None = None,
     validation: str = "ok",
@@ -116,6 +125,7 @@ async def latest_decision(pool: asyncpg.Pool, user_id: int) -> DecisionAudit | N
         return None
 
     result = dict(row)
+    result["decision"] = AgentDecision(result["decision"])
     if isinstance(result["arguments"], str):
         result["arguments"] = json.loads(result["arguments"])
     return cast(DecisionAudit, result)

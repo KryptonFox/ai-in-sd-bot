@@ -3,7 +3,8 @@ import base64
 import json
 import logging
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from typing import TypeVar
 
 from pydantic import ValidationError
 
@@ -12,7 +13,7 @@ from app.core.ports import ToolClient, TurnStore
 from app.core.schemas.agent import AgentResult
 from app.core.schemas.execution import RunState, StepAction
 from app.core.schemas.llm import ToolDefinition
-from app.core.schemas.mcp import ReadResourceArguments, ResourceDefinition
+from app.core.schemas.mcp import ReadResourceArguments, ResourceContent, ResourceDefinition
 from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.core.schemas.tools import (
     MAX_AGENT_IMAGE_BYTES,
@@ -26,6 +27,8 @@ from app.services.confirmation_service import ConfirmationService
 logger = logging.getLogger("app.tools")
 REMINDER_TOOL_NAME = "add_reminder"
 READ_RESOURCE_FUNCTION = "read_resource"
+REQUEST_DEADLINE_MESSAGE = "Общее время обработки запроса истекло."
+T = TypeVar("T")
 
 type ValidatedCall = tuple[ToolCall, ReadResourceArguments | None]
 
@@ -181,45 +184,42 @@ class ToolExecutionService:
         state.images.extend(images)
 
     @staticmethod
-    def _remaining_timeout(state: RunState) -> float | None:
+    def _raise_if_deadline_expired(state: RunState) -> None:
         if state.deadline_at is None:
-            return None
+            return
+        if state.deadline_at <= asyncio.get_running_loop().time():
+            raise ToolFailure("request_deadline", REQUEST_DEADLINE_MESSAGE)
 
-        remaining = state.deadline_at - asyncio.get_running_loop().time()
-        if remaining <= 0:
-            raise ToolFailure(
-                "request_deadline",
-                "Общее время обработки запроса истекло.",
-            )
-
-        return remaining
-
-    async def _call_with_timeout(
+    async def _deadline_bound(
         self,
-        call: ToolCall,
-        client: ToolClient,
-        call_timeout: float | None,
-    ) -> dict[str, object] | PhotoToolResult:
-        if call_timeout is None:
-            return await client.call_tool(call.name, call.arguments)
+        state: RunState,
+        operation: Callable[[], Awaitable[T]],
+    ) -> T:
+        """Bound one tool stage by the request deadline without hiding component timeouts."""
+        self._raise_if_deadline_expired(state)
+        if state.deadline_at is None:
+            return await operation()
 
+        timeout = asyncio.timeout_at(state.deadline_at)
         try:
-            async with asyncio.timeout(call_timeout):
-                return await client.call_tool(call.name, call.arguments)
+            async with timeout:
+                return await operation()
         except TimeoutError:
-            raise ToolFailure(
-                "request_deadline",
-                "Общее время обработки запроса истекло.",
-            ) from None
+            if timeout.expired():
+                raise ToolFailure("request_deadline", REQUEST_DEADLINE_MESSAGE) from None
+            raise
 
     async def _read(self, state: RunState, call: ToolCall) -> None:
         client = self._client()
         code = "ok"
-        timeout = self._remaining_timeout(state)
-        await self._reserve(state)
         started = time.monotonic()
+
+        async def reserve_and_call() -> dict[str, object] | PhotoToolResult:
+            await self._reserve(state)
+            return await client.call_tool(call.name, call.arguments)
+
         try:
-            outcome = await self._call_with_timeout(call, client, timeout)
+            outcome = await self._deadline_bound(state, reserve_and_call)
         except ToolFailure as error:
             code = error.code
             raise
@@ -256,39 +256,39 @@ class ToolExecutionService:
 
     async def _read_resource_call(self, state: RunState, call: ToolCall, uri: str) -> None:
         client = self._client()
-        timeout = self._remaining_timeout(state)
         code = "ok"
-        await self._reserve(state)
         started = time.monotonic()
         payload: dict[str, object] = {"source": "mcp_resource", "uri": uri}
+        reserved = False
+
+        async def reserve_and_read() -> ResourceContent:
+            nonlocal reserved
+            await self._reserve(state)
+            reserved = True
+            return await client.read_resource(uri)
+
         try:
-            if timeout is None:
-                resource = await client.read_resource(uri)
-            else:
-                async with asyncio.timeout(timeout):
-                    resource = await client.read_resource(uri)
+            resource = await self._deadline_bound(state, reserve_and_read)
             if len(resource.text) > self._max_output_chars:
                 raise ToolFailure("tool_output_budget", "Результат ресурса слишком большой.")
             payload.update(mime_type=resource.mime_type, content=resource.text)
             state.resource_uris.append(resource.uri)
         except TimeoutError:
-            code = "request_deadline"
-            raise ToolFailure(
-                "request_deadline",
-                "Общее время обработки запроса истекло.",
-            ) from None
+            code = "timeout"
+            raise
         except ToolFailure as error:
             code = error.code
-            if error.code == "request_deadline":
+            if not reserved or error.code == "request_deadline":
                 raise
             payload["error"] = {"code": error.code, "message": error.message}
+        finally:
+            logger.info(
+                "resource_complete request=%s duration_ms=%.0f code=%s",
+                state.context.request_id,
+                (time.monotonic() - started) * 1000,
+                code,
+            )
 
-        logger.info(
-            "resource_complete request=%s duration_ms=%.0f code=%s",
-            state.context.request_id,
-            (time.monotonic() - started) * 1000,
-            code,
-        )
         state.conversation.append(
             ChatMessage(
                 role=MessageRole.TOOL,

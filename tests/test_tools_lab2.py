@@ -191,6 +191,29 @@ def test_normalize_reminder_requests_clarification_for_dst_gap() -> None:
     assert raised.value.code == "ambiguous_time"
 
 
+@pytest.mark.parametrize("remind_at", ["not-a-date", "2026-02-30T10:00:00+03:00"])
+def test_normalize_reminder_rejects_malformed_time_as_clarification(remind_at: str) -> None:
+    with pytest.raises(ToolFailure) as raised:
+        normalize_reminder(
+            {"text": "проверить", "remind_at": remind_at},
+            "Europe/Moscow",
+            datetime(2026, 1, 1, tzinfo=UTC),
+        )
+
+    assert raised.value.code == "invalid_time"
+
+
+def test_normalize_reminder_rejects_invalid_model_fields_as_clarification() -> None:
+    with pytest.raises(ToolFailure) as raised:
+        normalize_reminder(
+            {"text": "x" * 501, "remind_at": "2027-01-01T12:00:00+03:00"},
+            "Europe/Moscow",
+            datetime(2026, 1, 1, tzinfo=UTC),
+        )
+
+    assert raised.value.code == "invalid_arguments"
+
+
 def test_normalize_reminder_accepts_future_time_across_year_boundary() -> None:
     result = normalize_reminder(
         {"text": "New year", "remind_at": "2027-01-01T01:00:00+01:00"},

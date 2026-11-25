@@ -5,8 +5,8 @@ from typing import cast
 
 import asyncpg
 
-from app.core.schemas.tools import ReminderResult
 from app.db.records import ConfirmationRecord, ConfirmationState
+from app.db.repositories.reminder_repo import reminder_result
 
 
 def decode_record(row: asyncpg.Record) -> ConfirmationRecord:
@@ -209,13 +209,7 @@ async def finalize_exhausted(
         )
         result = None
         if reminder is not None:
-            result = ReminderResult(
-                id=reminder["id"],
-                text=reminder["text"],
-                remind_at=reminder["remind_at"],
-                timezone=reminder["timezone"],
-                created=False,
-            ).model_dump(mode="json")
+            result = reminder_result(reminder).model_dump(mode="json")
         updated = await conn.fetchrow(
             """UPDATE pending_confirmations SET state=$2,result=$3::jsonb,error_code=$4,
                updated_at=$5 WHERE id=$1 RETURNING *""",

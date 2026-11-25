@@ -3,6 +3,7 @@ import json
 import logging
 import sys
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -14,7 +15,6 @@ from app.llm.client import OpenAIClient
 from app.logging_setup import configure_logging
 from app.modes.definitions import STUDY_MODE
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("experiment")
 
 QUERY = (
@@ -44,7 +44,7 @@ async def _run_experiment(
     return {
         "model": settings.llm_model,
         "query": QUERY,
-        "date": "2026-10-06",
+        "date": datetime.now(UTC).date().isoformat(),
         "runs": results,
         "comparison": comparison,
     }
@@ -60,10 +60,11 @@ async def _temperature_runs(
         for repeat in range(1, RUNS_PER_TEMP + 1):
             run_index = len(results) + 1
             logger.info(
-                "Run #%d: temp=%.1f (repeat %d/3)...",
+                "Run #%d: temp=%.1f (repeat %d/%d)...",
                 run_index,
                 temperature,
                 repeat,
+                RUNS_PER_TEMP,
             )
             request = LLMRequest(
                 messages=[

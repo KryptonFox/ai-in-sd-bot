@@ -28,6 +28,7 @@ from mcp_servers.math_tools.schemas import (
     PlotType,
 )
 from mcp_servers.math_tools.service import MathService
+from mcp_servers.tool_errors import raise_tool_error
 
 CALCULATE_DESCRIPTION = (
     "Математические вычисления с проверкой выражения. "
@@ -73,6 +74,8 @@ PLOT_DESCRIPTION = (
     "plot_type=complex_height — 3D |f(z)| над комплексной плоскостью; нули в области "
     "отмечаются маркерами и возвращаются в zero_markers. "
     "y_min/y_max по умолчанию равны x-диапазону. "
+    "gamma и factorial доступны на вещественных графиках. "
+    "В комплексном графике floor и ceil требуют вещественный аргумент, например abs(z). "
     "Примеры: parametric functions=[cos(t), sin(t)], x_min=0, x_max=6.283185307179586; "
     "surface functions=[x*y], x_min=-2, x_max=2, y_min=-2, y_max=2; "
     "domain_coloring functions=[1/z], variable=z, x_min=-2, x_max=2, y_min=-2, y_max=2."
@@ -96,9 +99,66 @@ EquationText = Annotated[
 ]
 
 
+VariableName = Annotated[str, Field(min_length=1, max_length=128)]
+DerivativeOrder = Annotated[
+    int,
+    Field(
+        ge=1,
+        le=5,
+        description=(
+            "Порядок производной для operation=diff: 1 — первая, 2 — вторая и т.д., до 5."
+        ),
+    ),
+]
+CalculationVariables = Annotated[
+    list[str],
+    Field(
+        max_length=MAX_VARIABLES,
+        description=(
+            "Различные переменные для partial_diff, jacobian и constrained_extrema. "
+            "Для второй частной производной по одной переменной используйте "
+            "operation=diff, variable=x, order=2."
+        ),
+    ),
+]
+JacobianFunctions = Annotated[
+    list[ExpressionText],
+    Field(
+        max_length=MAX_FUNCTIONS,
+        description="Функции для operation=jacobian.",
+    ),
+]
+ExtremumConstraints = Annotated[
+    list[EquationText],
+    Field(
+        max_length=MAX_EQUATIONS,
+        description=(
+            "Одно исходное уравнение-ограничение для operation=constrained_extrema. "
+            "Множитель Лагранжа добавляется сервером; не записывай lambda."
+        ),
+    ),
+]
+SolveVariables = Annotated[
+    list[str],
+    Field(
+        max_length=3,
+        description=(
+            "Неизвестные — идентификаторы без ключевых слов Python. "
+            "Для ручного метода Лагранжа используй lam или lmbda, не lambda."
+        ),
+    ),
+]
+ContourLevels = Annotated[
+    list[float],
+    Field(
+        max_length=MAX_PLOT_LEVELS,
+        description="Точные уровни для plot_type=contour; можно один уровень.",
+    ),
+]
+
+
 def _raise_tool_error(error: MathError) -> Never:
-    payload = {"error": {"code": error.code, "message": error.message}}
-    raise ToolError(json.dumps(payload, ensure_ascii=False))
+    raise_tool_error(error.code, error.message)
 
 
 @contextmanager
@@ -134,59 +194,43 @@ def build_server(service: MathService | None = None) -> FastMCP:
         lifespan=lifespan,
     )
 
-    @server.tool(description=CALCULATE_DESCRIPTION, annotations={"readOnlyHint": True})
+    read_only = {"readOnlyHint": True}
+    tools = _MathTools(math_service)
+    server.tool(
+        tools.math_calculate,
+        description=CALCULATE_DESCRIPTION,
+        annotations=read_only,
+    )
+    server.tool(tools.math_solve, description=SOLVE_DESCRIPTION, annotations=read_only)
+    server.tool(
+        tools.math_plot,
+        description=PLOT_DESCRIPTION,
+        annotations=read_only,
+        output_schema=MathPlotResult.model_json_schema(),
+    )
+    return server
+
+
+class _MathTools:
+    def __init__(self, service: MathService) -> None:
+        self._service = service
+
     async def math_calculate(
+        self,
         expression: ExpressionText | None = None,
         operation: CalculateOperation = CalculateOperation.SIMPLIFY,
-        variable: Annotated[str, Field(min_length=1, max_length=128)] | None = None,
-        order: Annotated[
-            int,
-            Field(
-                ge=1,
-                le=5,
-                description=(
-                    "Порядок производной для operation=diff: 1 — первая, 2 — вторая и т.д., до 5."
-                ),
-            ),
-        ] = 1,
+        variable: VariableName | None = None,
+        order: DerivativeOrder = 1,
         lower: str | float | int | None = None,
         upper: str | float | int | None = None,
         point: str | float | int | None = None,
         direction: LimitDirection = LimitDirection.BOTH,
-        variables: Annotated[
-            list[str],
-            Field(
-                max_length=MAX_VARIABLES,
-                description=(
-                    "Различные переменные для partial_diff, jacobian и constrained_extrema. "
-                    "Для второй частной производной по одной переменной используйте "
-                    "operation=diff, variable=x, order=2."
-                ),
-            ),
-        ]
-        | None = None,
-        functions: Annotated[
-            list[ExpressionText],
-            Field(
-                max_length=MAX_FUNCTIONS,
-                description="Функции для operation=jacobian.",
-            ),
-        ]
-        | None = None,
-        constraints: Annotated[
-            list[EquationText],
-            Field(
-                max_length=MAX_EQUATIONS,
-                description=(
-                    "Одно исходное уравнение-ограничение для operation=constrained_extrema. "
-                    "Множитель Лагранжа добавляется сервером; не записывай lambda."
-                ),
-            ),
-        ]
-        | None = None,
+        variables: CalculationVariables | None = None,
+        functions: JacobianFunctions | None = None,
+        constraints: ExtremumConstraints | None = None,
     ) -> MathCalculateResult:
         with _translate_tool_errors():
-            return await math_service.calculate(
+            return await self._service.calculate(
                 expression,
                 operation=operation,
                 variable=variable,
@@ -200,58 +244,37 @@ def build_server(service: MathService | None = None) -> FastMCP:
                 constraints=constraints,
             )
 
-    @server.tool(description=SOLVE_DESCRIPTION, annotations={"readOnlyHint": True})
     async def math_solve(
+        self,
         equations: Annotated[list[EquationText], Field(min_length=1, max_length=MAX_EQUATIONS)],
-        variables: Annotated[
-            list[str],
-            Field(
-                max_length=3,
-                description=(
-                    "Неизвестные — идентификаторы без ключевых слов Python. "
-                    "Для ручного метода Лагранжа используй lam или lmbda, не lambda."
-                ),
-            ),
-        ]
-        | None = None,
+        variables: SolveVariables | None = None,
         real_only: bool = True,
     ) -> MathSolveResult:
         with _translate_tool_errors():
-            return await math_service.solve(
+            return await self._service.solve(
                 equations,
                 variables=variables,
                 real_only=real_only,
             )
 
-    @server.tool(
-        description=PLOT_DESCRIPTION,
-        annotations={"readOnlyHint": True},
-        output_schema=MathPlotResult.model_json_schema(),
-    )
     async def math_plot(
+        self,
         functions: Annotated[
             list[ExpressionText],
             Field(min_length=1, max_length=MAX_FUNCTIONS),
         ],
         plot_type: PlotType = PlotType.CURVE,
-        variable: Annotated[str, Field(min_length=1, max_length=128)] | None = None,
-        parameter: Annotated[str, Field(min_length=1, max_length=128)] = "t",
-        y_variable: Annotated[str, Field(min_length=1, max_length=128)] = "y",
+        variable: VariableName | None = None,
+        parameter: VariableName = "t",
+        y_variable: VariableName = "y",
         x_min: float | None = None,
         x_max: float | None = None,
         y_min: float | None = None,
         y_max: float | None = None,
-        levels: Annotated[
-            list[float],
-            Field(
-                max_length=MAX_PLOT_LEVELS,
-                description="Точные уровни для plot_type=contour; можно один уровень.",
-            ),
-        ]
-        | None = None,
+        levels: ContourLevels | None = None,
     ) -> ToolResult:
         with _translate_tool_errors():
-            output = await math_service.plot(
+            output = await self._service.plot(
                 functions,
                 plot_type=plot_type,
                 variable=variable,
@@ -264,8 +287,6 @@ def build_server(service: MathService | None = None) -> FastMCP:
                 levels=levels,
             )
             return _plot_tool_result(output)
-
-    return server
 
 
 def _plot_tool_result(output: PlotOutput) -> ToolResult:

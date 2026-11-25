@@ -9,53 +9,96 @@ import pytest
 from app.config import ConfigError, MCPTransport
 from mcp_servers.student_tools.config import ServerSettings
 from scripts.common import compose_quote
-from scripts.local import compose_command
+
+
+def copy_compose_project(tmp_path: Path) -> Path:
+    root = Path(__file__).resolve().parents[1]
+    project = tmp_path / "project"
+    project.mkdir()
+
+    for name in ("compose.yaml", "compose.local.yaml", "compose.config.yaml"):
+        shutil.copy(root / name, project / name)
+
+    return project
+
+
+def compose_environment(**updates: str) -> dict[str, str]:
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("POSTGRES_", "BOT_TOKEN", "COMPOSE_", "MATH_MCP_", "LLM_"))
+    }
+    environment.update(updates)
+    return environment
+
+
+def run_compose_config(command: list[str], environment: dict[str, str]) -> dict:
+    result = subprocess.run(
+        [*command, "config", "--format", "json"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+    )
+    assert result.returncode == 0, "Docker Compose не смог разобрать конфигурацию"
+    return json.loads(result.stdout)["services"]
 
 
 @pytest.mark.skipif(not shutil.which("docker"), reason="Docker CLI не установлен")
 def test_local_and_cloud_compose_ports_credentials_and_healthchecks(tmp_path):
-    root = Path(__file__).resolve().parents[1]
+    project = copy_compose_project(tmp_path)
     password = "p$a#s's\\\\tail"
-    env_file = tmp_path / ".env"
-    env_file.write_text(
+    local_env = tmp_path / ".env"
+    local_env.write_text(
         "BOT_TOKEN=test\nPOSTGRES_PORT=55432\nPOSTGRES_PASSWORD=" + compose_quote(password) + "\n",
         encoding="utf-8",
     )
+    local = run_compose_config(
+        [
+            "docker",
+            "compose",
+            "--project-name",
+            "itmo-test",
+            "--project-directory",
+            str(project),
+            "--env-file",
+            str(local_env),
+            "-f",
+            str(project / "compose.yaml"),
+            "-f",
+            str(project / "compose.local.yaml"),
+        ],
+        compose_environment(),
+    )
 
-    environ = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith(("POSTGRES_", "BOT_TOKEN", "COMPOSE_", "MATH_MCP_"))
-    }
-    environ["MATH_MCP_OPERATION_TIMEOUT_SECONDS"] = "2.5"
-
-    command = compose_command(root)
-    command[command.index("--env-file") + 1] = str(env_file)
-
-    def config(command):
-        result = subprocess.run(
-            [*command, "config", "--format", "json"],
-            env=environ,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=30,
+    cloud_env = project / ".env.cloud"
+    cloud_env.write_text(
+        "\n".join(
+            [
+                "BOT_TOKEN=test",
+                "POSTGRES_PASSWORD=test",
+                "LLM_API_KEY=synthetic-llm-key",
+                "MCP_SHARED_SECRET=" + "m" * 40,
+                "MATH_MCP_OPERATION_TIMEOUT_SECONDS=2.5",
+            ]
         )
-        assert result.returncode == 0, "Docker Compose не смог разобрать конфигурацию"
-        return json.loads(result.stdout)["services"]
-
-    local = config(command)
-    cloud = config(
+        + "\n",
+        encoding="utf-8",
+    )
+    assert not (project / ".env").exists()
+    cloud = run_compose_config(
         [
             "docker",
             "compose",
             "--env-file",
-            str(env_file),
+            str(cloud_env),
             "-f",
-            str(root / "compose.yaml"),
+            str(project / "compose.yaml"),
             "--profile",
             "cloud",
-        ]
+        ],
+        compose_environment(COMPOSE_ENV_FILE=".env.cloud"),
     )
 
     assert local["db"]["ports"][0]["host_ip"] == "127.0.0.1"
@@ -66,6 +109,7 @@ def test_local_and_cloud_compose_ports_credentials_and_healthchecks(tmp_path):
     assert cloud["bot"]["environment"]["POSTGRES_PORT"] == "5432"
     assert cloud["bot"]["environment"]["MCP_SERVER_URL"] == "http://student-tools-mcp:8000/mcp"
     assert cloud["bot"]["environment"]["MATH_MCP_SERVER_URL"] == "http://math-tools-mcp:8000/mcp"
+    assert cloud["bot"]["environment"]["LLM_API_KEY"] == "synthetic-llm-key"
     assert cloud["bot"]["image"] == cloud["student-tools-mcp"]["image"] == "itmo-ai-bot:local"
     assert cloud["bot"]["image"] == cloud["math-tools-mcp"]["image"]
     assert cloud["bot"]["build"] == cloud["student-tools-mcp"]["build"]
@@ -131,8 +175,35 @@ def test_local_and_cloud_compose_ports_credentials_and_healthchecks(tmp_path):
 
 
 @pytest.mark.skipif(not shutil.which("docker"), reason="Docker CLI не установлен")
+def test_cloud_compose_without_any_local_dotenv_uses_optional_env_file(tmp_path):
+    project = copy_compose_project(tmp_path)
+    env_file = tmp_path / "synthetic.env"
+    env_file.write_text(
+        "BOT_TOKEN=test\nPOSTGRES_PASSWORD=test\nLLM_API_KEY=synthetic-key\n",
+        encoding="utf-8",
+    )
+    assert not (project / ".env").exists()
+
+    services = run_compose_config(
+        [
+            "docker",
+            "compose",
+            "--env-file",
+            str(env_file),
+            "-f",
+            str(project / "compose.yaml"),
+            "--profile",
+            "cloud",
+        ],
+        compose_environment(),
+    )
+
+    assert services["bot"]["environment"]["POSTGRES_HOST"] == "db"
+
+
+@pytest.mark.skipif(not shutil.which("docker"), reason="Docker CLI не установлен")
 def test_optional_compose_profile_mounts_separate_configs(tmp_path):
-    root = Path(__file__).resolve().parents[1]
+    project = copy_compose_project(tmp_path)
     env_file = tmp_path / ".env"
     env_file.write_text(
         "BOT_TOKEN=test\nPOSTGRES_PASSWORD=test\n",
@@ -142,41 +213,26 @@ def test_optional_compose_profile_mounts_separate_configs(tmp_path):
     math_config = tmp_path / "math.toml"
     bot_config.write_text("[llm]\n", encoding="utf-8")
     math_config.write_text("[math_mcp]\n", encoding="utf-8")
-    environment = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith(("POSTGRES_", "BOT_TOKEN", "COMPOSE_", "MATH_MCP_"))
-    }
-    environment.update(
-        BOT_CONFIG_FILE=str(bot_config),
-        MATH_MCP_CONFIG_FILE=str(math_config),
-    )
 
-    result = subprocess.run(
+    services = run_compose_config(
         [
             "docker",
             "compose",
             "--env-file",
             str(env_file),
             "-f",
-            str(root / "compose.yaml"),
+            str(project / "compose.yaml"),
             "-f",
-            str(root / "compose.config.yaml"),
+            str(project / "compose.config.yaml"),
             "--profile",
             "cloud",
-            "config",
-            "--format",
-            "json",
         ],
-        env=environment,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=30,
+        compose_environment(
+            BOT_CONFIG_FILE=str(bot_config),
+            MATH_MCP_CONFIG_FILE=str(math_config),
+        ),
     )
 
-    assert result.returncode == 0, "Docker Compose не смог разобрать профиль отдельных конфигов"
-    services = json.loads(result.stdout)["services"]
     assert services["bot"]["configs"] == [{"source": "bot-config", "target": "/app/config.toml"}]
     assert services["math-tools-mcp"]["configs"] == [
         {"source": "math-config", "target": "/app/config.toml"}

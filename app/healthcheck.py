@@ -1,9 +1,7 @@
 import argparse
-import json
-from urllib.error import HTTPError, URLError
-from urllib.request import ProxyHandler, build_opener
 
 from app.config import ConfigError, Settings
+from app.core.health_probe import endpoint_is_healthy
 
 
 def main() -> int:
@@ -13,17 +11,11 @@ def main() -> int:
 
     try:
         settings = Settings.load(args.env_file)
-        with build_opener(ProxyHandler({})).open(
-            f"http://127.0.0.1:{settings.health_port}/health", timeout=5
-        ) as response:
-            body = json.load(response)
-
-        if body.get("status") != "ok":
-            raise ValueError
     except ConfigError as exc:
         print(str(exc))
         return 1
-    except (HTTPError, URLError, OSError, ValueError):
+
+    if not endpoint_is_healthy("127.0.0.1", settings.health_port):
         print("Приложение не готово: проверьте запуск бота, подключение БД и логи.")
         return 1
 

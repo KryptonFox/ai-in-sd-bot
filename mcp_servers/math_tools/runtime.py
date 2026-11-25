@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 import os
 import sys
@@ -9,7 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mcp_servers.math_tools.errors import MathError
+from mcp_servers.math_tools.ipc import IpcProtocolError, decode_message, encode_message
 from mcp_servers.math_tools.limits import MEMORY_LIMIT_MIB, OPERATION_TIMEOUT_SECONDS
+from mcp_servers.math_tools.operations import WorkerOperation
 
 logger = logging.getLogger("math_tools.runtime")
 
@@ -18,7 +19,7 @@ WORKER_MODULE = "mcp_servers.math_tools.worker"
 DEFAULT_STARTUP_TIMEOUT_SECONDS = 30.0
 DEFAULT_QUEUE_TIMEOUT_SECONDS = 5.0
 WORKER_STREAM_LIMIT_BYTES = 4 * 1024 * 1024
-SAFE_OPERATIONS = frozenset({"calculate", "solve", "plot", "warmup", "limits"})
+SAFE_OPERATIONS = frozenset(operation.value for operation in WorkerOperation)
 SENSITIVE_ENVIRONMENT_KEYS = {
     "BOT_TOKEN",
     "DATABASE_URL",
@@ -71,7 +72,7 @@ class MathWorker:
         return process is not None and process.returncode is None
 
     async def warmup(self) -> dict[str, object]:
-        return await self.request({"operation": "warmup"})
+        return await self.request({"operation": WorkerOperation.WARMUP.value})
 
     async def request(
         self,
@@ -212,8 +213,8 @@ class MathWorker:
             raise MathError("worker_failed") from None
 
         try:
-            ready = json.loads(ready_line)
-        except (UnicodeDecodeError, json.JSONDecodeError):
+            ready = decode_message(ready_line)
+        except IpcProtocolError:
             await self._kill(process)
             raise MathError("worker_failed") from None
         if not isinstance(ready, dict) or ready.get("ready") is not True:
@@ -229,9 +230,9 @@ class MathWorker:
         if process.stdin is None or process.stdout is None:
             raise _WorkerTransportError
 
-        encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        encoded = encode_message(payload)
         try:
-            process.stdin.write(encoded + b"\n")
+            process.stdin.write(encoded)
             await process.stdin.drain()
             raw_response = await process.stdout.readline()
         except (BrokenPipeError, ConnectionResetError, ValueError):
@@ -241,8 +242,8 @@ class MathWorker:
             raise _WorkerTransportError
 
         try:
-            response = json.loads(raw_response)
-        except (UnicodeDecodeError, json.JSONDecodeError):
+            response = decode_message(raw_response)
+        except IpcProtocolError:
             raise _WorkerTransportError from None
         if not isinstance(response, dict):
             raise _WorkerTransportError

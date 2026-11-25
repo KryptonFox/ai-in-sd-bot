@@ -1,3 +1,4 @@
+import os
 import subprocess
 from unittest.mock import Mock
 
@@ -59,7 +60,8 @@ def test_cloud_persists_environment_mcp_secret_and_rejects_short_secret(tmp_path
     path = prepare_env(tmp_path, cloud=True, ask=Mock(), environ=env)
 
     assert dotenv_values(path)["MCP_SHARED_SECRET"] == "m" * 40
-    assert path.stat().st_mode & 0o077 == 0
+    if os.name != "nt":
+        assert path.stat().st_mode & 0o077 == 0
 
     with pytest.raises(ValueError, match="MCP_SHARED_SECRET"):
         prepare_env(
@@ -282,7 +284,7 @@ def test_cloud_reuses_default_network_and_does_not_delete_it(tmp_path):
 def test_deploy_archive_never_contains_env_or_keys(tmp_path):
     import tarfile
 
-    from scripts.cloud import source_archive
+    from scripts.cloud_ssh import source_archive
 
     (tmp_path / "app").mkdir()
     (tmp_path / "app" / "__init__.py").write_text("", encoding="utf-8")
@@ -430,6 +432,12 @@ def test_deploy_uploads_secrets_only_over_ssh_stdin(
         telegram_proxy_url="http://user:password@proxy:3128",
         mcp_shared_secret="m" * 40,
         schedule_path=schedule_path,
+        math_mcp_environment={
+            "MATH_MCP_OPERATION_TIMEOUT_SECONDS": "2.5",
+            "MATH_MCP_MAX_PNG_BYTES": "131072",
+            "MATH_MCP_CONFIG_FILE": "./config.math.toml",
+            "LLM_API_KEY": "must-not-be-forwarded",
+        },
     )
     deployment.deploy({}, settings)
 
@@ -448,9 +456,14 @@ def test_deploy_uploads_secrets_only_over_ssh_stdin(
     assert values["POSTGRES_HOST"] == "db"
     assert values["MCP_SHARED_SECRET"] == "m" * 40
     assert values["SCHEDULE_PATH"] == remote_schedule_path
+    assert values["MATH_MCP_OPERATION_TIMEOUT_SECONDS"] == "2.5"
+    assert values["MATH_MCP_MAX_PNG_BYTES"] == "131072"
+    assert "MATH_MCP_CONFIG_FILE" not in values
     assert "MATH_MCP_ENVIRONMENT" not in values
+    assert "must-not-be-forwarded" not in values.values()
     assert all("m" * 40 not in command for command, _ in calls)
     deployment_command = next(command for command, _ in calls if "tar -xzf" in command)
+    assert "COMPOSE_ENV_FILE=.env.cloud" in deployment_command
     assert "config --services" in deployment_command
     assert "stop mcp-server" in deployment_command
     assert "stop student-tools-mcp" in deployment_command
@@ -493,6 +506,7 @@ def test_cloud_help_renders(capsys):
 def test_cloud_status_and_logs_include_mcp_server(tmp_path, monkeypatch, action, expected):
     import scripts.cloud as cloud_module
     from scripts.cli import parser
+    from scripts.cloud_ssh import COMPOSE
 
     cloud(tmp_path, FakeYC())
     commands = []
@@ -509,7 +523,7 @@ def test_cloud_status_and_logs_include_mcp_server(tmp_path, monkeypatch, action,
     result = cloud_module.cloud_main(tmp_path, parser().parse_args(["cloud", action]))
 
     assert result == 0
-    assert commands == [f"{cloud_module.COMPOSE} {expected}"]
+    assert commands == [f"{COMPOSE} {expected}"]
 
 
 def test_setup_only_checks_real_credentials_without_starting_bot(tmp_path, monkeypatch):

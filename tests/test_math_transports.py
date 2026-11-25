@@ -1,34 +1,19 @@
-import base64
-import io
 import os
 import sys
-from collections.abc import Mapping
-from typing import cast
 
 import httpx2
 import pytest
 from mcp import ClientSession, types
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
-from PIL import Image
 
 from mcp_servers.math_tools.__main__ import http_app
-from mcp_servers.math_tools.limits import MAX_PNG_BYTES
 from mcp_servers.math_tools.server import build_server
 from mcp_servers.math_tools.service import MathService
+from tests.math_helpers import decode_png, mapping, sequence
 
 SECRET = "math-transport-secret-0123456789abcdef"
 TOOL_NAMES = {"math_calculate", "math_solve", "math_plot"}
-
-
-def mapping(value: object) -> Mapping[str, object]:
-    assert isinstance(value, dict)
-    return cast(Mapping[str, object], value)
-
-
-def sequence(value: object) -> list[object]:
-    assert isinstance(value, list)
-    return value
 
 
 def assert_png(result: types.CallToolResult) -> None:
@@ -36,12 +21,7 @@ def assert_png(result: types.CallToolResult) -> None:
     assert len(images) == 1
     image = images[0]
     assert image.mime_type == "image/png"
-    png = base64.b64decode(image.data)
-    assert png.startswith(b"\x89PNG\r\n\x1a\n")
-    assert len(png) <= MAX_PNG_BYTES
-    with Image.open(io.BytesIO(png)) as opened:
-        opened.load()
-        assert opened.format == "PNG"
+    decode_png(image.data)
 
 
 def assert_discovery(tools: list[types.Tool]) -> dict[str, types.Tool]:

@@ -1,45 +1,31 @@
-import base64
-import io
+import asyncio
 import json
 from collections.abc import Mapping
 from enum import StrEnum
 from fractions import Fraction
 from typing import cast
+from unittest.mock import Mock
 
 import pytest
-from PIL import Image
 
+from mcp_servers.math_tools import plot_dispatch
 from mcp_servers.math_tools.engine import handle_request
 from mcp_servers.math_tools.errors import MathError
 from mcp_servers.math_tools.limits import MAX_PNG_BYTES
+from mcp_servers.math_tools.runtime import MathRuntime
 from mcp_servers.math_tools.schemas import (
     CalculateOperation,
     CalculateStatus,
+    CheckpointState,
     LimitDirection,
     MathCalculateResult,
+    MathPlotCheckpoint,
     PlotStatus,
+    PlotType,
     SolveStatus,
 )
-
-
-def mapping(value: object) -> Mapping[str, object]:
-    assert isinstance(value, dict)
-    return cast(Mapping[str, object], value)
-
-
-def sequence(value: object) -> list[object]:
-    assert isinstance(value, list)
-    return value
-
-
-def text(value: object) -> str:
-    assert isinstance(value, str)
-    return value
-
-
-def number(value: object) -> float:
-    assert isinstance(value, (int, float)) and not isinstance(value, bool)
-    return float(value)
+from mcp_servers.math_tools.service import MathService
+from tests.math_helpers import decode_png, mapping, number, sequence, text
 
 
 def calculate(expression: str, operation: str = "simplify", **extra: object) -> dict[str, object]:
@@ -72,6 +58,7 @@ def test_closed_math_values_are_strenums_with_stable_json_values() -> None:
         CalculateStatus,
         SolveStatus,
         PlotStatus,
+        CheckpointState,
     ):
         assert issubclass(enum_type, StrEnum)
         for member in enum_type:
@@ -93,6 +80,16 @@ def test_closed_math_values_are_strenums_with_stable_json_values() -> None:
     assert result.status is CalculateStatus.OK
     assert result.operation is CalculateOperation.NUMERIC
     assert json.loads(result.model_dump_json())["status"] == "ok"
+
+    checkpoint = MathPlotCheckpoint(point="x=0", value="1", numeric="1")
+    assert checkpoint.state is CheckpointState.NONE
+    assert checkpoint.model_dump(mode="json")["state"] == ""
+
+    pole = MathPlotCheckpoint.model_validate(
+        {"point": "x=0", "value": "pole", "numeric": "", "state": "pole"}
+    )
+    assert pole.state is CheckpointState.POLE
+    assert json.loads(pole.model_dump_json())["state"] == "pole"
 
 
 def test_calculate_preserves_decimal_literal_digits() -> None:
@@ -320,16 +317,8 @@ def test_plot_splits_pole_of_reciprocal_function() -> None:
     assert first_series["segments"] == 2
     assert "0" in sequence(first_series["discontinuities"])
 
-    png = base64.b64decode(text(result["png_base64"]))
-    assert png.startswith(b"\x89PNG\r\n\x1a\n")
-    assert len(png) <= MAX_PNG_BYTES
+    png = decode_png(result["png_base64"])
     assert metadata["png_bytes"] == len(png)
-
-    with Image.open(io.BytesIO(png)) as image:
-        assert image.format == "PNG"
-        image.load()
-        assert image.width > 0
-        assert image.height > 0
 
 
 def test_plot_breaks_domain_gap_and_trigonometric_poles() -> None:
@@ -370,7 +359,7 @@ def test_plot_four_functions_fits_image_limit() -> None:
             "x_max": 10,
         }
     )
-    png = base64.b64decode(text(result["png_base64"]))
+    png = decode_png(result["png_base64"])
     assert len(png) <= MAX_PNG_BYTES
     assert len(sequence(mapping(result["result"])["functions"])) == 4
 
@@ -399,3 +388,92 @@ def test_plot_rejects_foreign_symbols_and_invalid_range() -> None:
             }
         )
     assert captured.value.code == "invalid_arguments"
+
+
+def test_calculate_preserves_source_expression_text() -> None:
+    result = calculate("x^2 + 1", "diff")
+    assert result["expression"] == "x^2 + 1"
+    assert result["result"] == "2*x"
+
+
+@pytest.mark.parametrize(
+    ("extra", "expected_limit"),
+    [
+        ({"max_png_bytes": 65536}, 65536),
+        ({}, MAX_PNG_BYTES),
+    ],
+)
+def test_plot_forwards_max_png_bytes_to_renderer(
+    monkeypatch: pytest.MonkeyPatch,
+    extra: dict[str, object],
+    expected_limit: int,
+) -> None:
+    render_spy = Mock(wraps=plot_dispatch.render_curve)
+    monkeypatch.setattr(plot_dispatch, "render_curve", render_spy)
+    result = handle_request(
+        {
+            "operation": "plot",
+            "functions": ["x^2"],
+            "variable": "x",
+            "x_min": -1,
+            "x_max": 1,
+            **extra,
+        }
+    )
+
+    call = render_spy.call_args
+    assert call is not None
+    assert call.kwargs["max_png_bytes"] == expected_limit
+    png = decode_png(result["png_base64"])
+    assert len(png) <= expected_limit
+    assert mapping(result["result"])["png_bytes"] == len(png)
+
+
+def test_service_forwards_max_png_bytes_and_rejects_invalid_plot_before_worker() -> None:
+    response = handle_request(
+        {
+            "operation": "plot",
+            "functions": ["sin(50*x)+cos(37*x)"],
+            "variable": "x",
+            "x_min": -10,
+            "x_max": 10,
+            "max_png_bytes": 65536,
+        }
+    )
+    runtime = _RecordingRuntime(response)
+    service = MathService(runtime=cast(MathRuntime, runtime), max_png_bytes=65536)
+
+    output = asyncio.run(service.plot(["sin(50*x)+cos(37*x)"], x_min=-10, x_max=10))
+    assert runtime.payload is not None
+    assert runtime.payload["max_png_bytes"] == 65536
+    assert len(output.png) <= 65536
+
+    runtime.payload = None
+    with pytest.raises(MathError) as captured:
+        asyncio.run(
+            service.plot(
+                ["x + y"],
+                plot_type=PlotType.CONTOUR,
+                variable="x",
+                y_variable="x",
+                x_min=0,
+                x_max=1,
+                y_min=0,
+                y_max=1,
+            )
+        )
+    assert captured.value.code == "invalid_arguments"
+    assert runtime.payload is None
+
+
+class _RecordingRuntime:
+    def __init__(self, response: dict[str, object]) -> None:
+        self.response = response
+        self.payload: Mapping[str, object] | None = None
+
+    async def request(self, payload: Mapping[str, object]) -> dict[str, object]:
+        self.payload = dict(payload)
+        return self.response
+
+    async def aclose(self) -> None:
+        return None

@@ -2,9 +2,11 @@ import math
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.core.limits import POSTGRES_INTEGER_MAX
 
@@ -13,8 +15,24 @@ DEFAULT_CONFIG_FILE = "config.toml"
 type TomlKind = Literal["string", "integer", "number", "boolean"]
 
 
-class TomlConfigError(ValueError):
+class ConfigValueError(ValueError):
     pass
+
+
+class TomlConfigError(ConfigValueError):
+    pass
+
+
+class MCPTransport(StrEnum):
+    STDIO = "stdio"
+    STREAMABLE_HTTP = "streamable-http"
+
+
+class ContextProvider(StrEnum):
+    AUTO = "auto"
+    NONE = "none"
+    OLLAMA = "ollama"
+    MODELS = "models"
 
 
 @dataclass(frozen=True)
@@ -23,7 +41,7 @@ class TomlParameter:
     kind: TomlKind
     minimum: float | None = None
     maximum: float | None = None
-    choices: frozenset[str] | None = None
+    choices: tuple[str, ...] | None = None
 
 
 TOML_SCHEMA: dict[str, dict[str, TomlParameter]] = {
@@ -43,7 +61,7 @@ TOML_SCHEMA: dict[str, dict[str, TomlParameter]] = {
         "context_provider": TomlParameter(
             "LLM_CONTEXT_PROVIDER",
             "string",
-            choices=frozenset({"auto", "none", "ollama", "models"}),
+            choices=tuple(provider.value for provider in ContextProvider),
         ),
     },
     "agent": {
@@ -91,7 +109,7 @@ TOML_SCHEMA: dict[str, dict[str, TomlParameter]] = {
         "transport": TomlParameter(
             "MCP_TRANSPORT",
             "string",
-            choices=frozenset({"stdio", "streamable-http"}),
+            choices=tuple(transport.value for transport in MCPTransport),
         ),
         "server_url": TomlParameter("MCP_SERVER_URL", "string"),
         "math_server_url": TomlParameter("MATH_MCP_SERVER_URL", "string"),
@@ -132,6 +150,26 @@ TOML_SCHEMA: dict[str, dict[str, TomlParameter]] = {
     },
 }
 
+ENVIRONMENT_ONLY_PARAMETERS = (
+    TomlParameter("POSTGRES_PORT", "integer", 1, 65535),
+    TomlParameter("HEALTH_PORT", "integer", 1, 65535),
+    TomlParameter("MCP_PORT", "integer", 1, 65535),
+    TomlParameter(
+        "LOG_LEVEL",
+        "string",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
+    ),
+)
+
+ENVIRONMENT_PARAMETERS: dict[str, TomlParameter] = {
+    parameter.environment_name: parameter
+    for section in TOML_SCHEMA.values()
+    for parameter in section.values()
+}
+ENVIRONMENT_PARAMETERS.update(
+    {parameter.environment_name: parameter for parameter in ENVIRONMENT_ONLY_PARAMETERS}
+)
+
 PUBLIC_URL_ENVIRONMENT_NAMES = frozenset(
     {
         "LLM_BASE_URL",
@@ -141,12 +179,38 @@ PUBLIC_URL_ENVIRONMENT_NAMES = frozenset(
 )
 
 
+class UrlValidationError(ValueError):
+    pass
+
+
 def _parameter_error(section: str, key: str, message: str) -> TomlConfigError:
     return TomlConfigError(f"config.toml: [{section}].{key}: {message}")
 
 
 def _section_error(section: str, message: str) -> TomlConfigError:
     return TomlConfigError(f"config.toml: [{section}]: {message}")
+
+
+def validate_url(raw_value: str) -> str:
+    if not raw_value:
+        return raw_value
+
+    try:
+        parsed = urlsplit(raw_value)
+        username = parsed.username
+        password = parsed.password
+        hostname = parsed.hostname
+    except ValueError:
+        raise UrlValidationError("укажите корректный URL (http:// или https://).") from None
+
+    if username is not None or password is not None:
+        raise UrlValidationError("не храните учётные данные в URL.")
+    if parsed.query or parsed.fragment:
+        raise UrlValidationError("не храните параметры запроса и фрагменты в URL.")
+    if parsed.scheme not in {"http", "https"} or not hostname:
+        raise UrlValidationError("укажите корректный URL (http:// или https://).")
+
+    return raw_value
 
 
 def _validated_value(
@@ -178,38 +242,17 @@ def _validated_value(
             raise _parameter_error(section, key, "значение должно быть строкой.")
 
         if parameter.choices is not None and raw_value not in parameter.choices:
-            allowed = ", ".join(sorted(parameter.choices))
-            raise _parameter_error(section, key, f"допустимые значения: {allowed}.")
+            raise _parameter_error(
+                section,
+                key,
+                f"допустимые значения: {', '.join(parameter.choices)}.",
+            )
 
         if parameter.environment_name in PUBLIC_URL_ENVIRONMENT_NAMES and raw_value:
             try:
-                parsed = urlsplit(raw_value)
-                username = parsed.username
-                password = parsed.password
-                hostname = parsed.hostname
-            except ValueError:
-                raise _parameter_error(
-                    section,
-                    key,
-                    "укажите корректный URL (http:// или https://).",
-                ) from None
-
-            if username is not None or password is not None:
-                raise _parameter_error(
-                    section,
-                    key,
-                    "не храните учётные данные в config.toml; используйте .env или окружение.",
-                )
-            if parsed.query or parsed.fragment:
-                raise _parameter_error(
-                    section,
-                    key,
-                    "не храните параметры запроса и фрагменты в config.toml.",
-                )
-            if parsed.scheme not in {"http", "https"} or not hostname:
-                raise _parameter_error(
-                    section, key, "укажите корректный URL (http:// или https://)."
-                )
+                validate_url(raw_value)
+            except UrlValidationError as error:
+                raise _parameter_error(section, key, str(error)) from None
 
         return raw_value
 
@@ -217,13 +260,13 @@ def _validated_value(
         raise _parameter_error(
             section,
             key,
-            f"значение должно быть не меньше {parameter.minimum:g}.",
+            f"значение должно быть не меньше {_format_bound(parameter.minimum)}.",
         )
     if parameter.maximum is not None and number > parameter.maximum:
         raise _parameter_error(
             section,
             key,
-            f"значение должно быть не больше {parameter.maximum:g}.",
+            f"значение должно быть не больше {_format_bound(parameter.maximum)}.",
         )
 
     return number
@@ -234,6 +277,155 @@ def _serialized(value: str | int | float | bool) -> str:
         return "true" if value else "false"
 
     return str(value)
+
+
+def environment_value(
+    values: Mapping[str, str | None],
+    name: str,
+    default: str = "",
+) -> str:
+    return values.get(name) or default
+
+
+def _environment_parameter(name: str) -> TomlParameter:
+    parameter = ENVIRONMENT_PARAMETERS.get(name)
+    if parameter is None:
+        raise ConfigValueError(f"{name}: параметр не описан в схеме конфигурации.")
+
+    return parameter
+
+
+def _format_bound(value: float) -> str:
+    if float(value).is_integer():
+        return str(int(value))
+
+    return f"{value:g}"
+
+
+def _integer_message(name: str, parameter: TomlParameter) -> str:
+    if parameter.minimum is not None and parameter.maximum is not None:
+        return (
+            f"{name}: допустимый диапазон "
+            f"{_format_bound(parameter.minimum)}..{_format_bound(parameter.maximum)}."
+        )
+
+    if parameter.minimum is not None:
+        return f"{name}: значение должно быть целым числом >= {_format_bound(parameter.minimum)}."
+
+    return f"{name}: значение должно быть целым числом."
+
+
+def _number_message(name: str, parameter: TomlParameter) -> str:
+    if parameter.minimum is not None and parameter.maximum is not None:
+        return (
+            f"{name}: допустимый диапазон "
+            f"{_format_bound(parameter.minimum)}..{_format_bound(parameter.maximum)}."
+        )
+
+    return f"{name}: значение должно быть конечным числом."
+
+
+def _choices_message(name: str, choices: tuple[str, ...]) -> str:
+    if len(choices) == 1:
+        allowed = choices[0]
+    else:
+        allowed = f"{', '.join(choices[:-1])} или {choices[-1]}"
+
+    return f"{name}: используйте {allowed}."
+
+
+def parse_integer(name: str, raw_value: str) -> int:
+    parameter = _environment_parameter(name)
+
+    try:
+        number = int(raw_value)
+    except ValueError:
+        raise ConfigValueError(_integer_message(name, parameter)) from None
+
+    if parameter.minimum is not None and number < parameter.minimum:
+        raise ConfigValueError(_integer_message(name, parameter)) from None
+    if parameter.maximum is not None and number > parameter.maximum:
+        raise ConfigValueError(_integer_message(name, parameter)) from None
+
+    return number
+
+
+def parse_number(name: str, raw_value: str) -> float:
+    parameter = _environment_parameter(name)
+
+    try:
+        number = float(raw_value)
+    except ValueError:
+        raise ConfigValueError(_number_message(name, parameter)) from None
+
+    if not math.isfinite(number):
+        raise ConfigValueError(_number_message(name, parameter)) from None
+    if parameter.minimum is not None and number < parameter.minimum:
+        raise ConfigValueError(_number_message(name, parameter)) from None
+    if parameter.maximum is not None and number > parameter.maximum:
+        raise ConfigValueError(_number_message(name, parameter)) from None
+
+    return number
+
+
+def parse_boolean(name: str, raw_value: str) -> bool:
+    normalized = raw_value.strip().lower()
+    if normalized not in {"true", "false", "1", "0"}:
+        raise ConfigValueError(f"{name}: укажите true или false.")
+
+    return normalized in {"true", "1"}
+
+
+def parse_choice(name: str, raw_value: str) -> str:
+    parameter = _environment_parameter(name)
+    choices = parameter.choices
+    if choices is None:
+        raise ConfigValueError(f"{name}: параметр не поддерживает выбор значения.")
+    if raw_value not in choices:
+        raise ConfigValueError(_choices_message(name, choices))
+
+    return raw_value
+
+
+def parse_url(name: str, raw_value: str) -> str:
+    try:
+        return validate_url(raw_value)
+    except UrlValidationError as error:
+        raise ConfigValueError(f"{name}: {error}") from None
+
+
+def parse_port(name: str, raw_value: str) -> int:
+    try:
+        number = int(raw_value)
+    except ValueError:
+        raise ConfigValueError(f"{name}: нужен номер порта от 1 до 65535.") from None
+
+    if not 1 <= number <= 65535:
+        raise ConfigValueError(f"{name}: нужен номер порта от 1 до 65535.")
+
+    return number
+
+
+def parse_timezone(name: str, raw_value: str) -> str:
+    try:
+        ZoneInfo(raw_value)
+    except (ValueError, ZoneInfoNotFoundError):
+        raise ConfigValueError(f"{name}: укажите существующую IANA-зону.") from None
+
+    return raw_value
+
+
+def validate_environment_parameter(name: str, raw_value: str) -> None:
+    parameter = _environment_parameter(name)
+
+    if parameter.kind == "integer":
+        parse_integer(name, raw_value)
+    elif parameter.kind == "number":
+        parse_number(name, raw_value)
+    elif parameter.kind == "boolean":
+        parse_boolean(name, raw_value)
+    elif parameter.choices is not None:
+        parse_choice(name, raw_value)
 
 
 def merge_environment(
@@ -247,9 +439,20 @@ def merge_environment(
     return {**toml_values, **file_overrides, **process_overrides}
 
 
-def load_toml_environment(config_file: Path | str = DEFAULT_CONFIG_FILE) -> dict[str, str]:
-    path = Path(config_file)
+def load_toml_environment(
+    config_file: Path | str | None = None,
+    *,
+    required: bool | None = None,
+) -> dict[str, str]:
+    explicit_path = config_file is not None
+    if required is None:
+        required = explicit_path
+
+    path = Path(DEFAULT_CONFIG_FILE if config_file is None else config_file)
     if not path.exists():
+        if required:
+            raise TomlConfigError(f"config.toml: файл не найден: {path}.")
+
         return {}
 
     try:

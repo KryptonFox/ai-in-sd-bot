@@ -9,6 +9,16 @@ from app.core.schemas.tools import ReminderArguments, ReminderResult, ToolFailur
 from app.db.records import ConfirmationState
 
 
+def reminder_result(row: asyncpg.Record, *, created: bool = False) -> ReminderResult:
+    return ReminderResult(
+        id=row["id"],
+        text=row["text"],
+        remind_at=row["remind_at"],
+        timezone=row["timezone"],
+        created=created,
+    )
+
+
 async def create_confirmed_reminder(
     pool: asyncpg.Pool,
     identifier: str,
@@ -56,13 +66,7 @@ async def create_confirmed_reminder(
             created = True
         assert existing is not None
 
-        return ReminderResult(
-            id=existing["id"],
-            text=existing["text"],
-            remind_at=existing["remind_at"],
-            timezone=existing["timezone"],
-            created=created,
-        )
+        return reminder_result(existing, created=created)
 
 
 async def find_result(pool: asyncpg.Pool, key: str) -> dict[str, object] | None:
@@ -70,10 +74,4 @@ async def find_result(pool: asyncpg.Pool, key: str) -> dict[str, object] | None:
         row = await conn.fetchrow("SELECT * FROM reminders WHERE idempotency_key=$1", key)
     if row is None:
         return None
-    return ReminderResult(
-        id=row["id"],
-        text=row["text"],
-        remind_at=row["remind_at"],
-        timezone=row["timezone"],
-        created=False,
-    ).model_dump(mode="json")
+    return reminder_result(row).model_dump(mode="json")

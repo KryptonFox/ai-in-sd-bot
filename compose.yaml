@@ -44,7 +44,8 @@ services:
       MATH_MCP_SERVER_URL: http://math-tools-mcp:8000/mcp
       MCP_SHARED_SECRET: ${MCP_SHARED_SECRET:-}
     env_file:
-      - .env
+      - path: ${COMPOSE_ENV_FILE:-.env}
+        required: false
     depends_on:
       db:
         condition: service_healthy

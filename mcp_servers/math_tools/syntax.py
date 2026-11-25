@@ -2,6 +2,7 @@ import ast
 import keyword
 import math
 import re
+from dataclasses import dataclass
 
 from mcp_servers.math_tools.errors import MathError
 from mcp_servers.math_tools.limits import MAX_AST_NODES, MAX_EXPRESSION_LENGTH
@@ -61,6 +62,21 @@ _ALLOWED_NODE_TYPES = (
 )
 
 
+@dataclass(frozen=True)
+class ExpressionSyntax:
+    tree: ast.Expression
+    normalized: str
+    text: str
+    variables: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class EquationSyntax:
+    left: ExpressionSyntax
+    right: ExpressionSyntax
+    normalized: str
+
+
 def _count_nodes(tree: ast.Expression) -> int:
     return sum(1 for _ in ast.walk(tree))
 
@@ -69,7 +85,7 @@ def _invalid(code: str = "invalid_expression") -> MathError:
     return MathError(code)
 
 
-def _parse_expression(text: str) -> tuple[ast.Expression, str]:
+def _parse_expression(text: str) -> tuple[ast.Expression, str, str]:
     if not isinstance(text, str):
         raise _invalid()
     if len(text) > MAX_EXPRESSION_LENGTH:
@@ -94,7 +110,7 @@ def _parse_expression(text: str) -> tuple[ast.Expression, str]:
         raise MathError("expression_too_complex")
 
     _validate_nodes(tree)
-    return tree, normalized
+    return tree, normalized, stripped
 
 
 def _validate_nodes(tree: ast.Expression) -> None:
@@ -142,12 +158,24 @@ def _validate_nodes(tree: ast.Expression) -> None:
 
 
 def normalize_expression(text: str) -> str:
-    _, normalized = _parse_expression(text)
-    return normalized
+    return parse_expression(text).normalized
+
+
+def parse_expression(text: str) -> ExpressionSyntax:
+    tree, normalized, source = _parse_expression(text)
+    return ExpressionSyntax(
+        tree=tree,
+        normalized=normalized,
+        text=source,
+        variables=_expression_variables(tree),
+    )
 
 
 def expression_variables(text: str) -> tuple[str, ...]:
-    tree, _ = _parse_expression(text)
+    return parse_expression(text).variables
+
+
+def _expression_variables(tree: ast.Expression) -> tuple[str, ...]:
     call_names = {
         node.func.id
         for node in ast.walk(tree)
@@ -181,6 +209,11 @@ def validate_variable(name: str) -> str:
 
 
 def equation_sides(text: str) -> tuple[str, str]:
+    equation = parse_equation(text)
+    return equation.left.normalized, equation.right.normalized
+
+
+def parse_equation(text: str) -> EquationSyntax:
     if not isinstance(text, str):
         raise _invalid()
     if len(text) > MAX_EXPRESSION_LENGTH:
@@ -198,14 +231,17 @@ def equation_sides(text: str) -> tuple[str, str]:
     if not left_text or not right_text:
         raise _invalid()
 
-    left_tree, left_normalized = _parse_expression(left_text)
-    right_tree, right_normalized = _parse_expression(right_text)
-    if _count_nodes(left_tree) + _count_nodes(right_tree) > MAX_AST_NODES:
+    left = parse_expression(left_text)
+    right = parse_expression(right_text)
+    if _count_nodes(left.tree) + _count_nodes(right.tree) > MAX_AST_NODES:
         raise MathError("expression_too_complex")
-    return left_normalized, right_normalized
+    return EquationSyntax(
+        left=left,
+        right=right,
+        normalized=f"{left.normalized} = {right.normalized}",
+    )
 
 
 def equation_variables(text: str) -> tuple[str, ...]:
-    left, right = equation_sides(text)
-    variables = set(expression_variables(left)) | set(expression_variables(right))
-    return tuple(sorted(variables))
+    equation = parse_equation(text)
+    return tuple(sorted(set(equation.left.variables) | set(equation.right.variables)))

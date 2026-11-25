@@ -4,7 +4,6 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastmcp import Client, FastMCP
 from mcp import types
 
 from app.core.clock import FrozenClock
@@ -13,9 +12,9 @@ from app.core.schemas.llm import LLMRequest, LLMResponse
 from app.core.schemas.mcp import ResourceContent
 from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.core.schemas.tools import ToolFailure
-from app.mcp.client import MCPClient
 from app.services.agent_service import AgentService
 from app.services.tool_execution import READ_RESOURCE_FUNCTION, ToolExecutionService
+from tests.fake_mcp import MockToolClient
 from tests.mcp_catalog import resource_catalog, tool_catalog
 
 EVALUATION_TIME = datetime.fromisoformat("2026-10-12T09:00:00+03:00")
@@ -53,13 +52,6 @@ def weather_result(**updates) -> dict:
     }
     result.update(updates)
     return result
-
-
-class MockToolClient(MCPClient):
-    call_tool: AsyncMock
-
-    def __init__(self) -> None:
-        super().__init__(Client(FastMCP("agent-service-test")))
 
 
 class MockResourceToolClient(MockToolClient):
@@ -420,6 +412,38 @@ async def test_reminder_without_timezone_returns_clarification_without_mcp() -> 
 
     assert result.decision == AgentDecision.CLARIFY
     assert "часовой пояс" in result.text
+    mcp.call_tool.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reminder_with_invalid_time_returns_clarification() -> None:
+    confirmations = MagicMock(
+        prepare=AsyncMock(
+            side_effect=ToolFailure(
+                "invalid_time",
+                "Укажите точное время ISO 8601 с часовым поясом.",
+            )
+        )
+    )
+    service, _, mcp = make_agent(
+        [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    tool_call(
+                        "add_reminder",
+                        {"text": "Повторить", "remind_at": "завтра 19:00"},
+                    )
+                ],
+            )
+        ],
+        confirmations=confirmations,
+    )
+
+    result = await service.run(system_message(), context())
+
+    assert result.decision == AgentDecision.CLARIFY
+    assert "ISO 8601" in result.text
     mcp.call_tool.assert_not_awaited()
 
 

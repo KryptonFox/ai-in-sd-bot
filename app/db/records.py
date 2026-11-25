@@ -2,6 +2,8 @@ from datetime import datetime
 from enum import StrEnum
 from typing import NotRequired, TypedDict
 
+from app.core.schemas.agent import AgentDecision
+
 
 class ConfirmationState(StrEnum):
     PENDING = "pending"
@@ -46,7 +48,7 @@ class DecisionAudit(TypedDict):
     user_id: int
     event_id: str
     request_id: str
-    decision: str
+    decision: AgentDecision
     tool_name: str | None
     arguments: dict[str, object]
     validation: str

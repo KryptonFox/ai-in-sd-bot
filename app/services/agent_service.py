@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from collections.abc import Mapping, Sequence
 from zoneinfo import ZoneInfo
@@ -7,6 +8,7 @@ from pydantic import ValidationError
 from app.core.budget import ContextBudget
 from app.core.clock import Clock, SystemClock
 from app.core.conversation import complete_unit_indices
+from app.core.exceptions import LLMTimeoutError
 from app.core.schemas.agent import (
     AgentDecision,
     AgentResult,
@@ -28,6 +30,7 @@ from app.prompts.agent import agent_rules
 from app.services.tool_execution import READ_RESOURCE_FUNCTION, ToolExecutionService
 
 logger = logging.getLogger("app.services.agent")
+REQUEST_DEADLINE_MESSAGE = "Превышено общее время обработки запроса."
 
 CLARIFICATION_TOOL = ToolDefinition(
     name="clarification",
@@ -40,6 +43,7 @@ CLARIFICATION_ERRORS = frozenset(
         "timezone_mismatch",
         "ambiguous_time",
         "past_time",
+        "invalid_time",
         "invalid_arguments",
         "forecast_date_unavailable",
     }
@@ -137,6 +141,7 @@ class AgentService:
                 )
                 return
 
+        state.protected_prefix += 1
         state.conversation.insert(0, ChatMessage(role=MessageRole.SYSTEM, content=instructions))
 
     async def _run_steps(
@@ -160,20 +165,36 @@ class AgentService:
 
                 output_limit = budget.generation_limit(state.conversation, definitions)
 
-            response = await self._llm.generate(
+            response = await self._generate(
+                state,
                 LLMRequest(
                     messages=state.conversation,
                     temperature=temperature,
                     model=model,
                     tools=definitions,
                     max_tokens=output_limit,
-                )
+                ),
             )
             outcome = await self._handle_response(state, response)
             if isinstance(outcome, AgentResult):
                 return outcome
 
         raise ToolFailure("step_budget", "Достигнут лимит шагов модели. Уточните запрос.")
+
+    async def _generate(self, state: RunState, request: LLMRequest) -> LLMResponse:
+        if state.deadline_at is None:
+            return await self._llm.generate(request)
+        if state.deadline_at <= asyncio.get_running_loop().time():
+            raise LLMTimeoutError(REQUEST_DEADLINE_MESSAGE)
+
+        timeout = asyncio.timeout_at(state.deadline_at)
+        try:
+            async with timeout:
+                return await self._llm.generate(request)
+        except TimeoutError:
+            if timeout.expired():
+                raise LLMTimeoutError(REQUEST_DEADLINE_MESSAGE) from None
+            raise
 
     def _trim_history_for_reserve(
         self,

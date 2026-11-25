@@ -24,7 +24,7 @@ async def get_or_create_user(pool: asyncpg.Pool, user_id: int) -> UserSettings:
         )
 
         if not row:
-            raise RuntimeError(f"Не удалось получить или создать пользователя {user_id}")
+            raise RuntimeError("Не удалось получить или создать пользователя")
 
         return UserSettings(
             user_id=row["user_id"],

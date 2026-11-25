@@ -1,62 +1,74 @@
 import asyncio
 import time
-from collections.abc import Mapping
 from datetime import UTC, datetime
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
-from fastmcp import Client, FastMCP
+import asyncpg
+import pytest
 
+from app.config import Settings
 from app.core.budget import ContextBudget
 from app.core.clock import FrozenClock
-from app.core.schemas.agent import AgentDecision, EventContext
-from app.core.schemas.llm import FinishReason, LLMRequest, LLMResponse
+from app.core.exceptions import LLMTimeoutError
+from app.core.schemas.agent import Acquired, AgentDecision, AgentResult, EventContext
+from app.core.schemas.llm import FinishReason, LLMResponse
 from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
-from app.mcp.client import MCPClient
 from app.services.agent_service import AgentService
 from app.services.context_builder import ContextBuilder
+from app.services.dialog_service import DialogService
 from app.services.tool_execution import ToolExecutionService
+from tests.fake_llm import ScriptedLLM
+from tests.fake_mcp import MockToolClient
 from tests.mcp_catalog import tool_catalog
+from tests.test_bot_scenarios import InMemoryPool
 
 CONTEXT = EventContext(user_id=1, event_id="budget", request_id="budget-request")
 NOW = datetime(2026, 10, 12, tzinfo=UTC)
 
 
-class ScriptedLLM:
-    def __init__(self, responses: list[LLMResponse]) -> None:
-        self._responses = iter(responses)
-        self.requests: list[LLMRequest] = []
+class SlowCompleteStore:
+    def __init__(self, delay: float) -> None:
+        self._delay = delay
+        self.completed: AgentResult | None = None
+        self.interruptions = 0
 
-    async def generate(self, request: LLMRequest) -> LLMResponse:
-        self.requests.append(request.model_copy(update={"messages": list(request.messages)}))
-        return next(self._responses)
+    async def claim(self, context: EventContext, now: datetime) -> Acquired:
+        return Acquired()
 
-    async def get_context_length(self, model: str | None = None) -> int:
-        return 32768
+    async def reserve(self, context: EventContext, limit: int) -> bool:
+        return True
 
-    async def aclose(self) -> None:
+    async def complete(
+        self,
+        context: EventContext,
+        message: ChatMessage,
+        assistant: ChatMessage,
+        result: AgentResult,
+        now: datetime,
+        duration_ms: float,
+    ) -> None:
+        await asyncio.sleep(self._delay)
+        self.completed = result
+
+    async def interrupt(self, context: EventContext, reason: str, now: datetime) -> bool:
+        self.interruptions += 1
+        return True
+
+    async def recover(self, now: datetime) -> None:
         pass
 
 
-class ScriptedToolClient(MCPClient):
-    def __init__(self, result: dict[str, object], delay: float = 0) -> None:
-        super().__init__(Client(FastMCP("budget-test")))
-        self.load_catalog(tool_catalog())
-        self._result = result
-        self._delay = delay
-        self.calls: list[tuple[str, Mapping[str, object]]] = []
+def make_tool_client(result: dict[str, object], *, delay: float = 0) -> MockToolClient:
+    async def respond(*args: object, **kwargs: object) -> dict[str, object]:
+        if delay:
+            await asyncio.sleep(delay)
+        return result
 
-    async def call_tool(
-        self,
-        name: str,
-        arguments: Mapping[str, object],
-        *,
-        user_id: int | None = None,
-        confirmation_id: str | None = None,
-    ) -> dict[str, object]:
-        self.calls.append((name, arguments))
-        if self._delay:
-            await asyncio.sleep(self._delay)
-        return self._result
+    client = MockToolClient()
+    client.load_catalog(tool_catalog())
+    client.call_tool = AsyncMock(side_effect=respond)
+    return client
 
 
 def tool_call(identifier: str) -> ToolCall:
@@ -142,7 +154,7 @@ async def test_history_trimming_repeats_without_splitting_tool_groups() -> None:
         old_answer_2,
         ChatMessage(role=MessageRole.USER, content="Покажи расписание"),
     ]
-    client = ScriptedToolClient({"date": "2026-10-12", "lessons": [], "payload": "x" * 1600})
+    client = make_tool_client({"date": "2026-10-12", "lessons": [], "payload": "x" * 1600})
     llm = ScriptedLLM(
         [
             LLMResponse(
@@ -197,8 +209,8 @@ async def test_history_trimming_repeats_without_splitting_tool_groups() -> None:
     assert any(message.content == "Покажи расписание" for message in final_messages)
 
 
-async def test_expired_deadline_blocks_rpc_before_budget_reservation() -> None:
-    client = ScriptedToolClient({"date": "2026-10-12", "lessons": []})
+async def test_expired_deadline_blocks_generation_and_rpc_before_reservation() -> None:
+    client = make_tool_client({"date": "2026-10-12", "lessons": []})
     store = MagicMock(reserve=AsyncMock(return_value=True))
     llm = ScriptedLLM(
         [
@@ -211,21 +223,21 @@ async def test_expired_deadline_blocks_rpc_before_budget_reservation() -> None:
     )
     agent = AgentService(llm, ToolExecutionService(client, store=store))
 
-    result = await agent.run(
-        [ChatMessage(role=MessageRole.USER, content="Покажи расписание")],
-        CONTEXT,
-        budget=ContextBudget(32768, 16384, 4096),
-        deadline_at=asyncio.get_running_loop().time() - 1,
-    )
+    with pytest.raises(LLMTimeoutError):
+        await agent.run(
+            [ChatMessage(role=MessageRole.USER, content="Покажи расписание")],
+            CONTEXT,
+            budget=ContextBudget(32768, 16384, 4096),
+            deadline_at=asyncio.get_running_loop().time() - 1,
+        )
 
-    assert result.decision == AgentDecision.ERROR
-    assert result.reason == "request_deadline"
-    assert client.calls == []
+    assert llm.requests == []
+    client.call_tool.assert_not_awaited()
     store.reserve.assert_not_awaited()
 
 
 async def test_late_tool_call_gets_only_remaining_request_deadline() -> None:
-    client = ScriptedToolClient({"date": "2026-10-12", "lessons": []}, delay=5)
+    client = make_tool_client({"date": "2026-10-12", "lessons": []}, delay=5)
     llm = ScriptedLLM(
         [
             LLMResponse(
@@ -237,7 +249,7 @@ async def test_late_tool_call_gets_only_remaining_request_deadline() -> None:
         ]
     )
     agent = AgentService(llm, ToolExecutionService(client))
-    deadline_at = asyncio.get_running_loop().time() + 0.05
+    deadline_at = asyncio.get_running_loop().time() + 0.1
     started = time.monotonic()
 
     result = await agent.run(
@@ -251,4 +263,74 @@ async def test_late_tool_call_gets_only_remaining_request_deadline() -> None:
     assert result.decision == AgentDecision.ERROR
     assert result.reason == "request_deadline"
     assert len(llm.requests) == 1
-    assert client.calls
+    client.call_tool.assert_awaited_once()
+
+
+async def test_dialog_service_persists_request_deadline_result_after_deadline() -> None:
+    pool = InMemoryPool()
+    store = SlowCompleteStore(delay=0.08)
+    settings = Settings(
+        bot_token="123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk",
+        postgres_password="unused",
+        llm_api_key="test-key",
+        agent_timeout=0.2,
+    )
+    client = make_tool_client({"date": "2026-10-12", "lessons": []}, delay=5)
+    llm = ScriptedLLM(
+        [
+            LLMResponse(
+                content="",
+                finish_reason=FinishReason.TOOL_CALLS,
+                tool_calls=[tool_call("late")],
+            )
+        ]
+    )
+    agent = AgentService(llm, ToolExecutionService(client))
+    service = DialogService(
+        cast(asyncpg.Pool, pool),
+        settings,
+        llm,
+        agent=agent,
+        store=store,
+    )
+
+    result = await service.process_user_message(1, "Покажи расписание")
+
+    assert isinstance(result, AgentResult)
+    assert result.reason == "request_deadline"
+    client.call_tool.assert_awaited_once()
+    assert store.completed == result
+    assert store.interruptions == 0
+
+
+async def test_inserted_instructions_extend_protected_prefix() -> None:
+    llm = ScriptedLLM([LLMResponse(content="Готово")])
+    agent = AgentService(llm, clock=FrozenClock(NOW))
+    protected_user = ChatMessage(role=MessageRole.USER, content="Пример запроса " * 20)
+    protected_assistant = ChatMessage(role=MessageRole.ASSISTANT, content="Пример ответа " * 20)
+    old_user = ChatMessage(role=MessageRole.USER, content="Старый вопрос " * 50)
+    old_answer = ChatMessage(role=MessageRole.ASSISTANT, content="Старый ответ " * 50)
+    current = ChatMessage(role=MessageRole.USER, content="Продолжим")
+    conversation = [protected_user, protected_assistant, old_user, old_answer, current]
+    instructions = agent.instructions(None)
+    conversation_with_instructions = [
+        ChatMessage(role=MessageRole.SYSTEM, content=instructions),
+        *conversation,
+    ]
+    base_estimate = ContextBudget(0, 512, 128).estimate(
+        conversation_with_instructions,
+        agent.definitions,
+    )
+
+    result = await agent.run(
+        conversation,
+        CONTEXT,
+        budget=ContextBudget(base_estimate + 64, 512, 128),
+        protected_prefix=2,
+    )
+
+    assert result.text == "Готово"
+    final_contents = [message.content for message in llm.requests[0].messages]
+    assert protected_user.content in final_contents
+    assert protected_assistant.content in final_contents
+    assert old_user.content not in final_contents

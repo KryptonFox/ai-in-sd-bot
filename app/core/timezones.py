@@ -2,6 +2,8 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
+from pydantic import ValidationError
+
 from app.core.schemas.tools import ReminderArguments, ToolFailure
 
 DEFAULT_USER_TIMEZONE = "Europe/Moscow"
@@ -19,7 +21,13 @@ def normalize_reminder(
     if not isinstance(value, str):
         raise ToolFailure("invalid_time", "Укажите точное время ISO 8601 с часовым поясом.")
 
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise ToolFailure(
+            "invalid_time", "Укажите точное время ISO 8601 с часовым поясом."
+        ) from None
+
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ToolFailure("timezone_required", "Время должно содержать явный часовой пояс.")
 
@@ -43,7 +51,11 @@ def normalize_reminder(
     if normalized.utcoffset() != parsed.utcoffset():
         raise ToolFailure("timezone_mismatch", "Уточните время в сохранённом часовом поясе.")
 
-    result = ReminderArguments.model_validate({**arguments, "remind_at": normalized})
+    try:
+        result = ReminderArguments.model_validate({**arguments, "remind_at": normalized})
+    except ValidationError:
+        raise ToolFailure("invalid_arguments", "Уточните параметры напоминания.") from None
+
     if result.remind_at <= now:
         raise ToolFailure("past_time", "Время напоминания должно быть в будущем.")
 

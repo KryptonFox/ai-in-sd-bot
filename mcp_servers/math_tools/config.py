@@ -1,27 +1,27 @@
-import math
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from enum import StrEnum
 from pathlib import Path
 
 from dotenv import dotenv_values
 
 from app.core.toml_config import (
-    DEFAULT_CONFIG_FILE,
-    TomlConfigError,
+    ConfigValueError,
+    MCPTransport,
+    environment_value,
     load_toml_environment,
     merge_environment,
+    parse_choice,
+    parse_integer,
+    parse_number,
+    parse_port,
 )
 
+MathTransport = MCPTransport
 
-class MathConfigError(ValueError):
+
+class MathConfigError(ConfigValueError):
     pass
-
-
-class MathTransport(StrEnum):
-    STDIO = "stdio"
-    STREAMABLE_HTTP = "streamable-http"
 
 
 @dataclass(frozen=True)
@@ -42,94 +42,83 @@ class MathSettings:
         env_file: Path | str = ".env",
         *,
         environ: Mapping[str, str] | None = None,
-        config_file: Path | str = DEFAULT_CONFIG_FILE,
+        config_file: Path | str | None = None,
     ) -> "MathSettings":
         try:
-            toml_values = load_toml_environment(config_file)
-        except TomlConfigError as error:
+            return _load_math_settings(env_file, environ=environ, config_file=config_file)
+        except MathConfigError:
+            raise
+        except ConfigValueError as error:
             raise MathConfigError(str(error)) from None
 
-        values = merge_environment(
-            toml_values,
-            dotenv_values(env_file, interpolate=False),
-            os.environ if environ is None else environ,
+
+def _math_config_path(
+    config_file: Path | str | None,
+    file_values: Mapping[str, str | None],
+    process_values: Mapping[str, str],
+) -> Path | None:
+    if config_file is not None:
+        return Path(config_file)
+
+    value = environment_value(process_values, "MATH_MCP_CONFIG_FILE") or environment_value(
+        file_values,
+        "MATH_MCP_CONFIG_FILE",
+    )
+    return Path(value) if value else None
+
+
+def _load_math_settings(
+    env_file: Path | str,
+    *,
+    environ: Mapping[str, str] | None,
+    config_file: Path | str | None,
+) -> MathSettings:
+    file_values = dotenv_values(env_file, interpolate=False)
+    process_values = os.environ if environ is None else environ
+    config_path = _math_config_path(config_file, file_values, process_values)
+
+    toml_values = load_toml_environment(config_path)
+    values = merge_environment(toml_values, file_values, process_values)
+
+    secret = environment_value(values, "MCP_SHARED_SECRET")
+    if secret and len(secret) < 32:
+        raise MathConfigError("MCP_SHARED_SECRET: задайте секрет не короче 32 символов.")
+
+    transport = MathTransport(
+        parse_choice(
+            "MCP_TRANSPORT",
+            environment_value(values, "MCP_TRANSPORT", MathTransport.STDIO.value),
         )
+    )
+    if transport == MathTransport.STREAMABLE_HTTP and not secret:
+        raise MathConfigError("MCP_SHARED_SECRET: для HTTP нужен Bearer-секрет.")
 
-        def value(key: str, default: str = "") -> str:
-            return values.get(key) or default
-
-        def port() -> int:
-            raw = value("MCP_PORT", "8000")
-            try:
-                parsed = int(raw)
-            except ValueError:
-                raise MathConfigError("MCP_PORT: нужен номер порта.") from None
-            if not 1 <= parsed <= 65535:
-                raise MathConfigError("MCP_PORT: нужен номер порта от 1 до 65535.")
-            return parsed
-
-        def seconds(key: str, default: float, low: float, high: float) -> float:
-            try:
-                parsed = float(value(key, str(default)))
-                if not math.isfinite(parsed) or not low <= parsed <= high:
-                    raise ValueError
-                return parsed
-            except ValueError:
-                raise MathConfigError(f"{key}: допустимый диапазон {low:g}..{high:g}.") from None
-
-        def bounded_integer(key: str, default: int, low: int, high: int) -> int:
-            try:
-                parsed = int(value(key, str(default)))
-                if not low <= parsed <= high:
-                    raise ValueError
-                return parsed
-            except ValueError:
-                raise MathConfigError(f"{key}: допустимый диапазон {low}..{high}.") from None
-
-        try:
-            transport = MathTransport(value("MCP_TRANSPORT", "stdio"))
-        except ValueError:
-            raise MathConfigError("MCP_TRANSPORT: используйте stdio или streamable-http.") from None
-
-        secret = value("MCP_SHARED_SECRET")
-        if secret and len(secret) < 32:
-            raise MathConfigError("MCP_SHARED_SECRET: задайте секрет не короче 32 символов.")
-        if transport == MathTransport.STREAMABLE_HTTP and not secret:
-            raise MathConfigError("MCP_SHARED_SECRET: для HTTP нужен Bearer-секрет.")
-
-        return cls(
-            mcp_shared_secret=secret,
-            mcp_host=value("MCP_HOST", "0.0.0.0"),
-            mcp_port=port(),
-            mcp_transport=transport,
-            math_mcp_startup_timeout_seconds=seconds(
-                "MATH_MCP_STARTUP_TIMEOUT_SECONDS",
-                30.0,
-                1,
-                120,
-            ),
-            math_mcp_operation_timeout_seconds=seconds(
-                "MATH_MCP_OPERATION_TIMEOUT_SECONDS",
-                5.0,
-                0.1,
-                60,
-            ),
-            math_mcp_queue_timeout_seconds=seconds(
-                "MATH_MCP_QUEUE_TIMEOUT_SECONDS",
-                5.0,
-                0.1,
-                180,
-            ),
-            math_mcp_memory_limit_mib=bounded_integer(
-                "MATH_MCP_MEMORY_LIMIT_MIB",
-                768,
-                128,
-                4096,
-            ),
-            math_mcp_max_png_bytes=bounded_integer(
-                "MATH_MCP_MAX_PNG_BYTES",
-                256 * 1024,
-                1024,
-                256 * 1024,
-            ),
-        )
+    return MathSettings(
+        mcp_shared_secret=secret,
+        mcp_host=environment_value(values, "MCP_HOST", "0.0.0.0"),
+        mcp_port=parse_port(
+            "MCP_PORT",
+            environment_value(values, "MCP_PORT", "8000"),
+        ),
+        mcp_transport=transport,
+        math_mcp_startup_timeout_seconds=parse_number(
+            "MATH_MCP_STARTUP_TIMEOUT_SECONDS",
+            environment_value(values, "MATH_MCP_STARTUP_TIMEOUT_SECONDS", "30.0"),
+        ),
+        math_mcp_operation_timeout_seconds=parse_number(
+            "MATH_MCP_OPERATION_TIMEOUT_SECONDS",
+            environment_value(values, "MATH_MCP_OPERATION_TIMEOUT_SECONDS", "5.0"),
+        ),
+        math_mcp_queue_timeout_seconds=parse_number(
+            "MATH_MCP_QUEUE_TIMEOUT_SECONDS",
+            environment_value(values, "MATH_MCP_QUEUE_TIMEOUT_SECONDS", "5.0"),
+        ),
+        math_mcp_memory_limit_mib=parse_integer(
+            "MATH_MCP_MEMORY_LIMIT_MIB",
+            environment_value(values, "MATH_MCP_MEMORY_LIMIT_MIB", "768"),
+        ),
+        math_mcp_max_png_bytes=parse_integer(
+            "MATH_MCP_MAX_PNG_BYTES",
+            environment_value(values, "MATH_MCP_MAX_PNG_BYTES", str(256 * 1024)),
+        ),
+    )

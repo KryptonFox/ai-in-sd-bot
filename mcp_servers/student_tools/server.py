@@ -1,14 +1,13 @@
 import hmac
-import json
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Any, Never
+from typing import Any
 
 import asyncpg
 import httpx
 from fastmcp import FastMCP
-from fastmcp.exceptions import ResourceError, ToolError
+from fastmcp.exceptions import ResourceError
 from fastmcp.server.context import Context
 from pydantic import ValidationError
 
@@ -33,6 +32,7 @@ from app.db.repositories.reminder_repo import create_confirmed_reminder
 from mcp_servers.student_tools.config import ServerSettings
 from mcp_servers.student_tools.schedule import ScheduleService
 from mcp_servers.student_tools.weather import WeatherService
+from mcp_servers.tool_errors import raise_tool_error
 
 WEATHER_DESCRIPTION = (
     "Текущая погода и дневной прогноз: температура, осадки, ветер. "
@@ -69,21 +69,16 @@ def _reminder_owner(context: Context, shared_secret: str) -> tuple[int, str]:
     return user_id, confirmation
 
 
-def _raise_tool_error(error: ToolFailure) -> Never:
-    payload = {"error": {"code": error.code, "message": error.message}}
-    raise ToolError(json.dumps(payload, ensure_ascii=False))
-
-
 @contextmanager
 def _translate_tool_errors() -> Generator[None, None, None]:
     try:
         yield
     except ToolFailure as error:
-        _raise_tool_error(error)
+        raise_tool_error(error.code, error.message)
     except (ValidationError, ValueError, TypeError):
-        _raise_tool_error(ToolFailure("invalid_arguments", "Параметры инструмента некорректны."))
+        raise_tool_error("invalid_arguments", "Параметры инструмента некорректны.")
     except Exception:
-        _raise_tool_error(ToolFailure("service_unavailable", "Инструмент временно недоступен."))
+        raise_tool_error("service_unavailable", "Инструмент временно недоступен.")
 
 
 def build_server(

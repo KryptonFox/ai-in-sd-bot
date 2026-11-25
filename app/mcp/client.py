@@ -3,7 +3,7 @@ import logging
 from collections.abc import AsyncGenerator, Mapping, Sequence
 from contextlib import asynccontextmanager
 
-from fastmcp import Client
+from fastmcp import Client, FastMCP
 from fastmcp.client.client import CallToolResult
 from fastmcp.exceptions import ResourceError
 from mcp import MCPError, types
@@ -32,6 +32,16 @@ class MCPClient:
         self.resources: dict[str, ResourceDefinition] = {}
         self.available = False
 
+    async def load_in_process_catalog(self, server: FastMCP, *, name: str) -> None:
+        async with Client(server, name=name) as discovery:
+            await self._discover(discovery)
+
+    async def _discover(self, client: Client) -> None:
+        tools = await client.list_tools()
+        resources = await client.list_resources()
+        self.load_catalog(tools)
+        self.load_resources(resources)
+
     def load_catalog(self, catalog: Sequence[types.Tool]) -> None:
         self.tools = self.catalog.load(catalog)
         self.available = bool(self.tools or self.resources)
@@ -58,10 +68,7 @@ class MCPClient:
     async def start(self) -> bool:
         try:
             async with self._request() as client:
-                tools = await client.list_tools()
-                resources = await client.list_resources()
-                self.load_catalog(tools)
-                self.load_resources(resources)
+                await self._discover(client)
         except ToolFailure:
             self.available = False
             return False
