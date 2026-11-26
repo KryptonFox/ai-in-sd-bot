@@ -6,7 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Protocol
 
-from app.config import MATH_MCP_ENVIRONMENT_KEYS, Settings
+from app.config import MATH_MCP_ENVIRONMENT_KEYS, WEB_SEARCH_ENVIRONMENT_KEYS, Settings
 from scripts.common import CommandError, compose_quote, run_command
 
 REMOTE = "/home/student/course-bot"
@@ -152,6 +152,10 @@ def _deployment_environment(settings: Settings) -> dict[str, str]:
         if key in MATH_MCP_ENVIRONMENT_KEYS and key != "MATH_MCP_CONFIG_FILE":
             values[key] = value
 
+    for key, value in settings.web_search_environment.items():
+        if key in WEB_SEARCH_ENVIRONMENT_KEYS:
+            values[key] = value
+
     return values
 
 
@@ -202,6 +206,8 @@ def source_archive(root: Path) -> Path:
     candidates.extend((root / "app" / "db" / "migrations" / "sql").glob("*.sql"))
     candidates.extend((root / "mcp_servers").rglob("*.py"))
     candidates.extend((root / "mcp_servers").glob("*/data/*.json"))
+    materials = root / "mcp_servers" / "student_tools" / "data" / "materials"
+    candidates.extend(materials.rglob("*.md"))
 
     with tarfile.open(archive_path, "w:gz") as archive:
         for path in sorted(candidates):

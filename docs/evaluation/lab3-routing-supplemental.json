@@ -1,0 +1,142 @@
+{
+  "version": 1,
+  "description": "Supplemental Lab 3 routing suite. Math and web-source cases are scored separately from the official 15-case set. Web cases target the knowledge route; boundary cases are marked explicitly.",
+  "evaluation_context": {
+    "now": "2026-10-12T09:00:00+03:00",
+    "timezone": "Europe/Moscow",
+    "city": "Санкт-Петербург, Россия"
+  },
+  "cases": [
+    {
+      "id": "math_1",
+      "suite": "math",
+      "query": "Проверь мой ответ: интеграл от x^2 по dx равен x^3/3 + C.",
+      "expected_target": "math",
+      "rationale": "Checking a computation belongs to the math route."
+    },
+    {
+      "id": "math_2",
+      "suite": "math",
+      "query": "Реши уравнение 2^x = 8.",
+      "expected_target": "math",
+      "rationale": "Equation solving belongs to the math route."
+    },
+    {
+      "id": "math_3",
+      "suite": "math",
+      "query": "Построй график функции y = sin(x)/x на отрезке [-10, 10].",
+      "expected_target": "math",
+      "rationale": "Plotting belongs to the math route."
+    },
+    {
+      "id": "math_4",
+      "suite": "math",
+      "query": "А теперь найди вторую производную.",
+      "expected_target": "math",
+      "history": [
+        {
+          "role": "user",
+          "content": "Посчитай производную x^3."
+        },
+        {
+          "role": "assistant",
+          "content": "Производная равна 3x^2."
+        }
+      ],
+      "rationale": "Continuing a math problem keeps the math route."
+    },
+    {
+      "id": "math_5",
+      "suite": "math",
+      "query": "Сколько будет 15% от 480?",
+      "expected_target": "math",
+      "rationale": "A percentage calculation belongs to the math route."
+    },
+    {
+      "id": "math_6",
+      "suite": "math",
+      "query": "Сходится ли ряд сумма 1/n^2 от n=1 до бесконечности?",
+      "expected_target": "math",
+      "rationale": "Series convergence analysis belongs to the math route."
+    },
+    {
+      "id": "math_7",
+      "suite": "math",
+      "boundary": true,
+      "query": "В конспекте утверждается, что интеграл от 1/x^2 на [1, ∞) сходится. Проверь это вычислением.",
+      "expected_target": "math",
+      "rationale": "The source is context; the requested check is a calculation, so the math route owns it."
+    },
+    {
+      "id": "math_8",
+      "suite": "math",
+      "query": "Найди максимум функции f(x)=x^3-3x на отрезке [-2, 2] и покажи график.",
+      "expected_target": "math",
+      "rationale": "Finding an extremum and plotting belong to the math route."
+    },
+    {
+      "id": "web_1",
+      "suite": "web",
+      "query": "Найди в интернете официальную документацию Model Context Protocol и дай ссылку.",
+      "expected_target": "knowledge",
+      "rationale": "An explicit web-source search belongs to the knowledge route."
+    },
+    {
+      "id": "web_2",
+      "suite": "web",
+      "boundary": true,
+      "query": "Сравни конспект про идемпотентность с описанием в веб-источнике.",
+      "expected_target": "knowledge",
+      "rationale": "Comparing lecture content with a web source belongs to the knowledge route."
+    },
+    {
+      "id": "web_3",
+      "suite": "web",
+      "query": "Поищи в сети актуальные сведения о поддержке MCP в Python SDK.",
+      "expected_target": "knowledge",
+      "rationale": "A request for current web sources belongs to the knowledge route."
+    },
+    {
+      "id": "web_4",
+      "suite": "web",
+      "query": "Сверь определение контекстного окна из конспекта с официальной документацией OpenAI.",
+      "expected_target": "knowledge",
+      "rationale": "Source checking across lecture and web material belongs to the knowledge route."
+    },
+    {
+      "id": "web_5",
+      "suite": "web",
+      "query": "Да, поищи.",
+      "expected_target": "knowledge",
+      "history": [
+        {
+          "role": "user",
+          "content": "Где описано контекстное окно модели?"
+        },
+        {
+          "role": "assistant",
+          "content": "В конспекте есть краткое определение. Могу поискать в интернете и сравнить с документацией.",
+          "metadata": {
+            "web_search_offer": true
+          }
+        }
+      ],
+      "rationale": "Approving a previously offered web search continues the knowledge route."
+    },
+    {
+      "id": "web_6",
+      "suite": "web",
+      "boundary": true,
+      "query": "Где в интернете описано контекстное окно? Сравни с лекцией.",
+      "expected_target": "knowledge",
+      "rationale": "An explicit web lookup plus lecture comparison belongs to the knowledge route."
+    },
+    {
+      "id": "web_7",
+      "suite": "web",
+      "query": "Найди свежие примеры A2A Agent Card в официальной документации.",
+      "expected_target": "knowledge",
+      "rationale": "Finding current official web documentation belongs to the knowledge route."
+    }
+  ]
+}

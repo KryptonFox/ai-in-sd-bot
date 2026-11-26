@@ -21,6 +21,7 @@ from mcp import types
 from app.config import MCPTransport, Settings
 from app.core.clock import FrozenClock
 from app.core.schemas.agent import AgentDecision, EventContext
+from app.core.schemas.knowledge import KnowledgeStatus, MaterialSearchResult
 from app.core.schemas.tools import ScheduleResult, ToolFailure, WeekSchedule
 from app.db.connection import create_pool
 from app.mcp.client import MCPClient
@@ -312,8 +313,23 @@ async def test_stdio_client_discovers_reads_and_confirms_reminder_with_database(
             "get_schedule",
             "get_schedule_week",
             "add_reminder",
+            "search_materials",
+            "search_web",
         }
+        assert set(client.resources) == {"schedule://current-week", "materials://catalog"}
         assert "read_resource" not in client.tools
+        materials = MaterialSearchResult.model_validate(
+            await client.call_tool(
+                "search_materials",
+                {"query": "идемпотентность доставка", "limit": 2},
+            )
+        )
+        assert materials.status is KnowledgeStatus.OK
+        snippet = materials.results[0]
+        assert snippet.source_id == "idempotency-and-delivery"
+        assert snippet.citation.startswith("materials://idempotency-and-delivery#")
+        catalog = await client.read_resource("materials://catalog")
+        assert len(json.loads(catalog.text)["documents"]) == 3
         schedule_result = await client.call_tool("get_schedule", {"date": today.isoformat()})
         assert ScheduleResult.model_validate(schedule_result).lessons[0].title == (
             "Интеграционная лекция"

@@ -12,6 +12,12 @@ streaming = true
 opencode_session = false
 context_provider = "auto"
 
+[router]
+base_url = "https://opencode.ai/inference/go/openai/v1"
+model = "gpt-6-luna-decision"
+timeout_seconds = 30.0
+opencode_session = false
+
 [agent]
 timeout_seconds = 240.0
 max_tool_calls = 5
@@ -34,6 +40,15 @@ server_url = "http://127.0.0.1:8000/mcp/"
 math_server_url = ""
 timeout_seconds = 10.0
 math_request_timeout_seconds = 40.0
+
+[web_search]
+# disabled | brave | exa; по умолчанию поиск выключен.
+# Brave требует WEB_SEARCH_API_KEY. Exa использует hosted MCP без ключа.
+# Если endpoint и timeout_seconds не заданы, применяются значения провайдера:
+# brave — https://api.search.brave.com/res/v1/web/search и 8 секунд;
+# exa — https://mcp.exa.ai/mcp?tools=web_search_exa и 20 секунд.
+provider = "disabled"
+max_results = 5
 
 [math_mcp]
 startup_timeout_seconds = 30.0

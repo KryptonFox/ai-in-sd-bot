@@ -72,6 +72,13 @@ class WeatherService:
 
         return await self._weather_for(locations[0], requested)
 
+    async def current_weather_at(self, location: GeoLocation) -> WeatherResult:
+        try:
+            async with asyncio.timeout(8):
+                return await self._weather_for(location, None)
+        except TimeoutError:
+            raise ToolFailure("weather_unavailable", "Сервис погоды не ответил вовремя.") from None
+
     async def _fetch(
         self,
         url: str,

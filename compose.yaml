@@ -81,6 +81,11 @@ services:
       MCP_PORT: "8000"
       SCHEDULE_PATH: mcp_servers/student_tools/data/schedule.json
       SCHEDULE_TIMEZONE: ${SCHEDULE_TIMEZONE:-Europe/Moscow}
+      WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-}
+      WEB_SEARCH_API_KEY: ${WEB_SEARCH_API_KEY:-}
+      WEB_SEARCH_ENDPOINT: ${WEB_SEARCH_ENDPOINT:-}
+      WEB_SEARCH_TIMEOUT_SECONDS: ${WEB_SEARCH_TIMEOUT_SECONDS:-}
+      WEB_SEARCH_MAX_RESULTS: ${WEB_SEARCH_MAX_RESULTS:-}
     volumes:
       - type: bind
         source: ${SCHEDULE_PATH:-./mcp_servers/student_tools/data/schedule.json}

@@ -63,6 +63,10 @@ async def test_migration_0005_preserves_saved_counters_and_relaxes_checks(
     confirmation_id = uuid4()
     confirmation_event_id = "eval:before-budget-migration-confirmation"
     expected_checksums: dict[int, str] = {}
+    later_migrations = sorted(
+        path for path in MIGRATIONS_DIR.glob("*.sql") if int(path.name.split("_", 1)[0]) > 4
+    )
+    expected_applied = [path.name for path in later_migrations]
 
     try:
         async with pool.acquire() as conn:
@@ -111,7 +115,7 @@ async def test_migration_0005_preserves_saved_counters_and_relaxes_checks(
 
         applied = await run_migrations(pool)
 
-        assert applied == ["0005_agent_call_budget.sql"]
+        assert applied == expected_applied
         async with pool.acquire() as conn:
             assert (
                 await conn.fetchval(
@@ -176,8 +180,14 @@ async def test_migration_0005_preserves_saved_counters_and_relaxes_checks(
                     "SELECT version,checksum FROM schema_migrations ORDER BY version"
                 )
             }
-            migration_0005 = MIGRATIONS_DIR / "0005_agent_call_budget.sql"
-            expected_checksums[5] = compute_checksum(migration_0005.read_text(encoding="utf-8"))
+            expected_checksums.update(
+                {
+                    int(path.name.split("_", 1)[0]): compute_checksum(
+                        path.read_text(encoding="utf-8")
+                    )
+                    for path in later_migrations
+                }
+            )
             assert stored_checksums == expected_checksums
 
         assert await run_migrations(pool) == []

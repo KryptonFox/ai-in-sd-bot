@@ -59,6 +59,11 @@ def get_default_bot_commands(mode_registry: ModeRegistry = registry) -> list[Bot
             BotCommand(command="tools", description="Доступные инструменты MCP"),
             BotCommand(command="timezone", description="Часовой пояс IANA для напоминаний"),
             BotCommand(command="why", description="Последнее решение агента"),
+            BotCommand(command="city", description="Город для ежедневной сводки"),
+            BotCommand(command="notifications", description="Настройки уведомлений и сводки"),
+            BotCommand(command="briefing_on", description="Включить ежедневную сводку"),
+            BotCommand(command="briefing_off", description="Выключить ежедневную сводку"),
+            BotCommand(command="trace", description="Техническая трасса запроса"),
         ]
     )
 

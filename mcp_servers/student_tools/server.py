@@ -29,7 +29,9 @@ from app.core.schemas.tools import (
     WeekSchedule,
 )
 from app.db.repositories.reminder_repo import create_confirmed_reminder
+from app.services.personal_schedule import PersonalScheduleService
 from mcp_servers.student_tools.config import ServerSettings
+from mcp_servers.student_tools.knowledge import register_knowledge_tools
 from mcp_servers.student_tools.schedule import ScheduleService
 from mcp_servers.student_tools.weather import WeatherService
 from mcp_servers.tool_errors import raise_tool_error
@@ -69,6 +71,26 @@ def _reminder_owner(context: Context, shared_secret: str) -> tuple[int, str]:
     return user_id, confirmation
 
 
+def _schedule_owner(context: Context, shared_secret: str) -> int | None:
+    meta = _request_meta(context)
+    if not {"app_token", "user_id", "confirmation_id"} & meta.keys():
+        return None
+
+    token = meta.get("app_token")
+    if (
+        not shared_secret
+        or not isinstance(token, str)
+        or not hmac.compare_digest(token, shared_secret)
+    ):
+        raise ToolFailure("unauthorized", "Нужен доверенный контекст приложения.")
+
+    user_id = meta.get("user_id")
+    if type(user_id) is not int or user_id <= 0:
+        raise ToolFailure("unauthorized", "Нужен доверенный владелец.")
+
+    return user_id
+
+
 @contextmanager
 def _translate_tool_errors() -> Generator[None, None, None]:
     try:
@@ -90,6 +112,7 @@ def build_server(
     clock = clock or SystemClock()
     weather = WeatherService(http, clock=clock)
     schedule = ScheduleService(settings.schedule_path, settings.schedule_timezone, clock)
+    personal_schedule = PersonalScheduleService(pool, clock, settings.schedule_timezone)
     server = FastMCP("student-tools", strict_input_validation=True, mask_error_details=True)
 
     @server.tool(description=WEATHER_DESCRIPTION, annotations={"readOnlyHint": True})
@@ -107,10 +130,14 @@ def build_server(
         ),
         annotations={"readOnlyHint": True},
     )
-    async def get_schedule(date: ISODate | None = None) -> ScheduleResult:
+    async def get_schedule(context: Context, date: ISODate | None = None) -> ScheduleResult:
         with _translate_tool_errors():
             arguments = ScheduleArguments(date=date)
-            return await schedule.get_schedule(arguments.date)
+            owner_id = _schedule_owner(context, settings.mcp_shared_secret)
+            if owner_id is None:
+                return await schedule.get_schedule(arguments.date)
+
+            return await personal_schedule.get_schedule(owner_id, arguments.date)
 
     @server.tool(
         description=(
@@ -121,14 +148,22 @@ def build_server(
         annotations={"readOnlyHint": True},
     )
     async def get_schedule_week(
+        context: Context,
         date: ISODate | None = None,
         week_offset: WeekOffset = 0,
     ) -> WeekSchedule:
         with _translate_tool_errors():
             arguments = ScheduleWeekArguments(date=date, week_offset=week_offset)
+            owner_id = _schedule_owner(context, settings.mcp_shared_secret)
+
+            if owner_id is None:
+                if arguments.date is not None:
+                    return await schedule.week_containing(arguments.date)
+                return await schedule.relative_week(arguments.week_offset)
+
             if arguments.date is not None:
-                return await schedule.week_containing(arguments.date)
-            return await schedule.relative_week(arguments.week_offset)
+                return await personal_schedule.week_containing(owner_id, arguments.date)
+            return await personal_schedule.relative_week(owner_id, arguments.week_offset)
 
     @server.tool(
         description="Создать напоминание только после подтверждения владельца.",
@@ -156,10 +191,20 @@ def build_server(
         description="Расписание текущей недели целиком, понедельник–воскресенье.",
         mime_type="application/json",
     )
-    async def current_week() -> str:
+    async def current_week(context: Context) -> str:
         try:
-            return (await schedule.current_week()).model_dump_json()
+            owner_id = _schedule_owner(context, settings.mcp_shared_secret)
+            if owner_id is None:
+                week = await schedule.current_week()
+            else:
+                week = await personal_schedule.current_week(owner_id)
+            return week.model_dump_json()
+        except ResourceError:
+            raise
+        except ToolFailure as error:
+            raise ResourceError(error.message) from None
         except Exception:
             raise ResourceError("Расписание временно недоступно.") from None
 
+    register_knowledge_tools(server, settings, http)
     return server

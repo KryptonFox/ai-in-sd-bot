@@ -162,10 +162,13 @@ async def test_stdio_transport_discovers_and_calls_server(tmp_path):
                 "get_schedule",
                 "get_schedule_week",
                 "add_reminder",
+                "search_materials",
+                "search_web",
             }
-            assert [str(resource.uri) for resource in resources.resources] == [
-                "schedule://current-week"
-            ]
+            assert {str(resource.uri) for resource in resources.resources} == {
+                "schedule://current-week",
+                "materials://catalog",
+            }
             discovered = {tool.name: tool for tool in tools.tools}
             assert all(tool.output_schema is not None for tool in discovered.values())
             assert all(
@@ -175,6 +178,10 @@ async def test_stdio_transport_discovers_and_calls_server(tmp_path):
             assert discovered["get_weather"].annotations.read_only_hint is True
             assert discovered["add_reminder"].annotations is not None
             assert discovered["add_reminder"].annotations.read_only_hint is False
+            assert discovered["search_materials"].annotations is not None
+            assert discovered["search_materials"].annotations.read_only_hint is True
+            assert discovered["search_web"].annotations is not None
+            assert discovered["search_web"].annotations.read_only_hint is True
             weather_output_schema = discovered["get_weather"].output_schema
             assert weather_output_schema is not None
             assert "anyOf" not in weather_output_schema
@@ -199,6 +206,21 @@ async def test_stdio_transport_discovers_and_calls_server(tmp_path):
             assert isinstance(content, types.TextResourceContents)
             week_data = json.loads(content.text)
             assert len(week_data["days"]) == 7
+
+            materials = await session.call_tool(
+                "search_materials",
+                {"query": "идемпотентность доставка", "limit": 2},
+            )
+            assert materials.structured_content is not None
+            assert materials.is_error is not True
+            assert materials.structured_content["status"] == "ok"
+            snippet = materials.structured_content["results"][0]
+            assert snippet["citation"].startswith("materials://")
+
+            catalog = await session.read_resource("materials://catalog")
+            catalog_content = catalog.contents[0]
+            assert isinstance(catalog_content, types.TextResourceContents)
+            assert len(json.loads(catalog_content.text)["documents"]) == 3
 
             extra_field = await session.call_tool(
                 "get_schedule", {"date": "2030-01-02", "unexpected": True}
@@ -247,8 +269,19 @@ async def test_streamable_http_transport_auth_and_mcp_contract(tmp_path):
                         await session.initialize()
                         tools = await session.list_tools()
                         resources = await session.list_resources()
-                        assert len(tools.tools) == 4
-                        assert len(resources.resources) == 1
+                        assert len(tools.tools) == 6
+                        assert {tool.name for tool in tools.tools} == {
+                            "get_weather",
+                            "get_schedule",
+                            "get_schedule_week",
+                            "add_reminder",
+                            "search_materials",
+                            "search_web",
+                        }
+                        assert {str(resource.uri) for resource in resources.resources} == {
+                            "schedule://current-week",
+                            "materials://catalog",
+                        }
 
                         schedule = await session.call_tool("get_schedule", {"date": "2030-01-02"})
                         assert schedule.structured_content is not None
@@ -272,6 +305,38 @@ async def test_streamable_http_transport_auth_and_mcp_contract(tmp_path):
                         assert default_schedule.structured_content is not None
                         assert default_schedule.structured_content["date"] == "2030-01-02"
                         assert len(default_schedule.structured_content["lessons"]) == 1
+
+                        materials = await session.call_tool(
+                            "search_materials",
+                            {"query": "контекстное окно модели", "limit": 2},
+                        )
+                        assert not materials.is_error
+                        assert materials.structured_content is not None
+                        assert materials.structured_content["status"] == "ok"
+                        assert materials.structured_content["results"][0]["citation"].startswith(
+                            "materials://"
+                        )
+
+                        catalog = await session.read_resource("materials://catalog")
+                        catalog_content = catalog.contents[0]
+                        assert isinstance(catalog_content, types.TextResourceContents)
+                        assert len(json.loads(catalog_content.text)["documents"]) == 3
+
+                        web_without_permission = await session.call_tool(
+                            "search_web",
+                            {"query": "mcp specification"},
+                        )
+                        web_with_permission = await session.call_tool(
+                            "search_web",
+                            {"query": "mcp specification"},
+                            meta={"app_token": SECRET, "web_search_allowed": True},
+                        )
+                        assert web_without_permission.is_error is True
+                        assert web_with_permission.is_error is True
+                        assert isinstance(web_without_permission.content[0], types.TextContent)
+                        assert isinstance(web_with_permission.content[0], types.TextContent)
+                        assert "unauthorized" in web_without_permission.content[0].text
+                        assert "web_search_disabled" in web_with_permission.content[0].text
 
                         week = await session.read_resource("schedule://current-week")
                         content = week.contents[0]

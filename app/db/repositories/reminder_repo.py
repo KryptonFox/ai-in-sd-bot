@@ -75,3 +75,17 @@ async def find_result(pool: asyncpg.Pool, key: str) -> dict[str, object] | None:
     if row is None:
         return None
     return reminder_result(row).model_dump(mode="json")
+
+
+async def reminders_between(
+    pool: asyncpg.Pool, user_id: int, start: datetime, end: datetime
+) -> list[ReminderResult]:
+    rows = await pool.fetch(
+        """SELECT id, text, remind_at, timezone FROM reminders
+           WHERE user_id=$1 AND remind_at >= $2 AND remind_at < $3
+           ORDER BY remind_at, id LIMIT 12""",
+        user_id,
+        start,
+        end,
+    )
+    return [reminder_result(row) for row in rows]

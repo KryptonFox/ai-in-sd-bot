@@ -81,6 +81,11 @@ def test_local_and_cloud_compose_ports_credentials_and_healthchecks(tmp_path):
                 "LLM_API_KEY=synthetic-llm-key",
                 "MCP_SHARED_SECRET=" + "m" * 40,
                 "MATH_MCP_OPERATION_TIMEOUT_SECONDS=2.5",
+                "WEB_SEARCH_PROVIDER=brave",
+                "WEB_SEARCH_API_KEY=synthetic-search-key",
+                "WEB_SEARCH_ENDPOINT=https://search.example.test/v1/web",
+                "WEB_SEARCH_TIMEOUT_SECONDS=5",
+                "WEB_SEARCH_MAX_RESULTS=4",
             ]
         )
         + "\n",
@@ -110,6 +115,14 @@ def test_local_and_cloud_compose_ports_credentials_and_healthchecks(tmp_path):
     assert cloud["bot"]["environment"]["MCP_SERVER_URL"] == "http://student-tools-mcp:8000/mcp"
     assert cloud["bot"]["environment"]["MATH_MCP_SERVER_URL"] == "http://math-tools-mcp:8000/mcp"
     assert cloud["bot"]["environment"]["LLM_API_KEY"] == "synthetic-llm-key"
+    student_environment = cloud["student-tools-mcp"]["environment"]
+    assert student_environment["WEB_SEARCH_PROVIDER"] == "brave"
+    assert student_environment["WEB_SEARCH_API_KEY"] == "synthetic-search-key"
+    assert student_environment["WEB_SEARCH_ENDPOINT"] == "https://search.example.test/v1/web"
+    assert student_environment["WEB_SEARCH_TIMEOUT_SECONDS"] == "5"
+    assert student_environment["WEB_SEARCH_MAX_RESULTS"] == "4"
+    assert "WEB_SEARCH_API_KEY" not in cloud["math-tools-mcp"]["environment"]
+    assert "WEB_SEARCH_PROVIDER" not in cloud["math-tools-mcp"]["environment"]
     assert cloud["bot"]["image"] == cloud["student-tools-mcp"]["image"] == "itmo-ai-bot:local"
     assert cloud["bot"]["image"] == cloud["math-tools-mcp"]["image"]
     assert cloud["bot"]["build"] == cloud["student-tools-mcp"]["build"]

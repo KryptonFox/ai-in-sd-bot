@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from fastmcp import Client
 from fastmcp.client.transports import StdioTransport, StreamableHttpTransport
 
-from app.config import MCPTransport, Settings
+from app.config import WEB_SEARCH_ENVIRONMENT_KEYS, MCPTransport, Settings
 from app.mcp.client import MCPClient
 from app.mcp.composite import CompositeToolClient
 
@@ -30,6 +30,15 @@ MATH_STDIO_ENVIRONMENT_KEYS = frozenset(
         "WINDIR",
     }
 )
+STUDENT_STDIO_EXCLUDED_ENVIRONMENT_KEYS = frozenset(
+    {
+        "BOT_TOKEN",
+        "LLM_API_KEY",
+        "ROUTER_API_KEY",
+        "TELEGRAM_PROXY_URL",
+    }
+)
+STUDENT_STDIO_EXCLUDED_CREDENTIAL_PREFIXES = ("GOOGLE", "GEMINI")
 
 
 @dataclass(frozen=True)
@@ -72,23 +81,7 @@ def create_student_tools_client(settings: Settings) -> MCPClient:
             headers={"Authorization": f"Bearer {secret}"},
         )
     else:
-        env = {
-            key: value
-            for key, value in os.environ.items()
-            if key not in {"BOT_TOKEN", "LLM_API_KEY", "TELEGRAM_PROXY_URL"}
-        }
-        env.update(
-            {
-                "MCP_SHARED_SECRET": secret,
-                "POSTGRES_HOST": settings.postgres_host,
-                "POSTGRES_PORT": str(settings.postgres_port),
-                "POSTGRES_DB": settings.postgres_db,
-                "POSTGRES_USER": settings.postgres_user,
-                "POSTGRES_PASSWORD": settings.postgres_password,
-                "SCHEDULE_PATH": settings.schedule_path,
-                "SCHEDULE_TIMEZONE": settings.schedule_timezone,
-            }
-        )
+        env = _student_stdio_environment(settings, secret)
         transport = StdioTransport(
             command=sys.executable,
             args=[
@@ -110,6 +103,36 @@ def create_student_tools_client(settings: Settings) -> MCPClient:
         init_timeout=settings.mcp_timeout,
     )
     return MCPClient(sdk, secret=secret)
+
+
+def _student_stdio_environment(settings: Settings, secret: str) -> dict[str, str]:
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in STUDENT_STDIO_EXCLUDED_ENVIRONMENT_KEYS
+        and key not in WEB_SEARCH_ENVIRONMENT_KEYS
+        and not key.upper().startswith(STUDENT_STDIO_EXCLUDED_CREDENTIAL_PREFIXES)
+    }
+    env.update(
+        {
+            "MCP_SHARED_SECRET": secret,
+            "POSTGRES_HOST": settings.postgres_host,
+            "POSTGRES_PORT": str(settings.postgres_port),
+            "POSTGRES_DB": settings.postgres_db,
+            "POSTGRES_USER": settings.postgres_user,
+            "POSTGRES_PASSWORD": settings.postgres_password,
+            "SCHEDULE_PATH": settings.schedule_path,
+            "SCHEDULE_TIMEZONE": settings.schedule_timezone,
+        }
+    )
+    env.update(
+        {
+            key: value
+            for key, value in settings.web_search_environment.items()
+            if key in WEB_SEARCH_ENVIRONMENT_KEYS
+        }
+    )
+    return env
 
 
 def create_math_tools_client(settings: Settings) -> MCPClient | None:

@@ -19,8 +19,11 @@ from app.core.schemas.tools import (
     ToolImage,
 )
 from app.mcp.catalog import ToolCatalog
+from app.mcp.request_context import current_mcp_request
 
 logger = logging.getLogger("app.mcp.client")
+PERSONAL_TOOLS = frozenset({"get_schedule", "get_schedule_week", "search_web"})
+PERSONAL_RESOURCES = frozenset({"schedule://current-week"})
 
 
 class MCPClient:
@@ -103,7 +106,9 @@ class MCPClient:
         self.catalog.validate_arguments(name, arguments)
         read_only = self.catalog.is_read_only(name)
         meta: dict[str, object] | None = None
-        if not read_only:
+        if read_only and name in PERSONAL_TOOLS:
+            meta = self._personal_read_meta()
+        elif not read_only:
             if user_id is None or confirmation_id is None:
                 raise ToolFailure("confirmation_required", "Нужно подтверждение владельца.")
             meta = {
@@ -179,7 +184,11 @@ class MCPClient:
             raise ToolFailure("resource_unavailable", "Ресурс недоступен.")
         try:
             async with self._request() as client:
-                contents = await client.read_resource(uri)
+                meta = self._personal_read_meta() if uri in PERSONAL_RESOURCES else None
+                if meta is None:
+                    contents = await client.read_resource(uri)
+                else:
+                    contents = await client.read_resource(uri, meta=meta)
         except ResourceError:
             raise ToolFailure("resource_unavailable", "Ресурс сейчас недоступен.") from None
 
@@ -198,6 +207,16 @@ class MCPClient:
             )
         except Exception:
             raise ToolFailure("invalid_output", "Ресурс вернул некорректный результат.") from None
+
+    def _personal_read_meta(self) -> dict[str, object] | None:
+        context = current_mcp_request()
+        if context is None:
+            return None
+        return {
+            "app_token": self.secret,
+            "user_id": context.user_id,
+            "web_search_allowed": context.web_search_allowed,
+        }
 
     async def aclose(self) -> None:
         self.available = False

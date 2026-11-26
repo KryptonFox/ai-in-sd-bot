@@ -143,7 +143,9 @@ async def test_resource_read_and_answer_use_one_native_function_call_cycle() -> 
         tool for tool in llm.requests[0].tools if tool.name == READ_RESOURCE_FUNCTION
     )
     assert resource_tool.parameters["additionalProperties"] is False
-    assert resource_tool.parameters["properties"]["uri"]["enum"] == [URI]
+    assert resource_tool.parameters["properties"]["uri"]["enum"] == sorted(
+        [URI, "materials://catalog"]
+    )
     result_message = next(
         message
         for message in llm.requests[1].messages

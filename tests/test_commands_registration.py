@@ -27,6 +27,18 @@ def test_get_default_bot_commands_structure():
         assert 1 <= len(cmd.description) <= 256
 
 
+def test_get_default_bot_commands_exposes_lab3_features():
+    commands = {command.command for command in get_default_bot_commands()}
+
+    assert {
+        "city",
+        "notifications",
+        "briefing_on",
+        "briefing_off",
+        "trace",
+    } <= commands
+
+
 def test_get_default_bot_commands_custom_registry():
     reg = ModeRegistry()
     reg.register(

@@ -42,6 +42,12 @@ from tests.mcp_catalog import resource_catalog, tool_catalog
 EVALUATION_TIME = datetime(2026, 10, 12, 9, tzinfo=UTC)
 CONTEXT = EventContext(user_id=42, event_id="everyday-event", request_id="everyday-request")
 RESOURCE_URI = "schedule://current-week"
+LEGACY_TOOL_NAMES = {
+    "get_weather",
+    "get_schedule",
+    "get_schedule_week",
+    "add_reminder",
+}
 
 
 def make_message(text: str) -> Message:
@@ -110,8 +116,12 @@ def weather_payload() -> dict[str, object]:
 class EverydayToolClient(MCPClient):
     def __init__(self, math_tools: Sequence[types.Tool]) -> None:
         super().__init__(Client(FastMCP("everyday-test")))
-        self.load_catalog([*tool_catalog(), *math_tools])
-        self.load_resources(resource_catalog())
+        self.load_catalog(
+            [tool for tool in tool_catalog() if tool.name in LEGACY_TOOL_NAMES] + list(math_tools)
+        )
+        self.load_resources(
+            [resource for resource in resource_catalog() if str(resource.uri) == RESOURCE_URI]
+        )
         self.tool_calls = AsyncMock(return_value=weather_payload())
         self.resource_reads = AsyncMock(
             return_value=ResourceContent(RESOURCE_URI, '{"days": [{"date": "2026-10-12"}]}')

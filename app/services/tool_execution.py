@@ -22,6 +22,7 @@ from app.core.schemas.tools import (
     ToolFailure,
     ToolImage,
 )
+from app.core.trace import TraceStep, trace_step
 from app.services.confirmation_service import ConfirmationService
 
 logger = logging.getLogger("app.tools")
@@ -31,6 +32,16 @@ REQUEST_DEADLINE_MESSAGE = "Общее время обработки запро�
 T = TypeVar("T")
 
 type ValidatedCall = tuple[ToolCall, ReadResourceArguments | None]
+
+
+def _safe_trace_tool_name(value: str) -> str | None:
+    if (
+        1 <= len(value) <= 128
+        and value.isascii()
+        and all(char.isalnum() or char in "_.:/-#" for char in value)
+    ):
+        return value
+    return None
 
 
 class ToolExecutionService:
@@ -83,7 +94,11 @@ class ToolExecutionService:
 
         state.calls_used += 1
 
-    def _validate_batch(self, calls: Sequence[ToolCall]) -> list[ValidatedCall]:
+    def _validate_batch(
+        self,
+        calls: Sequence[ToolCall],
+        step: TraceStep | None = None,
+    ) -> list[ValidatedCall]:
         client = self._client()
         mutations = 0
         validated: list[ValidatedCall] = []
@@ -91,6 +106,8 @@ class ToolExecutionService:
 
         for call in calls:
             if call.id in identifiers:
+                if step is not None:
+                    step.tool_name = _safe_trace_tool_name(call.name)
                 raise ToolFailure(
                     "invalid_arguments", "Вызовы инструментов должны иметь разные ID."
                 )
@@ -100,23 +117,37 @@ class ToolExecutionService:
                 try:
                     arguments = ReadResourceArguments.model_validate(call.arguments)
                 except ValidationError:
+                    if step is not None:
+                        step.tool_name = READ_RESOURCE_FUNCTION
                     raise ToolFailure("invalid_arguments", "Уточните URI ресурса.") from None
 
                 if arguments.uri not in client.resources:
+                    if step is not None:
+                        step.tool_name = _safe_trace_tool_name(arguments.uri)
                     raise ToolFailure("resource_unavailable", "Ресурс не обнаружен у MCP-сервера.")
                 validated.append((call, arguments))
                 continue
 
-            client.validate_arguments(call.name, call.arguments)
+            try:
+                client.validate_arguments(call.name, call.arguments)
+            except ToolFailure:
+                if step is not None:
+                    step.tool_name = _safe_trace_tool_name(call.name)
+                raise
+
             if call.name == REMINDER_TOOL_NAME:
                 mutations += 1
             elif not client.is_read_only(call.name):
+                if step is not None:
+                    step.tool_name = _safe_trace_tool_name(call.name)
                 raise ToolFailure(
                     "unsupported_action", "Для этого действия не настроено подтверждение."
                 )
             validated.append((call, None))
 
         if mutations > 1:
+            if step is not None:
+                step.tool_name = REMINDER_TOOL_NAME
             raise ToolFailure("multiple_mutations", "Подтверждайте напоминания по одному.")
         return validated
 
@@ -125,19 +156,29 @@ class ToolExecutionService:
         state: RunState,
         calls: Sequence[ToolCall],
     ) -> AgentResult | StepAction:
-        validated = self._validate_batch(calls)
+        with trace_step("tools", "validate_batch") as step:
+            validated = self._validate_batch(calls, step)
+            if self._confirmations is None and any(
+                call.name == REMINDER_TOOL_NAME for call, _ in validated
+            ):
+                if step is not None:
+                    step.tool_name = REMINDER_TOOL_NAME
+                raise ToolFailure("confirmation_unavailable", "Подтверждения сейчас недоступны.")
 
         for call, resource_arguments in validated:
             if resource_arguments is not None:
-                await self._read_resource_call(state, call, resource_arguments.uri)
+                with trace_step("mcp", "read_resource", tool_name=resource_arguments.uri):
+                    await self._read_resource_call(state, call, resource_arguments.uri)
                 continue
 
             state.last_call = call
 
             if call.name == REMINDER_TOOL_NAME:
-                return await self._prepare(state, call)
+                with trace_step("confirmation", "prepare", tool_name=call.name):
+                    return await self._prepare(state, call)
 
-            await self._read(state, call)
+            with trace_step("mcp", "call_tool", tool_name=call.name):
+                await self._read(state, call)
 
         return StepAction.CONTINUE
 
@@ -220,6 +261,20 @@ class ToolExecutionService:
 
         try:
             outcome = await self._deadline_bound(state, reserve_and_call)
+            if isinstance(outcome, PhotoToolResult):
+                payload = outcome.payload
+                images = outcome.images
+            else:
+                payload = outcome
+                images = []
+
+            content = json.dumps({"source": call.name, "data": payload}, ensure_ascii=False)
+            if len(content) > self._max_output_chars:
+                raise ToolFailure(
+                    "tool_output_budget", "Результат инструмента слишком большой. Уточните запрос."
+                )
+
+            self._add_images(state, images)
         except ToolFailure as error:
             code = error.code
             raise
@@ -232,20 +287,6 @@ class ToolExecutionService:
                 code,
             )
 
-        if isinstance(outcome, PhotoToolResult):
-            payload = outcome.payload
-            images = outcome.images
-        else:
-            payload = outcome
-            images = []
-
-        content = json.dumps({"source": call.name, "data": payload}, ensure_ascii=False)
-        if len(content) > self._max_output_chars:
-            raise ToolFailure(
-                "tool_output_budget", "Результат инструмента слишком большой. Уточните запрос."
-            )
-
-        self._add_images(state, images)
         state.conversation.append(
             ChatMessage(
                 role=MessageRole.TOOL,

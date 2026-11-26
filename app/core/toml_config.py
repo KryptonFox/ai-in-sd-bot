@@ -42,6 +42,7 @@ class TomlParameter:
     minimum: float | None = None
     maximum: float | None = None
     choices: tuple[str, ...] | None = None
+    allow_query: bool = False
 
 
 TOML_SCHEMA: dict[str, dict[str, TomlParameter]] = {
@@ -63,6 +64,12 @@ TOML_SCHEMA: dict[str, dict[str, TomlParameter]] = {
             "string",
             choices=tuple(provider.value for provider in ContextProvider),
         ),
+    },
+    "router": {
+        "base_url": TomlParameter("ROUTER_BASE_URL", "string"),
+        "model": TomlParameter("ROUTER_MODEL", "string"),
+        "timeout_seconds": TomlParameter("ROUTER_TIMEOUT", "number", 1, 1800),
+        "opencode_session": TomlParameter("ROUTER_OPENCODE_SESSION", "boolean"),
     },
     "agent": {
         "timeout_seconds": TomlParameter("AGENT_TIMEOUT", "number", 1, 1800),
@@ -121,6 +128,16 @@ TOML_SCHEMA: dict[str, dict[str, TomlParameter]] = {
             180,
         ),
     },
+    "web_search": {
+        "provider": TomlParameter(
+            "WEB_SEARCH_PROVIDER",
+            "string",
+            choices=("disabled", "brave", "exa"),
+        ),
+        "endpoint": TomlParameter("WEB_SEARCH_ENDPOINT", "string", allow_query=True),
+        "timeout_seconds": TomlParameter("WEB_SEARCH_TIMEOUT_SECONDS", "number", 1, 30),
+        "max_results": TomlParameter("WEB_SEARCH_MAX_RESULTS", "integer", 1, 8),
+    },
     "math_mcp": {
         "startup_timeout_seconds": TomlParameter(
             "MATH_MCP_STARTUP_TIMEOUT_SECONDS",
@@ -173,8 +190,10 @@ ENVIRONMENT_PARAMETERS.update(
 PUBLIC_URL_ENVIRONMENT_NAMES = frozenset(
     {
         "LLM_BASE_URL",
+        "ROUTER_BASE_URL",
         "MCP_SERVER_URL",
         "MATH_MCP_SERVER_URL",
+        "WEB_SEARCH_ENDPOINT",
     }
 )
 
@@ -191,7 +210,7 @@ def _section_error(section: str, message: str) -> TomlConfigError:
     return TomlConfigError(f"config.toml: [{section}]: {message}")
 
 
-def validate_url(raw_value: str) -> str:
+def validate_url(raw_value: str, *, allow_query: bool = False) -> str:
     if not raw_value:
         return raw_value
 
@@ -205,7 +224,7 @@ def validate_url(raw_value: str) -> str:
 
     if username is not None or password is not None:
         raise UrlValidationError("не храните учётные данные в URL.")
-    if parsed.query or parsed.fragment:
+    if parsed.fragment or parsed.query and not allow_query:
         raise UrlValidationError("не храните параметры запроса и фрагменты в URL.")
     if parsed.scheme not in {"http", "https"} or not hostname:
         raise UrlValidationError("укажите корректный URL (http:// или https://).")
@@ -250,7 +269,7 @@ def _validated_value(
 
         if parameter.environment_name in PUBLIC_URL_ENVIRONMENT_NAMES and raw_value:
             try:
-                validate_url(raw_value)
+                validate_url(raw_value, allow_query=parameter.allow_query)
             except UrlValidationError as error:
                 raise _parameter_error(section, key, str(error)) from None
 

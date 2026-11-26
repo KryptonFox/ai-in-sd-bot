@@ -600,6 +600,20 @@ wheels = [
 ]
 
 [[package]]
+name = "icalendar"
+version = "7.3.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-dateutil" },
+    { name = "typing-extensions" },
+    { name = "tzdata" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9d/2d/db155eaa6ffe65b370b9899a69ac67cd439a33a9e9610327cef1ffaac86e/icalendar-7.3.2.tar.gz", hash = "sha256:f15380927aed4318860e001c03b543c48578c73aec46e2d384c5d0802082b808", size = 525771, upload-time = "2026-11-20T11:05:15.591Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a5/f9/ececbb7618626dd6f70603d2b8d6faa39d7c81631b434fa242288ede4719/icalendar-7.3.2-py3-none-any.whl", hash = "sha256:f95ce4ff8f41d8ad9ca253a676ef40c672abd3774458d197c215055a0d805cc4", size = 542537, upload-time = "2026-11-20T11:05:13.921Z" },
+]
+
+[[package]]
 name = "idna"
 version = "3.20"
 source = { registry = "https://pypi.org/simple" }
@@ -629,11 +643,13 @@ dependencies = [
     { name = "fastmcp" },
     { name = "httpx" },
     { name = "httpx2" },
+    { name = "icalendar" },
     { name = "jsonschema" },
     { name = "matplotlib" },
     { name = "openai" },
     { name = "pillow" },
     { name = "pydantic" },
+    { name = "python-dateutil" },
     { name = "python-dotenv" },
     { name = "sympy" },
     { name = "telegramify-markdown" },
@@ -658,11 +674,13 @@ requires-dist = [
     { name = "fastmcp", specifier = "==4.1.5" },
     { name = "httpx", specifier = ">=0.28,<0.29" },
     { name = "httpx2", specifier = "==2.16.0" },
+    { name = "icalendar", specifier = "==7.3.2" },
     { name = "jsonschema", specifier = "==4.26.0" },
     { name = "matplotlib", specifier = "==3.11.2" },
     { name = "openai", specifier = "==3.37.0" },
     { name = "pillow", specifier = "==13.0.0" },
     { name = "pydantic", specifier = "==2.13.5" },
+    { name = "python-dateutil", specifier = "==4.0.0" },
     { name = "python-dotenv", specifier = "==1.2.3" },
     { name = "sympy", specifier = "==1.14.0" },
     { name = "telegramify-markdown", specifier = "==1.4.1" },

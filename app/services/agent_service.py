@@ -25,6 +25,7 @@ from app.core.schemas.llm import (
 from app.core.schemas.mcp import ReadResourceArguments, ResourceDefinition
 from app.core.schemas.message import ChatMessage, MessageRole, ToolCall
 from app.core.schemas.tools import ToolFailure
+from app.core.trace import trace_step
 from app.llm.base import BaseLLMClient
 from app.prompts.agent import agent_rules
 from app.services.tool_execution import READ_RESOURCE_FUNCTION, ToolExecutionService
@@ -76,11 +77,13 @@ class AgentService:
         *,
         clock: Clock | None = None,
         max_llm_steps: int = 4,
+        specialist_instructions: str = "",
     ) -> None:
         self._llm = llm
         self._tools = tools or ToolExecutionService()
         self._clock = clock or SystemClock()
         self._max_steps = max_llm_steps
+        self._specialist_instructions = specialist_instructions
 
     @property
     def definitions(self) -> list[ToolDefinition]:
@@ -97,7 +100,10 @@ class AgentService:
     def instructions(self, timezone: str | None) -> str:
         now = self._clock.now()
         local = now.astimezone(ZoneInfo(timezone)) if timezone else now
-        return agent_rules(local, timezone, tools_available=self._tools.available)
+        rules = agent_rules(local, timezone, tools_available=self._tools.available)
+        if self._specialist_instructions:
+            return f"{rules}\n\n{self._specialist_instructions}"
+        return rules
 
     async def run(
         self,
@@ -129,7 +135,12 @@ class AgentService:
             decision = (
                 AgentDecision.CLARIFY if error.code in CLARIFICATION_ERRORS else AgentDecision.ERROR
             )
-            return state.build_result(error.message, decision, error.code)
+            reason = (
+                "tool_failed"
+                if error.code in {"web_search_offer", "reminder_followup"}
+                else error.code
+            )
+            return state.build_result(error.message, decision, reason)
 
     def _append_instructions(self, state: RunState) -> None:
         instructions = self.instructions(state.timezone)
@@ -165,16 +176,20 @@ class AgentService:
 
                 output_limit = budget.generation_limit(state.conversation, definitions)
 
-            response = await self._generate(
-                state,
-                LLMRequest(
-                    messages=state.conversation,
-                    temperature=temperature,
-                    model=model,
-                    tools=definitions,
-                    max_tokens=output_limit,
-                ),
-            )
+            with trace_step("llm", "generate", model_name=model) as step:
+                response = await self._generate(
+                    state,
+                    LLMRequest(
+                        messages=state.conversation,
+                        temperature=temperature,
+                        model=model,
+                        tools=definitions,
+                        max_tokens=output_limit,
+                    ),
+                )
+                if step is not None:
+                    step.input_tokens = response.prompt_tokens
+                    step.output_tokens = response.completion_tokens
             outcome = await self._handle_response(state, response)
             if isinstance(outcome, AgentResult):
                 return outcome
@@ -253,6 +268,13 @@ class AgentService:
                     "truncated_tool_call",
                 )
 
+            if self._contains_system_leak(state, response.content):
+                return state.build_result(
+                    "Я не могу раскрывать системные инструкции.",
+                    AgentDecision.ERROR,
+                    "prompt_leak_blocked",
+                )
+
             return state.build_result(
                 response.content,
                 AgentDecision.RESPOND,
@@ -261,6 +283,12 @@ class AgentService:
             )
 
         if not response.tool_calls:
+            if self._contains_system_leak(state, response.content):
+                return state.build_result(
+                    "Я не могу раскрывать системные инструкции.",
+                    AgentDecision.ERROR,
+                    "prompt_leak_blocked",
+                )
             decision = AgentDecision.TOOL if state.last_call is not None else AgentDecision.RESPOND
             return state.build_result(response.content, decision, "plain_response")
 
@@ -276,6 +304,24 @@ class AgentService:
             )
         )
         return await self._tools.execute(state, response.tool_calls)
+
+    @staticmethod
+    def _contains_system_leak(state: RunState, content: str) -> bool:
+        normalized_output = " ".join(content.split())
+        if len(normalized_output) < 48:
+            return False
+
+        for message in state.conversation:
+            if message.role != MessageRole.SYSTEM:
+                continue
+            normalized_system = " ".join(message.content.split())
+            if len(normalized_system) < 48:
+                continue
+            for offset in range(0, len(normalized_system) - 47, 24):
+                if normalized_system[offset : offset + 48] in normalized_output:
+                    return True
+
+        return False
 
     @staticmethod
     def _clarify(

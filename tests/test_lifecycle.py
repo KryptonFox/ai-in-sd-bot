@@ -214,6 +214,7 @@ async def test_run_wires_student_client_to_confirmations_and_composite_to_tools(
 ):
     from app import __main__ as application
     from app.mcp.connection import ToolClients
+    from app.mcp.restricted import RestrictedToolClient
 
     student = Mock(available=True)
     composite = Mock(
@@ -265,7 +266,8 @@ async def test_run_wires_student_client_to_confirmations_and_composite_to_tools(
         await application.run(Settings(bot_token="unused", postgres_password="unused"))
 
     assert configuration.call_args.args[1] is student
-    assert tool_configuration.call_args.args[0] is composite
+    legacy_client = tool_configuration.call_args.args[0]
+    assert isinstance(legacy_client, RestrictedToolClient)
     assert dialog_configuration.call_args.kwargs["tool_client"] is composite
     composite.start.assert_awaited_once()
     composite.aclose.assert_awaited_once()

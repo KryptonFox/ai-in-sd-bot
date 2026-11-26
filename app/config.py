@@ -34,6 +34,9 @@ class ConfigError(ConfigValueError):
 
 DEFAULT_SCHEDULE_PATH = "mcp_servers/student_tools/data/schedule.json"
 LEGACY_DEFAULT_SCHEDULE_PATH = "app/data/schedule.json"
+DEFAULT_ROUTER_BASE_URL = "https://opencode.ai/inference/go/openai/v1"
+DEFAULT_ROUTER_MODEL = "gpt-6-luna-decision"
+OPENCODE_GO_PATH_PREFIX = "/inference/go/"
 MATH_MCP_ENVIRONMENT_KEYS = frozenset(
     {
         "MATH_MCP_CONFIG_FILE",
@@ -42,6 +45,15 @@ MATH_MCP_ENVIRONMENT_KEYS = frozenset(
         "MATH_MCP_QUEUE_TIMEOUT_SECONDS",
         "MATH_MCP_MEMORY_LIMIT_MIB",
         "MATH_MCP_MAX_PNG_BYTES",
+    }
+)
+WEB_SEARCH_ENVIRONMENT_KEYS = frozenset(
+    {
+        "WEB_SEARCH_PROVIDER",
+        "WEB_SEARCH_API_KEY",
+        "WEB_SEARCH_ENDPOINT",
+        "WEB_SEARCH_TIMEOUT_SECONDS",
+        "WEB_SEARCH_MAX_RESULTS",
     }
 )
 
@@ -73,6 +85,19 @@ def public_url(value: str) -> str:
     return f"{parsed.scheme}://{host}"
 
 
+def is_opencode_go_url(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return False
+
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname == "opencode.ai"
+        and parsed.path.startswith(OPENCODE_GO_PATH_PREFIX)
+    )
+
+
 def _math_mcp_environment(
     file_values: Mapping[str, str | None],
     process_values: Mapping[str, str],
@@ -91,6 +116,20 @@ def _math_mcp_environment(
     for key, value in overrides.items():
         if key != "MATH_MCP_CONFIG_FILE":
             validate_environment_parameter(key, value)
+
+    return overrides
+
+
+def _web_search_environment(
+    file_values: Mapping[str, str | None],
+    process_values: Mapping[str, str],
+) -> dict[str, str]:
+    overrides: dict[str, str] = {}
+
+    for source in (file_values, process_values):
+        for key, value in source.items():
+            if value and key in WEB_SEARCH_ENVIRONMENT_KEYS:
+                overrides[key] = value
 
     return overrides
 
@@ -148,6 +187,14 @@ class _LLMValues(TypedDict):
     llm_max_tokens: int
     llm_generation_reserve_tokens: int
     llm_context_provider: ContextProvider
+
+
+class _RouterValues(TypedDict):
+    router_api_key: str
+    router_base_url: str
+    router_model: str
+    router_timeout: float
+    router_opencode_session: bool
 
 
 class _HistoryValues(TypedDict):
@@ -239,6 +286,34 @@ def _parse_llm_settings(values: Mapping[str, str | None]) -> _LLMValues:
                     ContextProvider.AUTO.value,
                 ),
             )
+        ),
+    }
+
+
+def _parse_router_settings(values: Mapping[str, str | None]) -> _RouterValues:
+    return {
+        "router_api_key": environment_value(values, "ROUTER_API_KEY").strip(),
+        "router_base_url": parse_url(
+            "ROUTER_BASE_URL",
+            environment_value(
+                values,
+                "ROUTER_BASE_URL",
+                DEFAULT_ROUTER_BASE_URL,
+            ).strip(),
+        ),
+        "router_model": environment_value(
+            values,
+            "ROUTER_MODEL",
+            DEFAULT_ROUTER_MODEL,
+        ).strip()
+        or DEFAULT_ROUTER_MODEL,
+        "router_timeout": parse_number(
+            "ROUTER_TIMEOUT",
+            environment_value(values, "ROUTER_TIMEOUT", "30.0"),
+        ),
+        "router_opencode_session": parse_boolean(
+            "ROUTER_OPENCODE_SESSION",
+            environment_value(values, "ROUTER_OPENCODE_SESSION", "false"),
         ),
     }
 
@@ -372,17 +447,21 @@ def _load_settings(
     toml_values = load_toml_environment(config_file, required=False)
     values = merge_environment(toml_values, file_values, process_values)
     math_environment = _math_mcp_environment(file_values, process_values, config_file)
+    web_search_environment = _web_search_environment(file_values, process_values)
+    llm_values = _parse_llm_settings(values)
 
     return Settings(
         bot_token=_bot_token(values),
         postgres_password=_postgres_password(values),
         telegram_proxy_url=_telegram_proxy(values),
         **_parse_database_settings(values),
-        **_parse_llm_settings(values),
+        **llm_values,
+        **_parse_router_settings(values),
         **_parse_history_settings(values),
         **_parse_agent_settings(values),
         **_parse_mcp_settings(values, math_environment),
         **_parse_service_settings(values),
+        web_search_environment=web_search_environment,
     )
 
 
@@ -405,6 +484,11 @@ class Settings:
     llm_opencode_session: bool = False
     llm_max_tokens: int = 16384
     llm_generation_reserve_tokens: int = 4096
+    router_api_key: str = field(default="", repr=False)
+    router_base_url: str = DEFAULT_ROUTER_BASE_URL
+    router_model: str = DEFAULT_ROUTER_MODEL
+    router_timeout: float = 30.0
+    router_opencode_session: bool = False
     agent_timeout: float = 240.0
     summary_max_chars: int = 2000
     tool_result_max_chars: int = 12000
@@ -431,6 +515,20 @@ class Settings:
         repr=False,
         compare=False,
     )
+    web_search_environment: Mapping[str, str] = field(
+        default_factory=dict,
+        repr=False,
+        compare=False,
+    )
+
+    @property
+    def effective_router_api_key(self) -> str:
+        if self.router_api_key:
+            return self.router_api_key
+        if is_opencode_go_url(self.router_base_url) and is_opencode_go_url(self.llm_base_url):
+            return self.llm_api_key
+
+        return ""
 
     @property
     def effective_generation_reserve_tokens(self) -> int:
@@ -456,6 +554,10 @@ class Settings:
             "llm_generation_reserve_tokens": self.llm_generation_reserve_tokens,
             "llm_effective_generation_reserve_tokens": (self.effective_generation_reserve_tokens),
             "llm_context_provider": self.llm_context_provider.value,
+            "router_base_url": public_url(self.router_base_url),
+            "router_model": self.router_model,
+            "router_timeout_seconds": self.router_timeout,
+            "router_opencode_session": self.router_opencode_session,
             "agent_timeout_seconds": self.agent_timeout,
             "agent_max_tool_calls": self.agent_max_tool_calls,
             "agent_max_llm_steps": self.agent_max_llm_steps,

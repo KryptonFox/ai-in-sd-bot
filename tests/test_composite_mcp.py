@@ -51,6 +51,8 @@ STUDENT_TOOLS = {
     "get_schedule",
     "get_schedule_week",
     "add_reminder",
+    "search_materials",
+    "search_web",
 }
 MATH_TOOLS = {"math_calculate", "math_solve", "math_plot"}
 
@@ -586,11 +588,15 @@ async def assert_two_server_composite(
 ) -> None:
     assert await composite.start() is True
     assert set(composite.tools) == STUDENT_TOOLS | MATH_TOOLS
-    assert set(composite.resources) == {"schedule://current-week"}
+    assert set(composite.resources) == {"schedule://current-week", "materials://catalog"}
     assert composite.resources["schedule://current-week"].uri == "schedule://current-week"
     resource = await composite.read_resource("schedule://current-week")
     assert resource.mime_type == "application/json"
     assert json.loads(resource.text)["start_date"]
+
+    catalog_resource = await composite.read_resource("materials://catalog")
+    assert catalog_resource.mime_type == "application/json"
+    assert len(json.loads(catalog_resource.text)["documents"]) == 3
 
     catalog = {tool.name: tool for tool in tool_catalog()}
     for name in STUDENT_TOOLS:

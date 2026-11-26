@@ -95,8 +95,11 @@ async def test_resource_adapter_rejects_undiscovered_and_arbitrary_uris() -> Non
         for tool in AgentService(Mock(), ToolExecutionService(client)).definitions
         if tool.name == READ_RESOURCE_FUNCTION
     )
-    assert resource_tool.parameters["properties"]["uri"]["enum"] == ["schedule://current-week"]
+    assert resource_tool.parameters["properties"]["uri"]["enum"] == sorted(
+        ["schedule://current-week", "materials://catalog"]
+    )
     Draft202012Validator(resource_tool.parameters).validate({"uri": "schedule://current-week"})
+    Draft202012Validator(resource_tool.parameters).validate({"uri": "materials://catalog"})
 
     for uri in ("file:///etc/passwd", "https://example.org", "schedule://next-week"):
         with pytest.raises(ToolFailure):

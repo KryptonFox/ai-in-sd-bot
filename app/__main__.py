@@ -4,25 +4,58 @@ import logging
 from contextlib import AsyncExitStack
 
 import asyncpg
+import httpx
 from aiogram import Bot, Dispatcher
 from aiohttp import web
 
 from app.config import ConfigError, Settings
+from app.core.clock import Clock, SystemClock
+from app.core.ports import ToolClient, TurnStore
+from app.core.trace import OperationTrace
 from app.db.connection import create_pool
+from app.db.repositories.notification_repo import PostgresNotificationRepository
+from app.db.repositories.trace_repo import purge_traces, save_trace
 from app.db.repositories.turn_repo import PostgresTurnStore
 from app.handlers import router
+from app.handlers.notifications import NotificationChatMiddleware
 from app.health import HealthState, start_health_server
+from app.llm.base import BaseLLMClient
 from app.llm.client import OpenAIClient
+from app.llm.decisions import DecisionsRouter
 from app.logging_setup import configure_logging
 from app.mcp.composite import CompositeToolClient
 from app.mcp.connection import create_tool_clients
+from app.mcp.restricted import RestrictedToolClient
 from app.services.agent_service import AgentService
+from app.services.briefing import BriefingSources
+from app.services.calendar_import import CalendarImportService
 from app.services.confirmation_service import ConfirmationService
 from app.services.dialog_service import DialogService
+from app.services.notifications import (
+    HttpCityResolver,
+    NotificationService,
+    TelegramBotDelivery,
+)
+from app.services.specialists import build_specialists
+from app.services.supervisor import Supervisor
 from app.services.tool_execution import ToolExecutionService
 from app.telegram import create_bot, setup_bot_commands, setup_bot_description
+from mcp_servers.student_tools.weather import WeatherService
 
 logger = logging.getLogger("app")
+TRACE_PURGE_INTERVAL_SECONDS = 6 * 60 * 60
+LEGACY_TOOL_NAMES = frozenset(
+    {
+        "get_weather",
+        "get_schedule",
+        "get_schedule_week",
+        "add_reminder",
+        "math_calculate",
+        "math_solve",
+        "math_plot",
+    }
+)
+LEGACY_RESOURCE_URIS = frozenset({"schedule://current-week"})
 
 
 async def run(settings: Settings) -> None:
@@ -31,9 +64,14 @@ async def run(settings: Settings) -> None:
     runner = None
     llm_client = None
     mcp_client: CompositeToolClient | None = None
+    decisions_router: DecisionsRouter | None = None
+    http_client: httpx.AsyncClient | None = None
     recovery_task = None
+    notification_task = None
+    trace_task = None
 
     try:
+        clock = SystemClock()
         llm_client = OpenAIClient(settings)
         state.pool = await create_pool(settings)
         logger.info("PostgreSQL подключён: SELECT 1 выполнен, миграции применены.")
@@ -45,6 +83,8 @@ async def run(settings: Settings) -> None:
         await mcp_client.start()
         state.mcp = mcp_client
 
+        http_client = httpx.AsyncClient(timeout=10.0)
+
         confirmations = ConfirmationService(
             state.pool,
             clients.student,
@@ -53,7 +93,7 @@ async def run(settings: Settings) -> None:
         store = PostgresTurnStore(state.pool)
 
         tools = ToolExecutionService(
-            mcp_client,
+            _create_legacy_tool_client(mcp_client),
             confirmations,
             store,
             max_calls=settings.agent_max_tool_calls,
@@ -65,6 +105,13 @@ async def run(settings: Settings) -> None:
             tools,
             max_llm_steps=settings.agent_max_llm_steps,
         )
+        decisions_router, supervisor = await _create_router_supervisor(
+            settings,
+            llm_client,
+            mcp_client,
+            store,
+            confirmations,
+        )
         dialog_service = DialogService(
             state.pool,
             settings,
@@ -73,20 +120,38 @@ async def run(settings: Settings) -> None:
             confirmations=confirmations,
             tool_client=mcp_client,
             store=store,
+            supervisor=supervisor,
         )
         await dialog_service.recover()
 
+        notification_service = _create_notification_service(
+            state.pool,
+            clients.student,
+            bot,
+            http_client,
+            clock,
+        )
+        calendar_import_service = CalendarImportService(state.pool, clock)
+        dispatcher = _create_dispatcher(notification_service)
+
         recovery_task = asyncio.create_task(_recover_services(confirmations, mcp_client))
 
-        dispatcher = Dispatcher()
-        dispatcher.include_router(router)
-
         runner = await start_health_server(state, settings.health_port)
+        notification_task = asyncio.create_task(
+            notification_service.run(),
+            name="notification-service",
+        )
+        trace_task = asyncio.create_task(
+            _purge_traces_periodically(state.pool, clock),
+            name="trace-retention",
+        )
         state.polling_task = asyncio.create_task(
             dispatcher.start_polling(
                 bot,
                 db=state.pool,
                 dialog_service=dialog_service,
+                notification_service=notification_service,
+                calendar_import_service=calendar_import_service,
                 allowed_updates=dispatcher.resolve_used_update_types(),
                 close_bot_session=False,
             )
@@ -103,7 +168,85 @@ async def run(settings: Settings) -> None:
             mcp_client,
             runner,
             recovery_task,
+            decisions_router=decisions_router,
+            http=http_client,
+            notification_task=notification_task,
+            trace_task=trace_task,
         )
+
+
+async def _create_router_supervisor(
+    settings: Settings,
+    llm: BaseLLMClient,
+    client: ToolClient,
+    store: TurnStore,
+    confirmations: ConfirmationService,
+) -> tuple[DecisionsRouter | None, Supervisor | None]:
+    if not settings.effective_router_api_key:
+        logger.warning("router_disabled reason=api_key_missing fallback=legacy")
+        return None, None
+
+    decisions_router = DecisionsRouter(settings)
+    try:
+        agents = build_specialists(settings, llm, client, store, confirmations)
+        supervisor = Supervisor(decisions_router, agents, settings.router_model)
+    except BaseException:
+        await decisions_router.aclose()
+        raise
+
+    return decisions_router, supervisor
+
+
+def _create_legacy_tool_client(client: ToolClient) -> RestrictedToolClient:
+    return RestrictedToolClient(
+        client,
+        LEGACY_TOOL_NAMES,
+        LEGACY_RESOURCE_URIS,
+        trusted_reminder=True,
+    )
+
+
+def _create_notification_service(
+    pool: asyncpg.Pool,
+    student: ToolClient,
+    bot: Bot,
+    http: httpx.AsyncClient,
+    clock: Clock,
+) -> NotificationService:
+    weather = WeatherService(http, clock=clock)
+    briefing = BriefingSources(pool, student, weather)
+
+    async def trace_sink(trace: OperationTrace) -> None:
+        await save_trace(pool, trace)
+
+    return NotificationService(
+        PostgresNotificationRepository(pool),
+        clock=clock,
+        deliver=TelegramBotDelivery(bot),
+        briefing=briefing,
+        city_resolver=HttpCityResolver(http),
+        trace_sink=trace_sink,
+    )
+
+
+def _create_dispatcher(notification_service: NotificationService) -> Dispatcher:
+    dispatcher = Dispatcher()
+    dispatcher.message.outer_middleware(NotificationChatMiddleware(notification_service))
+    dispatcher.include_router(router)
+
+    return dispatcher
+
+
+async def _purge_traces_periodically(pool: asyncpg.Pool, clock: Clock) -> None:
+    while True:
+        try:
+            await purge_traces(pool, clock.now())
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("trace_purge_failed")
+
+        await asyncio.sleep(TRACE_PURGE_INTERVAL_SECONDS)
 
 
 async def _prepare_telegram(bot: Bot) -> None:
@@ -155,6 +298,11 @@ async def _shutdown(
     mcp: CompositeToolClient | None,
     runner: web.AppRunner | None,
     recovery_task: asyncio.Task[None] | None,
+    *,
+    decisions_router: DecisionsRouter | None = None,
+    http: httpx.AsyncClient | None = None,
+    notification_task: asyncio.Task[None] | None = None,
+    trace_task: asyncio.Task[None] | None = None,
 ) -> None:
     state.initialized = False
 
@@ -165,6 +313,10 @@ async def _shutdown(
         cleanup.push_async_callback(bot.session.close)
         if llm is not None:
             cleanup.push_async_callback(llm.aclose)
+        if decisions_router is not None:
+            cleanup.push_async_callback(decisions_router.aclose)
+        if http is not None:
+            cleanup.push_async_callback(http.aclose)
 
         if runner is not None:
             cleanup.push_async_callback(runner.cleanup)
@@ -172,10 +324,20 @@ async def _shutdown(
         if mcp is not None:
             cleanup.push_async_callback(mcp.aclose)
 
-        for task in (state.polling_task, recovery_task):
-            if task is not None:
-                task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
+        tasks = [
+            task
+            for task in (
+                state.polling_task,
+                recovery_task,
+                notification_task,
+                trace_task,
+            )
+            if task is not None
+        ]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def main() -> int:
